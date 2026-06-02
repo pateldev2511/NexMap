@@ -1,0 +1,84 @@
+/*
+ * NexMap design tokens + base layout.
+ * Hierarchy (per design review §5): canvas is the primary surface (high contrast),
+ * chrome recedes (muted), bottom panel collapses to zero by default.
+ */
+
+:root {
+  /* Surfaces — light theme */
+  --canvas-bg: #f4f6f8;
+  --canvas-grid: #dbe1e8;
+  --chrome-bg: #ffffff;
+  --chrome-border: #e2e6ea;
+  --chrome-fg: #1c2733;
+  --chrome-fg-muted: #6b7785;
+  --accent: #2563eb;
+  --accent-fg: #ffffff;
+
+  /* Validation severity — each pairs with a glyph (non-color indicator) */
+  --sev-info: #2563eb;
+  --sev-warn: #d97706;
+  --sev-error: #dc2626;
+  --sev-critical: #7c1d6f;
+
+  /* Layout */
+  --topbar-h: 44px;
+  --left-w: 240px;
+  --right-w: 300px;
+  --statusbar-h: 26px;
+
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+    sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --canvas-bg: #161a1f;
+  --canvas-grid: #262c33;
+  --chrome-bg: #1e242b;
+  --chrome-border: #2c333b;
+  --chrome-fg: #e6eaef;
+  --chrome-fg-muted: #8b96a3;
+  --accent: #3b82f6;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--chrome-fg);
+  background: var(--canvas-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
