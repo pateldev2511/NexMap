@@ -2,7 +2,7 @@
  * Export orchestrator: format → build-from-model → download. One entry point so
  * the dialog stays declarative and the build/download wiring lives in one place.
  */
-import type { Device, Link } from '@/model/types';
+import type { CanvasObject, Device, Link } from '@/model/types';
 import { buildSvg } from './buildSvg';
 import { rasterize, downloadBlob } from './raster';
 import { buildPdfBlob, type PageSize } from './pdf';
@@ -13,6 +13,7 @@ export type ExportFormat = 'png' | 'jpg' | 'svg' | 'pdf' | 'csv-inventory' | 'cs
 export interface ExportScene {
   devices: Device[];
   links: Link[];
+  objects: CanvasObject[];
   projectName: string;
 }
 
@@ -56,6 +57,7 @@ export async function runExport(scene: ExportScene, opts: ExportOptions): Promis
   const svg = buildSvg(devices, links, {
     background: opts.format === 'jpg' ? (opts.background ?? '#ffffff') : opts.background,
     includeLabels: opts.includeLabels,
+    objects: scene.objects,
   });
 
   if (opts.format === 'svg') {

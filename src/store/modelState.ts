@@ -8,14 +8,23 @@
  * All mutation flows through these helpers so the adjacency index can never drift
  * out of sync with the device/link maps.
  */
-import { createEmptyDocument } from '@/model/schema';
-import type { Device, Layer, Link, NexMapDocument, ProjectMeta } from '@/model/types';
+import { createEmptyDocument, isCanvasObject } from '@/model/schema';
+import type {
+  CanvasObject,
+  Device,
+  Layer,
+  Link,
+  NexMapDocument,
+  ProjectMeta,
+} from '@/model/types';
 
 export interface ModelState {
   project: ProjectMeta;
   layers: Map<string, Layer>;
   devices: Map<string, Device>;
   links: Map<string, Link>;
+  /** Text notes + shapes/zones, keyed by id. */
+  objects: Map<string, CanvasObject>;
   /** deviceId → set of link IDs touching it. */
   adjacency: Map<string, Set<string>>;
 }
@@ -30,10 +39,12 @@ export function fromDocument(doc: NexMapDocument): ModelState {
     layers: new Map(doc.layers.map((l) => [l.id, l])),
     devices: new Map(),
     links: new Map(),
+    objects: new Map(),
     adjacency: new Map(),
   };
   for (const d of doc.devices) addDevice(state, d);
   for (const l of doc.links) addLink(state, l);
+  for (const o of doc.objects ?? []) if (isCanvasObject(o)) state.objects.set(o.id, o);
   return state;
 }
 
@@ -45,6 +56,7 @@ export function toDocument(state: ModelState, base: NexMapDocument): NexMapDocum
     layers: [...state.layers.values()].sort((a, b) => a.order - b.order),
     devices: [...state.devices.values()],
     links: [...state.links.values()],
+    objects: [...state.objects.values()],
   };
 }
 

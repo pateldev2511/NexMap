@@ -117,6 +117,51 @@ describe('grouping', () => {
   });
 });
 
+describe('canvas objects (text + shape)', () => {
+  it('creates text and shape objects', () => {
+    const t = s().addText(10, 20);
+    const sh = s().addShape(0, 0, 200, 120);
+    expect(s().getObject(t)!.kind).toBe('text');
+    expect(s().getObject(sh)!.kind).toBe('shape');
+    expect(s().objectsAll()).toHaveLength(2);
+  });
+
+  it('moves objects via the shared drag flow and is undoable', () => {
+    const sh = s().addShape(0, 0, 100, 60);
+    s().select([sh]);
+    s().beginDrag();
+    s().dragTo(40, 24, true); // suspend snap
+    s().endDrag();
+    expect(s().getObject(sh)!.x).toBe(40);
+    s().undo();
+    expect(s().getObject(sh)!.x).toBe(0);
+  });
+
+  it('deletes objects, and lock protects them', () => {
+    const t = s().addText(0, 0);
+    s().select([t]);
+    s().toggleLockSelection();
+    expect(s().getObject(t)!.locked).toBe(true);
+    s().select([t]);
+    s().deleteSelection();
+    expect(s().objectsAll()).toHaveLength(1); // locked, not deleted
+    s().select([t]);
+    s().toggleLockSelection();
+    s().select([t]);
+    s().deleteSelection();
+    expect(s().objectsAll()).toHaveLength(0);
+  });
+
+  it('objects survive a document round-trip', () => {
+    s().addText(5, 5);
+    s().addShape(0, 0, 80, 40);
+    const doc = s().getDocument();
+    expect(doc.objects).toHaveLength(2);
+    s().loadDoc(doc);
+    expect(s().objectsAll()).toHaveLength(2);
+  });
+});
+
 describe('z-order', () => {
   it('bring to front raises z above all others', () => {
     const a = s().addDeviceAt('router', 0, 0);

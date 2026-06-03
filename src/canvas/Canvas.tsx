@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import type { DeviceType } from '@/model/types';
 import { useProjectStore } from '@/store/projectStore';
 import { DeviceNode } from './DeviceNode';
+import { ObjectNode } from './ObjectNode';
 import { CanvasToolbar } from './CanvasToolbar';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import {
@@ -22,6 +23,7 @@ type Gesture =
   | { kind: 'drag'; startX: number; startY: number; moved: boolean }
   | { kind: 'marquee'; startX: number; startY: number; additive: boolean }
   | { kind: 'lasso'; additive: boolean }
+  | { kind: 'shape'; startX: number; startY: number }
   | { kind: 'link'; sourceId: string };
 
 const ZOOM_STEP = 1.0015;
@@ -174,6 +176,8 @@ export function Canvas() {
       if (e.key === 'v' || e.key === 'V') store().setMode('select');
       if (e.key === 'q' || e.key === 'Q') store().setMode('lasso');
       if (e.key === 'h' || e.key === 'H') store().setMode('pan');
+      if (e.key === 't' || e.key === 'T') store().setMode('text');
+      if (e.key === 'r' || e.key === 'R') store().setMode('shape');
       if (e.key === 'c' || e.key === 'C' || e.key === 'l' || e.key === 'L')
         store().setMode('connect');
       if (e.key === 'Escape') {
@@ -246,9 +250,9 @@ export function Canvas() {
   const onDevicePointerDown = useCallback(
     (e: React.PointerEvent, id: string) => {
       if (spaceHeld || store().mode === 'pan') return; // let the root handler pan
-      // In connect mode, pressing a device starts a link drag.
+      // In connect mode, pressing a DEVICE starts a link drag (not objects).
       if (store().mode === 'connect') {
-        startLinkFrom(e, id);
+        if (store().getDevice(id)) startLinkFrom(e, id);
         return;
       }
       e.stopPropagation();
@@ -274,6 +278,18 @@ export function Canvas() {
         return;
       }
       if (store().mode === 'connect') return; // empty press in connect mode = noop
+      if (store().mode === 'text') {
+        const c = screenToCanvas(viewport, sx, sy);
+        const id = store().addText(snap(c.x, false), snap(c.y, false));
+        store().select([id]);
+        store().setMode('select');
+        return;
+      }
+      if (store().mode === 'shape') {
+        gesture.current = { kind: 'shape', startX: sx, startY: sy };
+        setMarquee({ x: sx, y: sy, w: 0, h: 0 });
+        return;
+      }
       if (store().mode === 'lasso') {
         gesture.current = { kind: 'lasso', additive: e.shiftKey };
         setLassoPts([{ x: sx, y: sy }]);
@@ -283,7 +299,7 @@ export function Canvas() {
       gesture.current = { kind: 'marquee', startX: sx, startY: sy, additive: e.shiftKey };
       setMarquee({ x: sx, y: sy, w: 0, h: 0 });
     },
-    [spaceHeld, store, localPoint],
+    [spaceHeld, store, localPoint, viewport],
   );
 
   const onPointerMove = useCallback(
@@ -311,7 +327,7 @@ export function Canvas() {
         if (!g.moved) gesture.current = { ...g, moved: true };
         return;
       }
-      if (g.kind === 'marquee') {
+      if (g.kind === 'marquee' || g.kind === 'shape') {
         setMarquee({
           x: Math.min(g.startX, sx),
           y: Math.min(g.startY, sy),
@@ -366,6 +382,18 @@ export function Canvas() {
           store().lassoSelect(poly, g.additive);
         }
         setLassoPts(null);
+      } else if (g.kind === 'shape' && marquee) {
+        const tl = screenToCanvas(viewport, marquee.x, marquee.y);
+        const w = marquee.w / viewport.scale;
+        const h = marquee.h / viewport.scale;
+        // Tiny drag → a default-sized zone at the press point.
+        const id =
+          w > 8 && h > 8
+            ? store().addShape(snap(tl.x, false), snap(tl.y, false), Math.round(w), Math.round(h))
+            : store().addShape(snap(tl.x, false), snap(tl.y, false), 160, 100);
+        store().select([id]);
+        store().setMode('select');
+        setMarquee(null);
       }
     },
     [store, marquee, viewport, linkTarget, lassoPts],
@@ -428,6 +456,9 @@ export function Canvas() {
   const devices = size.w > 0 ? store().visibleDevices(box) : [];
   // Stacking order: lower z renders first (underneath).
   devices.sort((a, b) => (a.z ?? 0) - (b.z ?? 0));
+  const allObjects = size.w > 0 ? store().objectsAll() : [];
+  const shapes = allObjects.filter((o) => o.kind === 'shape'); // render under links
+  const texts = allObjects.filter((o) => o.kind === 'text'); // render on top
   const links = size.w > 0 ? store().visibleLinks(box) : [];
   const handleDevice = hoveredId ? store().getDevice(hoveredId) : undefined;
   const linkSource =
@@ -476,6 +507,14 @@ export function Canvas() {
         <rect x={0} y={0} width="100%" height="100%" fill="url(#nexmap-grid)" />
 
         <g transform={`translate(${viewport.tx} ${viewport.ty}) scale(${viewport.scale})`}>
+          {shapes.map((o) => (
+            <ObjectNode
+              key={o.id}
+              object={o}
+              selected={selection.has(o.id)}
+              onPointerDown={onDevicePointerDown}
+            />
+          ))}
           {links.map((l) => {
             const a = store().getDevice(l.sourceId);
             const b = store().getDevice(l.targetId);
@@ -521,6 +560,15 @@ export function Canvas() {
               scale={viewport.scale}
               validTarget={linkTarget === dev.id}
               hasIssue={errorIds.has(dev.id)}
+              onPointerDown={onDevicePointerDown}
+            />
+          ))}
+
+          {texts.map((o) => (
+            <ObjectNode
+              key={o.id}
+              object={o}
+              selected={selection.has(o.id)}
               onPointerDown={onDevicePointerDown}
             />
           ))}

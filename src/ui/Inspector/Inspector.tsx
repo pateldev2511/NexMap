@@ -1,5 +1,5 @@
 import { useProjectStore } from '@/store/projectStore';
-import type { Device, DeviceType, Link } from '@/model/types';
+import type { CanvasObject, Device, DeviceType, Link } from '@/model/types';
 import { isValidIp, isValidCidr } from '@/lib/ipcidr';
 import { defaultDeviceName } from '@/model/schema';
 import styles from './Inspector.module.css';
@@ -135,6 +135,59 @@ function LinkInspector({ link }: { link: Link }) {
   );
 }
 
+function ObjectInspector({ object }: { object: CanvasObject }) {
+  const updateObject = useProjectStore((s) => s.updateObject);
+  const endEdit = useProjectStore((s) => s.endEdit);
+  // Patch form: keyof CanvasObject is only the common keys, so take a partial.
+  function set(after: Record<string, unknown>) {
+    const before: Record<string, unknown> = {};
+    const o = object as unknown as Record<string, unknown>;
+    for (const k of Object.keys(after)) before[k] = o[k];
+    updateObject(object.id, before as Partial<CanvasObject>, after as Partial<CanvasObject>);
+  }
+  return (
+    <div className={styles.group}>
+      <div className={styles.groupTitle}>{object.kind === 'text' ? 'Text' : 'Shape / Zone'}</div>
+      {object.kind === 'text' ? (
+        <>
+          <Field label="Text">
+            <textarea value={object.text} onChange={(e) => set({ text: e.target.value })} onBlur={endEdit} />
+          </Field>
+          <Field label="Font size">
+            <input
+              type="number"
+              value={object.fontSize ?? 14}
+              onChange={(e) => set({ fontSize: Number(e.target.value) })}
+              onBlur={endEdit}
+            />
+          </Field>
+          <Field label="Color">
+            <input type="color" value={object.color ?? '#1c2733'} onChange={(e) => { set({ color: e.target.value }); endEdit(); }} />
+          </Field>
+        </>
+      ) : (
+        <>
+          <Field label="Label">
+            <input value={object.label ?? ''} onChange={(e) => set({ label: e.target.value })} onBlur={endEdit} />
+          </Field>
+          <Field label="Shape">
+            <select value={object.shape} onChange={(e) => { set({ shape: e.target.value }); endEdit(); }}>
+              <option value="rect">Rectangle</option>
+              <option value="ellipse">Ellipse</option>
+            </select>
+          </Field>
+          <Field label="Fill">
+            <input type="color" value={object.fill ?? '#2563eb'} onChange={(e) => { set({ fill: e.target.value }); endEdit(); }} />
+          </Field>
+          <Field label="Border">
+            <input type="color" value={object.stroke ?? '#2563eb'} onChange={(e) => { set({ stroke: e.target.value }); endEdit(); }} />
+          </Field>
+        </>
+      )}
+    </div>
+  );
+}
+
 function ProjectInspector() {
   const projectName = useProjectStore((s) => s.projectName);
   const rename = useProjectStore((s) => s.renameProject);
@@ -192,10 +245,15 @@ export function Inspector() {
       body = <DeviceInspector device={device} />;
     } else {
       const link = store().getLink(id);
+      const object = store().getObject(id);
       if (link) {
         head = link.name || 'Link';
         sub = 'Connection';
         body = <LinkInspector link={link} />;
+      } else if (object) {
+        head = object.kind === 'text' ? 'Text note' : object.label || 'Shape';
+        sub = object.kind === 'text' ? 'Note' : 'Zone / shape';
+        body = <ObjectInspector object={object} />;
       } else {
         body = <ProjectInspector />;
       }

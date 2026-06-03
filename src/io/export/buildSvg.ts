@@ -8,12 +8,14 @@
  * external references by construction. Object IDs are preserved for round-trip.
  */
 import { deviceVisual } from '@/canvas/deviceVisuals';
-import type { Device, Link } from '@/model/types';
+import type { CanvasObject, Device, Link } from '@/model/types';
 
 export interface ExportSvgOptions {
   background: string | null; // null = transparent
   includeLabels: boolean;
   padding?: number;
+  /** Text notes + shapes/zones to include (shapes render under devices). */
+  objects?: CanvasObject[];
 }
 
 interface Bounds {
@@ -23,14 +25,17 @@ interface Bounds {
   maxY: number;
 }
 
-function bounds(devices: Device[], padding: number): Bounds | null {
-  if (devices.length === 0) return null;
+function bounds(
+  boxes: { x: number; y: number; width: number; height: number }[],
+  padding: number,
+): Bounds | null {
+  if (boxes.length === 0) return null;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const d of devices) {
-    minX = Math.min(minX, d.x);
-    minY = Math.min(minY, d.y);
-    maxX = Math.max(maxX, d.x + d.width);
-    maxY = Math.max(maxY, d.y + d.height + (16 /* label */));
+  for (const b of boxes) {
+    minX = Math.min(minX, b.x);
+    minY = Math.min(minY, b.y);
+    maxX = Math.max(maxX, b.x + b.width);
+    maxY = Math.max(maxY, b.y + b.height + 16 /* label headroom */);
   }
   return { minX: minX - padding, minY: minY - padding, maxX: maxX + padding, maxY: maxY + padding };
 }
@@ -42,7 +47,8 @@ export function escapeXml(s: string): string {
 
 export function buildSvg(devices: Device[], links: Link[], opts: ExportSvgOptions): string {
   const padding = opts.padding ?? 40;
-  const b = bounds(devices, padding) ?? { minX: 0, minY: 0, maxX: 400, maxY: 300 };
+  const objects = opts.objects ?? [];
+  const b = bounds([...devices, ...objects], padding) ?? { minX: 0, minY: 0, maxX: 400, maxY: 300 };
   const w = Math.max(1, b.maxX - b.minX);
   const h = Math.max(1, b.maxY - b.minY);
   const byId = new Map(devices.map((d) => [d.id, d]));
@@ -56,7 +62,20 @@ export function buildSvg(devices: Device[], links: Link[], opts: ExportSvgOption
     parts.push(`<rect x="${b.minX}" y="${b.minY}" width="${w}" height="${h}" fill="${escapeXml(opts.background)}"/>`);
   }
 
-  // Links first (under devices).
+  // Shapes/zones render under everything.
+  for (const o of objects) {
+    if (o.kind !== 'shape') continue;
+    const fill = escapeXml(o.fill ?? '#e8effb');
+    const stroke = escapeXml(o.stroke ?? '#2563eb');
+    if (o.shape === 'ellipse') {
+      parts.push(`<ellipse data-id="${escapeXml(o.id)}" cx="${o.x + o.width / 2}" cy="${o.y + o.height / 2}" rx="${o.width / 2}" ry="${o.height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`);
+    } else {
+      parts.push(`<rect data-id="${escapeXml(o.id)}" x="${o.x}" y="${o.y}" width="${o.width}" height="${o.height}" rx="6" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`);
+    }
+    if (o.label) parts.push(`<text x="${o.x + 8}" y="${o.y + 16}" fill="#64748b" font-size="11">${escapeXml(o.label)}</text>`);
+  }
+
+  // Links (under devices).
   for (const l of links) {
     const a = byId.get(l.sourceId);
     const t = byId.get(l.targetId);
@@ -77,6 +96,14 @@ export function buildSvg(devices: Device[], links: Link[], opts: ExportSvgOption
       parts.push(`<text x="${d.width / 2}" y="${d.height + 12}" fill="#1c2733" font-size="11" text-anchor="middle">${escapeXml(d.name)}</text>`);
     }
     parts.push(`</g>`);
+  }
+
+  // Text notes render on top.
+  for (const o of objects) {
+    if (o.kind !== 'text') continue;
+    parts.push(
+      `<text data-id="${escapeXml(o.id)}" x="${o.x + 4}" y="${o.y + (o.fontSize ?? 14)}" font-size="${o.fontSize ?? 14}" fill="${escapeXml(o.color ?? '#1c2733')}">${escapeXml(o.text)}</text>`,
+    );
   }
 
   parts.push(`</svg>`);

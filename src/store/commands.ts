@@ -9,7 +9,7 @@
  * `transaction()` composes sub-commands into a single atomic history entry — the
  * basis for build-draft-then-commit import (DA-T2): the whole import is one undo.
  */
-import type { Device, Link } from '@/model/types';
+import type { CanvasObject, Device, Link } from '@/model/types';
 import {
   addDevice,
   addLink,
@@ -161,9 +161,11 @@ export class DeleteCommand implements Command {
   readonly label = 'Delete';
   private removedDevices: Device[] = [];
   private removedLinks: Link[] = [];
+  private removedObjects: CanvasObject[] = [];
   constructor(
     private readonly deviceIds: string[],
     private readonly explicitLinkIds: string[] = [],
+    private readonly objectIds: string[] = [],
   ) {}
   apply(s: ModelState) {
     // Recompute the removed set on (re-)apply so redo after edits stays correct.
@@ -173,12 +175,72 @@ export class DeleteCommand implements Command {
     }
     this.removedLinks = [...linkIds].map((id) => s.links.get(id)).filter(isLink);
     this.removedDevices = this.deviceIds.map((id) => s.devices.get(id)).filter(isDevice);
+    this.removedObjects = this.objectIds.map((id) => s.objects.get(id)).filter(isObject);
     for (const link of this.removedLinks) removeLink(s, link.id);
     for (const device of this.removedDevices) removeDevice(s, device.id);
+    for (const obj of this.removedObjects) s.objects.delete(obj.id);
   }
   undo(s: ModelState) {
     for (const device of this.removedDevices) addDevice(s, device);
     for (const link of this.removedLinks) addLink(s, link);
+    for (const obj of this.removedObjects) s.objects.set(obj.id, obj);
+  }
+}
+
+export class AddObjectCommand implements Command {
+  readonly label = 'Add object';
+  constructor(private readonly obj: CanvasObject) {}
+  apply(s: ModelState) {
+    s.objects.set(this.obj.id, this.obj);
+  }
+  undo(s: ModelState) {
+    s.objects.delete(this.obj.id);
+  }
+}
+
+export class MoveObjectCommand implements Command {
+  readonly label = 'Move object';
+  constructor(
+    private readonly id: string,
+    private readonly from: { x: number; y: number },
+    private readonly to: { x: number; y: number },
+  ) {}
+  apply(s: ModelState) {
+    const o = s.objects.get(this.id);
+    if (o) s.objects.set(this.id, { ...o, x: this.to.x, y: this.to.y });
+  }
+  undo(s: ModelState) {
+    const o = s.objects.get(this.id);
+    if (o) s.objects.set(this.id, { ...o, x: this.from.x, y: this.from.y });
+  }
+  mergeWith(next: Command): Command | null {
+    if (next instanceof MoveObjectCommand && next.id === this.id) {
+      return new MoveObjectCommand(this.id, this.from, next.to);
+    }
+    return null;
+  }
+}
+
+export class UpdateObjectCommand implements Command {
+  readonly label = 'Edit object';
+  constructor(
+    private readonly id: string,
+    private readonly before: Partial<CanvasObject>,
+    private readonly after: Partial<CanvasObject>,
+  ) {}
+  apply(s: ModelState) {
+    const o = s.objects.get(this.id);
+    if (o) s.objects.set(this.id, { ...o, ...this.after } as CanvasObject);
+  }
+  undo(s: ModelState) {
+    const o = s.objects.get(this.id);
+    if (o) s.objects.set(this.id, { ...o, ...this.before } as CanvasObject);
+  }
+  mergeWith(next: Command): Command | null {
+    if (next instanceof UpdateObjectCommand && next.id === this.id && sameKeys(this.after, next.after)) {
+      return new UpdateObjectCommand(this.id, this.before, next.after);
+    }
+    return null;
   }
 }
 
@@ -205,6 +267,9 @@ function isDevice(d: Device | undefined): d is Device {
 }
 function isLink(l: Link | undefined): l is Link {
   return l !== undefined;
+}
+function isObject(o: CanvasObject | undefined): o is CanvasObject {
+  return o !== undefined;
 }
 function sameKeys(a: object, b: object): boolean {
   const ka = Object.keys(a).sort();

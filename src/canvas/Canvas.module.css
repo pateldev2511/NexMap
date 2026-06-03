@@ -119,6 +119,35 @@
   cursor: grab;
 }
 
+.objNode {
+  cursor: pointer;
+}
+
+.shapeBody {
+  stroke-width: 1.5;
+}
+
+.objNode.selected .shapeBody {
+  stroke-width: 2.5;
+  stroke-dasharray: none;
+}
+
+.shapeLabel {
+  fill: var(--chrome-fg-muted);
+  font-size: 11px;
+  font-family: var(--font-ui);
+  pointer-events: none;
+}
+
+.textObj {
+  font-family: var(--font-ui);
+  dominant-baseline: alphabetic;
+}
+
+.objNode.selected .textObj {
+  outline: none;
+}
+
 .link {
   stroke: var(--chrome-fg-muted);
   stroke-width: 1.5;

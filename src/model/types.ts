@@ -88,6 +88,41 @@ export interface Link {
   extra?: ExtraFields;
 }
 
+/**
+ * Non-device canvas objects (Phase 1): freeform text notes and shapes/zones.
+ * Share the position/lock/group fields with devices so the editor can move,
+ * select, lock, and delete them through the same flows.
+ */
+interface BaseCanvasObject {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  layerId: string;
+  z?: number;
+  locked?: boolean;
+  groupId?: string;
+  extra?: ExtraFields;
+}
+
+export interface TextObject extends BaseCanvasObject {
+  kind: 'text';
+  text: string;
+  fontSize?: number;
+  color?: string;
+}
+
+export interface ShapeObject extends BaseCanvasObject {
+  kind: 'shape';
+  shape: 'rect' | 'ellipse';
+  label?: string;
+  fill?: string;
+  stroke?: string;
+}
+
+export type CanvasObject = TextObject | ShapeObject;
+
 export interface ProjectMeta {
   id: string;
   name: string;
@@ -109,9 +144,9 @@ export interface NexMapDocument {
   layers: Layer[];
   devices: Device[];
   links: Link[];
+  objects: CanvasObject[];
   // Forward-declared, unused in MVP — preserved verbatim on load→save.
   views: unknown[];
-  objects: unknown[];
   interfaces: unknown[];
   vlans: unknown[];
   subnets: unknown[];

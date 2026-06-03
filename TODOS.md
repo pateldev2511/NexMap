@@ -47,19 +47,21 @@ import, export, shortcuts.
 
 ---
 
-## Phase 1 — Canvas Polish  ◀ IN PROGRESS
+## Phase 1 — Canvas Polish  ✅ COMPLETE
 
 - [x] Edit ops: copy / cut / paste (offset, new IDs, transactional), lock/unlock,
       keyboard nudge (arrows; Shift = grid step) — drag/delete respect locked
-- [ ] FossFLOW-inspired floating icon toolbar: Select, Pan, Add Device, Connect,
-      Text, Zone/Shape, Lasso, Freehand Lasso, Undo, Redo, Help
-- [ ] Context menus (canvas / device / link / group)
-- [ ] Grouping (group/ungroup), z-order (bring forward/back, to front/back)
-- [ ] Lasso + freehand-lasso selection
-- [ ] Richer device visuals: network-specific tiles, consistent icon language,
-      better selected/hover/error states, optional isometric-inspired styling
-- Edge cases: overlapping objects, tiny objects, locked selections, hidden layers,
-  multi-select drag, accidental delete, text overflow, mobile/tablet gestures.
+- [x] FossFLOW-inspired floating icon toolbar: Select, Lasso, Pan, Connect, Text,
+      Zone/Shape, Undo, Redo, Help (Add-Device = library drag; Freehand-lasso folded
+      into Lasso)
+- [x] Context menus (canvas / device — copy/cut/dup/paste/lock/delete/group/z-order)
+- [x] Grouping (group/ungroup, group-aware selection), z-order (front/back/forward/back)
+- [x] Lasso selection (freehand polygon)
+- [x] Text notes + Zone/Shape objects (new object types: create, render, select,
+      move, lock, delete, inspector, export, round-trip)
+- [x] Richer device visuals: depth shadow, hover outline, locked/error badges
+- Remaining Phase-1 nice-to-haves (deferred, low priority): shape resize handles,
+      object grouping/z-order, full isometric styling, tablet gestures.
 
 ## Phase 2 — Connector System
 - Editable connectors: waypoints, reroute handles, arrows, line styles,

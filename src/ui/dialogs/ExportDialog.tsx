@@ -48,7 +48,12 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         fileName: '',
       };
       const outcome = await runExport(
-        { devices: store().devicesAll(), links: store().linksAll(), projectName },
+        {
+          devices: store().devicesAll(),
+          links: store().linksAll(),
+          objects: store().objectsAll(),
+          projectName,
+        },
         opts,
       );
       setMsg(outcome.warning ? `⚠ ${outcome.warning}` : `✓ Exported ${outcome.fileName}`);

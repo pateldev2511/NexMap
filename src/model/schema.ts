@@ -4,12 +4,15 @@
  */
 import { nanoid } from 'nanoid';
 import type {
+  CanvasObject,
   Device,
   DeviceType,
   Layer,
   Link,
   NexMapDocument,
   ProjectMeta,
+  ShapeObject,
+  TextObject,
 } from './types';
 
 /** Bump when the on-disk shape changes; add a migration in migrate.ts. */
@@ -78,6 +81,55 @@ export function createLink(
   partial: Partial<Link> = {},
 ): Link {
   return { id: nanoid(), kind: 'link', sourceId, targetId, layerId, ...partial };
+}
+
+export function createTextObject(
+  x: number,
+  y: number,
+  layerId: string,
+  partial: Partial<TextObject> = {},
+): TextObject {
+  return {
+    id: nanoid(),
+    kind: 'text',
+    x,
+    y,
+    width: 160,
+    height: 28,
+    layerId,
+    text: 'Text',
+    fontSize: 14,
+    ...partial,
+  };
+}
+
+export function createShapeObject(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  layerId: string,
+  partial: Partial<ShapeObject> = {},
+): ShapeObject {
+  return {
+    id: nanoid(),
+    kind: 'shape',
+    shape: 'rect',
+    x,
+    y,
+    width,
+    height,
+    layerId,
+    ...partial,
+  };
+}
+
+export function isCanvasObject(v: unknown): v is CanvasObject {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    ((v as CanvasObject).kind === 'text' || (v as CanvasObject).kind === 'shape')
+  );
 }
 
 export function createProjectMeta(

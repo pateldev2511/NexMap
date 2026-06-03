@@ -34,6 +34,8 @@ export function CanvasToolbar({ mode, onMode, canUndo, canRedo, onUndo, onRedo, 
       {tool('lasso', '◌', 'Q', 'Lasso select')}
       {tool('pan', '✋', 'H', 'Pan')}
       {tool('connect', '⤴', 'C', 'Connect')}
+      {tool('text', 'T', 'T', 'Text note')}
+      {tool('shape', '▭', 'R', 'Zone / shape')}
       <span className={styles.divider} />
       <button className={styles.icon} onClick={onUndo} disabled={!canUndo} title="Undo (⌘Z)" aria-label="Undo">
         ↶

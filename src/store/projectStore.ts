@@ -10,8 +10,21 @@
  */
 import { create } from 'zustand';
 import { nanoid } from 'nanoid';
-import type { Device, DeviceType, Link, NexMapDocument, ValidationIssue } from '@/model/types';
-import { createDevice, createEmptyDocument, createLink } from '@/model/schema';
+import type {
+  CanvasObject,
+  Device,
+  DeviceType,
+  Link,
+  NexMapDocument,
+  ValidationIssue,
+} from '@/model/types';
+import {
+  createDevice,
+  createEmptyDocument,
+  createLink,
+  createShapeObject,
+  createTextObject,
+} from '@/model/schema';
 import { validate, resetIssueIds } from '@/model/validate';
 import { SpatialIndex, type Box } from '@/lib/spatial-index';
 import { pointInPolygon, type Point } from '@/lib/geometry';
@@ -19,16 +32,19 @@ import { History } from './history';
 import {
   AddDeviceCommand,
   AddLinkCommand,
+  AddObjectCommand,
   DeleteCommand,
   MoveDeviceCommand,
+  MoveObjectCommand,
   RenameProjectCommand,
   UpdateDeviceCommand,
   UpdateLinkCommand,
+  UpdateObjectCommand,
   transaction,
   type Command,
 } from './commands';
 
-export type CanvasMode = 'select' | 'pan' | 'connect' | 'lasso';
+export type CanvasMode = 'select' | 'pan' | 'connect' | 'lasso' | 'text' | 'shape';
 import {
   emptyModel,
   fromDocument,
@@ -51,10 +67,18 @@ let pasteOffset = 0;
 function deviceBox(d: Device): Box {
   return { x: d.x, y: d.y, width: d.width, height: d.height };
 }
+function objBox(o: CanvasObject): Box {
+  return { x: o.x, y: o.y, width: o.width, height: o.height };
+}
+/** Any movable entity (device or object). */
+function movable(id: string): (Device | CanvasObject) | undefined {
+  return model.devices.get(id) ?? model.objects.get(id);
+}
 
 function rebuildIndex(): void {
   index.clear();
   for (const d of model.devices.values()) index.insert(d.id, deviceBox(d));
+  for (const o of model.objects.values()) index.insert(o.id, objBox(o));
 }
 
 /** Shared z-order transaction: compute new z per selected device, commit as one entry. */
@@ -94,6 +118,11 @@ export interface ProjectStore {
 
   // --- actions (the only writers) ---
   addDeviceAt(type: DeviceType, x: number, y: number): string;
+  addText(x: number, y: number): string;
+  addShape(x: number, y: number, width: number, height: number): string;
+  updateObject(id: string, before: Partial<CanvasObject>, after: Partial<CanvasObject>): void;
+  getObject(id: string): CanvasObject | undefined;
+  objectsAll(): CanvasObject[];
   /** Begin dragging the current selection — snapshots origin positions. */
   beginDrag(): void;
   /** Move dragged devices by a canvas-space delta (transient, no history). */
@@ -198,11 +227,41 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       return device.id;
     },
 
+    addText(x, y) {
+      const obj = createTextObject(x, y, firstLayerId());
+      history.dispatch(new AddObjectCommand(obj), model);
+      index.insert(obj.id, objBox(obj));
+      history.commitCoalesceBoundary();
+      set({ rev: get().rev + 1, selection: new Set([obj.id]), canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
+      return obj.id;
+    },
+
+    addShape(x, y, width, height) {
+      const obj = createShapeObject(x, y, width, height, firstLayerId(), { label: 'Zone' });
+      history.dispatch(new AddObjectCommand(obj), model);
+      index.insert(obj.id, objBox(obj));
+      history.commitCoalesceBoundary();
+      set({ rev: get().rev + 1, selection: new Set([obj.id]), canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
+      return obj.id;
+    },
+
+    updateObject(id, before, after) {
+      commit(new UpdateObjectCommand(id, before, after));
+    },
+
+    getObject(id) {
+      return model.objects.get(id);
+    },
+
+    objectsAll() {
+      return [...model.objects.values()];
+    },
+
     beginDrag() {
       const origins = new Map<string, { x: number; y: number }>();
       for (const id of get().selection) {
-        const d = model.devices.get(id);
-        if (d && !d.locked) origins.set(id, { x: d.x, y: d.y }); // locked devices don't move
+        const m = movable(id);
+        if (m && !m.locked) origins.set(id, { x: m.x, y: m.y }); // locked entities don't move
       }
       dragOrigins = origins;
     },
@@ -210,25 +269,36 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     dragTo(dx, dy, suspendSnap) {
       if (!dragOrigins) return;
       for (const [id, origin] of dragOrigins) {
-        const d = model.devices.get(id);
-        if (!d) continue;
         const x = snapValue(origin.x + dx, suspendSnap);
         const y = snapValue(origin.y + dy, suspendSnap);
-        model.devices.set(id, { ...d, x, y });
-        index.update(id, { x, y, width: d.width, height: d.height });
+        const d = model.devices.get(id);
+        if (d) {
+          model.devices.set(id, { ...d, x, y });
+          index.update(id, { x, y, width: d.width, height: d.height });
+          continue;
+        }
+        const o = model.objects.get(id);
+        if (o) {
+          model.objects.set(id, { ...o, x, y });
+          index.update(id, { x, y, width: o.width, height: o.height });
+        }
       }
       set({ rev: get().rev + 1, dirty: true });
     },
 
     endDrag() {
       if (!dragOrigins) return;
-      // Commit the net move of each device as ONE atomic history entry.
+      // Commit the net move of each entity as ONE atomic history entry.
       const moves: Command[] = [];
       for (const [id, origin] of dragOrigins) {
-        const d = model.devices.get(id);
-        if (!d) continue;
-        if (d.x !== origin.x || d.y !== origin.y) {
-          moves.push(new MoveDeviceCommand(id, origin, { x: d.x, y: d.y }));
+        const m = movable(id);
+        if (!m) continue;
+        if (m.x !== origin.x || m.y !== origin.y) {
+          moves.push(
+            model.devices.has(id)
+              ? new MoveDeviceCommand(id, origin, { x: m.x, y: m.y })
+              : new MoveObjectCommand(id, origin, { x: m.x, y: m.y }),
+          );
         }
       }
       dragOrigins = null;
@@ -307,13 +377,15 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     },
 
     toggleLockSelection() {
-      const ids = [...get().selection].filter((id) => model.devices.has(id));
+      const ids = [...get().selection].filter((id) => movable(id));
       if (ids.length === 0) return;
       // If any is unlocked, lock all; else unlock all.
-      const anyUnlocked = ids.some((id) => !model.devices.get(id)!.locked);
+      const anyUnlocked = ids.some((id) => !movable(id)!.locked);
       const cmds = ids.map((id) => {
-        const cur = !!model.devices.get(id)!.locked;
-        return new UpdateDeviceCommand(id, { locked: cur }, { locked: anyUnlocked });
+        const cur = !!movable(id)!.locked;
+        return model.devices.has(id)
+          ? new UpdateDeviceCommand(id, { locked: cur }, { locked: anyUnlocked })
+          : new UpdateObjectCommand(id, { locked: cur }, { locked: anyUnlocked });
       });
       history.dispatch(transaction(anyUnlocked ? 'Lock' : 'Unlock', cmds), model);
       history.commitCoalesceBoundary();
@@ -322,18 +394,20 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     nudgeSelection(dx, dy) {
       const ids = [...get().selection].filter((id) => {
-        const d = model.devices.get(id);
-        return d && !d.locked;
+        const m = movable(id);
+        return m && !m.locked;
       });
       if (ids.length === 0) return;
       const cmds = ids.map((id) => {
-        const d = model.devices.get(id)!;
-        return new MoveDeviceCommand(id, { x: d.x, y: d.y }, { x: d.x + dx, y: d.y + dy });
+        const m = movable(id)!;
+        return model.devices.has(id)
+          ? new MoveDeviceCommand(id, { x: m.x, y: m.y }, { x: m.x + dx, y: m.y + dy })
+          : new MoveObjectCommand(id, { x: m.x, y: m.y }, { x: m.x + dx, y: m.y + dy });
       });
       history.dispatch(transaction('Nudge', cmds), model);
       for (const id of ids) {
-        const d = model.devices.get(id)!;
-        index.update(id, deviceBox(d));
+        const m = movable(id)!;
+        index.update(id, { x: m.x, y: m.y, width: m.width, height: m.height });
       }
       set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
     },
@@ -419,10 +493,11 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     deleteSelection() {
       const ids = [...get().selection];
       if (ids.length === 0) return;
-      // Locked devices are protected from deletion.
+      // Locked devices/objects are protected from deletion.
       const deviceIds = ids.filter((id) => model.devices.has(id) && !model.devices.get(id)!.locked);
       const linkIds = ids.filter((id) => model.links.has(id));
-      commit(new DeleteCommand(deviceIds, linkIds), { reindex: true });
+      const objectIds = ids.filter((id) => model.objects.has(id) && !model.objects.get(id)!.locked);
+      commit(new DeleteCommand(deviceIds, linkIds, objectIds), { reindex: true });
       history.commitCoalesceBoundary();
       set({ selection: new Set() });
     },
@@ -441,8 +516,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     lassoSelect(points, additive = false) {
       const next = additive ? new Set(get().selection) : new Set<string>();
+      const inside = (x: number, y: number) => pointInPolygon(x, y, points);
       for (const d of model.devices.values()) {
-        if (pointInPolygon(d.x + d.width / 2, d.y + d.height / 2, points)) next.add(d.id);
+        if (inside(d.x + d.width / 2, d.y + d.height / 2)) next.add(d.id);
+      }
+      for (const o of model.objects.values()) {
+        if (inside(o.x + o.width / 2, o.y + o.height / 2)) next.add(o.id);
       }
       set({ selection: next });
     },
