@@ -13,9 +13,13 @@ import {
   parseGraphml,
   parseDrawio,
   parseTopologyJson,
+  parseNetboxJson,
+  looksLikeNetbox,
   type ImportResult,
 } from '@/io/import/graphImport';
 import styles from './ImportDialog.module.css';
+
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif']);
 
 /**
  * CSV import flow (spec Import): pick → parse → preview → map → validate → confirm.
@@ -40,12 +44,43 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
   const fields = kind === 'devices' ? DEVICE_FIELDS : LINK_FIELDS;
   const parsed = useMemo(() => (text ? parseCsv(text) : null), [text]);
 
+  function addImageObject(href: string, w: number, h: number) {
+    store().addImage(href, w, h);
+    setText(null);
+    setGraphResult(null);
+    setDone({ count: 1, warnings: [], skipped: 0 });
+  }
+
   async function onFile(file: File) {
-    const raw = await file.text();
     setDone(null);
     setFileName(file.name);
     const ext = file.name.toLowerCase().split('.').pop() ?? '';
     const layer = store().defaultLayerId();
+
+    // Raster image → background underlay (read dims from the loaded image).
+    if (IMAGE_EXTS.has(ext)) {
+      const dataUrl = await new Promise<string>((res) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result as string);
+        r.readAsDataURL(file);
+      });
+      const img = new Image();
+      img.onload = () => addImageObject(dataUrl, img.naturalWidth || 400, img.naturalHeight || 300);
+      img.src = dataUrl;
+      return;
+    }
+
+    const raw = await file.text();
+
+    // SVG → sanitized background underlay (DOMPurify lazy-loaded — only here).
+    if (ext === 'svg') {
+      const DOMPurify = (await import('dompurify')).default;
+      const clean = DOMPurify.sanitize(raw, { USE_PROFILES: { svg: true, svgFilters: true } });
+      const w = Number(/width="(\d+(?:\.\d+)?)"/.exec(clean)?.[1] ?? 400);
+      const h = Number(/height="(\d+(?:\.\d+)?)"/.exec(clean)?.[1] ?? 300);
+      addImageObject('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(clean), w, h);
+      return;
+    }
 
     if (ext === 'graphml') {
       setText(null);
@@ -59,7 +94,10 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
     }
     if (ext === 'json') {
       setText(null);
-      setGraphResult({ name: file.name, result: parseTopologyJson(raw, layer) });
+      const result = looksLikeNetbox(raw)
+        ? parseNetboxJson(raw, layer)
+        : parseTopologyJson(raw, layer);
+      setGraphResult({ name: file.name, result });
       return;
     }
     // CSV (default).
@@ -110,9 +148,10 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
         <div className={styles.body}>
           {!text && !graphResult && !done && (
             <div className={styles.dropzone} onClick={() => inputRef.current?.click()}>
-              Choose a file: CSV (devices/links), GraphML, draw.io XML, or topology JSON.
+              Choose a file: CSV (devices/links), GraphML, draw.io XML, topology/NetBox
+              JSON, or an image/SVG to use as a background underlay.
               <br />
-              CSV headers are auto-detected; other formats import devices + links directly.
+              CSV headers are auto-detected; SVG underlays are sanitized on import.
             </div>
           )}
 
@@ -226,7 +265,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
           <input
             ref={inputRef}
             type="file"
-            accept=".csv,.graphml,.drawio,.xml,.json,text/csv,application/xml,application/json"
+            accept=".csv,.graphml,.drawio,.xml,.json,.svg,.png,.jpg,.jpeg,.webp,.gif,text/csv,application/xml,application/json,image/*"
             style={{ display: 'none' }}
             onChange={async (e) => {
               const file = e.target.files?.[0];

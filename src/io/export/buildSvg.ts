@@ -62,7 +62,15 @@ export function buildSvg(devices: Device[], links: Link[], opts: ExportSvgOption
     parts.push(`<rect x="${b.minX}" y="${b.minY}" width="${w}" height="${h}" fill="${escapeXml(opts.background)}"/>`);
   }
 
-  // Shapes/zones render under everything.
+  // Image underlays render at the very back.
+  for (const o of objects) {
+    if (o.kind !== 'image') continue;
+    parts.push(
+      `<image href="${escapeXml(o.href)}" x="${o.x}" y="${o.y}" width="${o.width}" height="${o.height}" opacity="${o.opacity ?? 1}" preserveAspectRatio="none"/>`,
+    );
+  }
+
+  // Shapes/zones render under links/devices.
   for (const o of objects) {
     if (o.kind !== 'shape') continue;
     const fill = escapeXml(o.fill ?? '#e8effb');

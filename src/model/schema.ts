@@ -7,6 +7,7 @@ import type {
   CanvasObject,
   Device,
   DeviceType,
+  ImageObject,
   Layer,
   Link,
   NexMapDocument,
@@ -124,12 +125,21 @@ export function createShapeObject(
   };
 }
 
+export function createImageObject(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  layerId: string,
+  href: string,
+  partial: Partial<ImageObject> = {},
+): ImageObject {
+  return { id: nanoid(), kind: 'image', x, y, width, height, layerId, href, z: -1000, ...partial };
+}
+
 export function isCanvasObject(v: unknown): v is CanvasObject {
-  return (
-    typeof v === 'object' &&
-    v !== null &&
-    ((v as CanvasObject).kind === 'text' || (v as CanvasObject).kind === 'shape')
-  );
+  const k = (v as CanvasObject | null)?.kind;
+  return typeof v === 'object' && v !== null && (k === 'text' || k === 'shape' || k === 'image');
 }
 
 export function createProjectMeta(

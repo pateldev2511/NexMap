@@ -541,6 +541,7 @@ export function Canvas() {
   // Stacking order: lower z renders first (underneath).
   devices.sort((a, b) => (a.z ?? 0) - (b.z ?? 0));
   const allObjects = size.w > 0 ? store().objectsAll() : [];
+  const images = allObjects.filter((o) => o.kind === 'image'); // back-most underlays
   const shapes = allObjects.filter((o) => o.kind === 'shape'); // render under links
   const texts = allObjects.filter((o) => o.kind === 'text'); // render on top
   const links = size.w > 0 ? store().visibleLinks(box) : [];
@@ -608,6 +609,14 @@ export function Canvas() {
         <rect x={0} y={0} width="100%" height="100%" fill="url(#nexmap-grid)" />
 
         <g transform={`translate(${viewport.tx} ${viewport.ty}) scale(${viewport.scale})`}>
+          {images.map((o) => (
+            <ObjectNode
+              key={o.id}
+              object={o}
+              selected={selection.has(o.id)}
+              onPointerDown={onDevicePointerDown}
+            />
+          ))}
           {shapes.map((o) => (
             <ObjectNode
               key={o.id}

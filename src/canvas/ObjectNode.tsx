@@ -13,6 +13,32 @@ const LOCK_GLYPH = '\u{1F512}';
 /** Renders a text note or a shape/zone. Selection/drag go through the shared handler. */
 function ObjectNodeImpl({ object, selected, onPointerDown }: ObjectNodeProps) {
   const cls = `${styles.objNode} ${selected ? styles.selected : ''}`;
+  if (object.kind === 'image') {
+    return (
+      <g className={cls} onPointerDown={(e) => onPointerDown(e, object.id)} data-id={object.id}>
+        <image
+          href={object.href}
+          x={object.x}
+          y={object.y}
+          width={object.width}
+          height={object.height}
+          opacity={object.opacity ?? 1}
+          preserveAspectRatio="none"
+        />
+        {selected && (
+          <rect
+            className={styles.shapeBody}
+            x={object.x}
+            y={object.y}
+            width={object.width}
+            height={object.height}
+            fill="none"
+            stroke="var(--accent)"
+          />
+        )}
+      </g>
+    );
+  }
   if (object.kind === 'shape') {
     const Tag = object.shape === 'ellipse' ? 'ellipse' : 'rect';
     const common = {

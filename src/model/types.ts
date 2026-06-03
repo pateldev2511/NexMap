@@ -134,7 +134,14 @@ export interface ShapeObject extends BaseCanvasObject {
   stroke?: string;
 }
 
-export type CanvasObject = TextObject | ShapeObject;
+export interface ImageObject extends BaseCanvasObject {
+  kind: 'image';
+  /** Data URL (sanitized for SVG; raster for png/jpg/webp). */
+  href: string;
+  opacity?: number;
+}
+
+export type CanvasObject = TextObject | ShapeObject | ImageObject;
 
 export interface ProjectMeta {
   id: string;

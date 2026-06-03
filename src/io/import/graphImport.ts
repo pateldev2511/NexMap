@@ -137,6 +137,48 @@ export function parseDrawio(text: string, layerId: string): ImportResult {
   return { devices, links, warnings, skipped };
 }
 
+/** A NetBox JSON export has a `results` array of device objects. */
+export function looksLikeNetbox(text: string): boolean {
+  try {
+    const d = JSON.parse(text) as { results?: unknown };
+    return Array.isArray(d.results);
+  } catch {
+    return false;
+  }
+}
+
+/** Parse a NetBox device-list JSON export (`results[]`). Links aren't included. */
+export function parseNetboxJson(text: string, layerId: string): ImportResult {
+  let data: { results?: unknown[] };
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return { devices: [], links: [], warnings: ['File is not valid JSON.'], skipped: 0 };
+  }
+  const results = Array.isArray(data.results) ? data.results : [];
+  const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+  const nested = (o: unknown, ...path: string[]): string | undefined => {
+    let cur: unknown = o;
+    for (const k of path) cur = (cur as Record<string, unknown> | null)?.[k];
+    return str(cur);
+  };
+  const devices: Device[] = results.map((raw, i) => {
+    const d = raw as Record<string, unknown>;
+    const name = str(d.name) || str(d.display) || `device-${i}`;
+    const roleLabel = nested(d.device_role, 'name') ?? nested(d.role, 'name') ?? '';
+    const pos = layout(i);
+    return createDevice(inferType(roleLabel || name), pos.x, pos.y, layerId, {
+      name,
+      role: roleLabel || undefined,
+      model: nested(d.device_type, 'model'),
+      vendor: nested(d.device_type, 'manufacturer', 'name'),
+      location: nested(d.site, 'name'),
+      managementIp: nested(d.primary_ip, 'address') ?? nested(d.primary_ip4, 'address'),
+    });
+  });
+  return { devices, links: [], warnings: [], skipped: 0 };
+}
+
 /**
  * Parse a generic topology JSON: `{ devices: [...], links: [...] }` (NexMap-ish).
  * Full `.nexmap` documents (with schemaVersion) are handled by the open flow, not

@@ -73,15 +73,16 @@ import, export, shortcuts.
 - Deferred (low priority): obstacle-avoiding auto-routing, curved/freeform links,
   per-segment orthogonal routing through waypoints.
 
-## Phase 3 — Export & Import Upgrade
-- Export dialog: live preview, crop-to-selection/content, custom filename, DPI/scale
-  slider, transparent checkerboard preview, layer/view scope, progress/cancel.
-- Export package ZIP: `.nexmap` + images + PDF + inventory CSV + links CSV +
-  validation report.
-- Import: `.nexmap`, CSV (devices/links/IP/VLANs), JSON, SVG/image underlays,
-  draw.io, GraphML, NetBox CSV/JSON.
-- Edge cases: huge diagrams, canvas limits, PDF pagination, unsafe SVG, malformed
-  CSV, bad encodings, duplicate IDs/names, links-before-devices, partial rollback.
+## Phase 3 — Export & Import Upgrade  ✅ COMPLETE (IP/VLAN CSV → Phase 4)
+- [x] Export dialog: live preview, crop-to-selection, custom filename, DPI/scale
+  slider, transparent checkerboard preview
+- [x] Export package ZIP: `.nexmap` + PNG + SVG + PDF + inventory CSV + links CSV +
+  validation report
+- [x] Import: CSV (devices/links), JSON (topology), draw.io, GraphML, NetBox CSV/JSON,
+  SVG/image background underlays (sanitized)
+- [x] Unsafe-SVG sanitization on import; transactional partial-rollback (single undo)
+- Deferred to Phase 4 (needs the subnet/VLAN model): IP-plan + VLAN CSV import.
+- Deferred (low priority): layer/view export scope, multi-page PDF pagination.
 
 ## Phase 4 — Network Semantics
 - First-class interfaces, VLANs, subnets, zones, sites, racks, cloud networks.

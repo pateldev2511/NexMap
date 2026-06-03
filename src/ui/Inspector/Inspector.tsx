@@ -198,8 +198,10 @@ function ObjectInspector({ object }: { object: CanvasObject }) {
   }
   return (
     <div className={styles.group}>
-      <div className={styles.groupTitle}>{object.kind === 'text' ? 'Text' : 'Shape / Zone'}</div>
-      {object.kind === 'text' ? (
+      <div className={styles.groupTitle}>
+        {object.kind === 'text' ? 'Text' : object.kind === 'image' ? 'Image / underlay' : 'Shape / Zone'}
+      </div>
+      {object.kind === 'text' && (
         <>
           <Field label="Text">
             <textarea value={object.text} onChange={(e) => set({ text: e.target.value })} onBlur={endEdit} />
@@ -216,7 +218,8 @@ function ObjectInspector({ object }: { object: CanvasObject }) {
             <input type="color" value={object.color ?? '#1c2733'} onChange={(e) => { set({ color: e.target.value }); endEdit(); }} />
           </Field>
         </>
-      ) : (
+      )}
+      {object.kind === 'shape' && (
         <>
           <Field label="Label">
             <input value={object.label ?? ''} onChange={(e) => set({ label: e.target.value })} onBlur={endEdit} />
@@ -234,6 +237,18 @@ function ObjectInspector({ object }: { object: CanvasObject }) {
             <input type="color" value={object.stroke ?? '#2563eb'} onChange={(e) => { set({ stroke: e.target.value }); endEdit(); }} />
           </Field>
         </>
+      )}
+      {object.kind === 'image' && (
+        <Field label="Opacity">
+          <input
+            type="range"
+            min={0.1}
+            max={1}
+            step={0.05}
+            value={object.opacity ?? 1}
+            onChange={(e) => { set({ opacity: Number(e.target.value) }); endEdit(); }}
+          />
+        </Field>
       )}
     </div>
   );
@@ -302,8 +317,13 @@ export function Inspector() {
         sub = 'Connection';
         body = <LinkInspector link={link} />;
       } else if (object) {
-        head = object.kind === 'text' ? 'Text note' : object.label || 'Shape';
-        sub = object.kind === 'text' ? 'Note' : 'Zone / shape';
+        head =
+          object.kind === 'text'
+            ? 'Text note'
+            : object.kind === 'image'
+              ? 'Image underlay'
+              : object.label || 'Shape';
+        sub = object.kind === 'text' ? 'Note' : object.kind === 'image' ? 'Underlay' : 'Zone / shape';
         body = <ObjectInspector object={object} />;
       } else {
         body = <ProjectInspector />;

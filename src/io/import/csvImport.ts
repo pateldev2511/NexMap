@@ -19,13 +19,16 @@ interface FieldDef {
 
 export const DEVICE_FIELDS: FieldDef[] = [
   { key: 'name', aliases: ['name', 'device', 'hostname', 'host'] },
-  { key: 'type', aliases: ['type', 'device_type', 'kind'] },
+  { key: 'type', aliases: ['type', 'device_type', 'device_role', 'role', 'kind'] },
   { key: 'vendor', aliases: ['vendor', 'manufacturer', 'make'] },
-  { key: 'model', aliases: ['model'] },
-  { key: 'role', aliases: ['role', 'function'] },
-  { key: 'location', aliases: ['location', 'site', 'room'] },
-  { key: 'managementIp', aliases: ['management_ip', 'mgmt_ip', 'ip', 'ip_address', 'address'] },
-  { key: 'notes', aliases: ['notes', 'description', 'comment'] },
+  { key: 'model', aliases: ['model', 'device_type'] },
+  { key: 'role', aliases: ['role', 'device_role', 'function'] },
+  { key: 'location', aliases: ['location', 'site', 'room', 'rack'] },
+  {
+    key: 'managementIp',
+    aliases: ['management_ip', 'mgmt_ip', 'ip', 'ip_address', 'address', 'primary_ip', 'primary_ip4'],
+  },
+  { key: 'notes', aliases: ['notes', 'description', 'comment', 'comments'] },
 ];
 
 export const LINK_FIELDS: FieldDef[] = [

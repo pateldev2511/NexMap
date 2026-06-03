@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseGraphml, parseDrawio, parseTopologyJson } from './graphImport';
+import { parseGraphml, parseDrawio, parseTopologyJson, parseNetboxJson, looksLikeNetbox } from './graphImport';
 
 const L = 'layer';
 
@@ -70,5 +70,33 @@ describe('parseTopologyJson', () => {
   it('rejects JSON without a devices array', () => {
     expect(parseTopologyJson('{"foo":1}', L).warnings.length).toBeGreaterThan(0);
     expect(parseTopologyJson('not json', L).warnings[0]).toMatch(/valid JSON/);
+  });
+});
+
+describe('NetBox import', () => {
+  const nb = JSON.stringify({
+    results: [
+      {
+        name: 'sw-core-1',
+        device_role: { name: 'switch' },
+        device_type: { model: 'C9300', manufacturer: { name: 'Cisco' } },
+        site: { name: 'HQ' },
+        primary_ip: { address: '10.0.0.2/24' },
+      },
+    ],
+  });
+
+  it('detects and parses a NetBox device export', () => {
+    expect(looksLikeNetbox(nb)).toBe(true);
+    expect(looksLikeNetbox('{"devices":[]}')).toBe(false);
+    const r = parseNetboxJson(nb, L);
+    expect(r.devices).toHaveLength(1);
+    const d = r.devices[0]!;
+    expect(d.name).toBe('sw-core-1');
+    expect(d.type).toBe('switch'); // inferred from role
+    expect(d.vendor).toBe('Cisco');
+    expect(d.model).toBe('C9300');
+    expect(d.location).toBe('HQ');
+    expect(d.managementIp).toBe('10.0.0.2/24');
   });
 });

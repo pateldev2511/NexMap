@@ -22,6 +22,7 @@ import {
   createDevice,
   createEmptyDocument,
   createLink,
+  createImageObject,
   createShapeObject,
   createTextObject,
 } from '@/model/schema';
@@ -120,6 +121,7 @@ export interface ProjectStore {
   addDeviceAt(type: DeviceType, x: number, y: number): string;
   addText(x: number, y: number): string;
   addShape(x: number, y: number, width: number, height: number): string;
+  addImage(href: string, width: number, height: number): string;
   updateObject(id: string, before: Partial<CanvasObject>, after: Partial<CanvasObject>): void;
   getObject(id: string): CanvasObject | undefined;
   objectsAll(): CanvasObject[];
@@ -238,6 +240,18 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     addShape(x, y, width, height) {
       const obj = createShapeObject(x, y, width, height, firstLayerId(), { label: 'Zone' });
+      history.dispatch(new AddObjectCommand(obj), model);
+      index.insert(obj.id, objBox(obj));
+      history.commitCoalesceBoundary();
+      set({ rev: get().rev + 1, selection: new Set([obj.id]), canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
+      return obj.id;
+    },
+
+    addImage(href, width, height) {
+      // Cap absurd dimensions; underlays render at the back via z=-1000.
+      const w = Math.min(width, 4000);
+      const h = Math.min(height, 4000);
+      const obj = createImageObject(40, 40, w, h, firstLayerId(), href);
       history.dispatch(new AddObjectCommand(obj), model);
       index.insert(obj.id, objBox(obj));
       history.commitCoalesceBoundary();
