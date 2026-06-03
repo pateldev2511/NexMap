@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { validate, resetIssueIds } from './validate';
-import { createDevice, createLink } from './schema';
+import { createDevice, createLink, createVlan, createSubnet } from './schema';
 import type { Device } from './types';
 
 const LAYER = 'layer-1';
@@ -66,6 +66,42 @@ describe('validate — MVP checks', () => {
     const a = dev('   ');
     const issues = validate({ devices: [a], links: [] });
     expect(issues.some((i) => i.code === 'device-no-name')).toBe(true);
+  });
+
+  it('flags duplicate VLAN IDs and out-of-range VLANs', () => {
+    const issues = validate({
+      devices: [],
+      links: [],
+      vlans: [createVlan(10, 'A'), createVlan(10, 'B'), createVlan(9000, 'Bad')],
+    });
+    expect(issues.some((i) => i.code === 'duplicate-vlan')).toBe(true);
+    expect(issues.some((i) => i.code === 'invalid-vlan-range')).toBe(true);
+  });
+
+  it('flags overlapping subnets and missing gateway', () => {
+    const issues = validate({
+      devices: [],
+      links: [],
+      subnets: [createSubnet('10.0.0.0/16'), createSubnet('10.0.1.0/24', { gateway: '10.0.1.1' })],
+    });
+    expect(issues.some((i) => i.code === 'overlapping-subnet')).toBe(true);
+    expect(issues.some((i) => i.code === 'subnet-no-gateway')).toBe(true); // the /16 has none
+  });
+
+  it('flags an IP outside all defined subnets', () => {
+    const a = dev('a', '192.168.99.5');
+    const issues = validate({
+      devices: [a],
+      links: [],
+      subnets: [createSubnet('10.0.0.0/24', { gateway: '10.0.0.1' })],
+    });
+    expect(issues.some((i) => i.code === 'ip-outside-subnet')).toBe(true);
+  });
+
+  it('does not flag ip-outside-subnet when no subnets are defined', () => {
+    const a = dev('a', '192.168.99.5');
+    const issues = validate({ devices: [a], links: [] });
+    expect(issues.some((i) => i.code === 'ip-outside-subnet')).toBe(false);
   });
 
   it('is deterministic across runs', () => {

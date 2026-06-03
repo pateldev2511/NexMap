@@ -13,7 +13,9 @@ import type {
   NexMapDocument,
   ProjectMeta,
   ShapeObject,
+  Subnet,
   TextObject,
+  Vlan,
 } from './types';
 
 /** Bump when the on-disk shape changes; add a migration in migrate.ts. */
@@ -135,6 +137,14 @@ export function createImageObject(
   partial: Partial<ImageObject> = {},
 ): ImageObject {
   return { id: nanoid(), kind: 'image', x, y, width, height, layerId, href, z: -1000, ...partial };
+}
+
+export function createVlan(vlanId: number, name: string, partial: Partial<Vlan> = {}): Vlan {
+  return { id: nanoid(), vlanId, name, ...partial };
+}
+
+export function createSubnet(cidr: string, partial: Partial<Subnet> = {}): Subnet {
+  return { id: nanoid(), cidr, ...partial };
 }
 
 export function isCanvasObject(v: unknown): v is CanvasObject {

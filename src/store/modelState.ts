@@ -16,6 +16,8 @@ import type {
   Link,
   NexMapDocument,
   ProjectMeta,
+  Subnet,
+  Vlan,
 } from '@/model/types';
 
 export interface ModelState {
@@ -25,6 +27,8 @@ export interface ModelState {
   links: Map<string, Link>;
   /** Text notes + shapes/zones, keyed by id. */
   objects: Map<string, CanvasObject>;
+  vlans: Map<string, Vlan>;
+  subnets: Map<string, Subnet>;
   /** deviceId → set of link IDs touching it. */
   adjacency: Map<string, Set<string>>;
 }
@@ -40,6 +44,8 @@ export function fromDocument(doc: NexMapDocument): ModelState {
     devices: new Map(),
     links: new Map(),
     objects: new Map(),
+    vlans: new Map((doc.vlans ?? []).map((v) => [v.id, v])),
+    subnets: new Map((doc.subnets ?? []).map((s) => [s.id, s])),
     adjacency: new Map(),
   };
   for (const d of doc.devices) addDevice(state, d);
@@ -57,6 +63,8 @@ export function toDocument(state: ModelState, base: NexMapDocument): NexMapDocum
     devices: [...state.devices.values()],
     links: [...state.links.values()],
     objects: [...state.objects.values()],
+    vlans: [...state.vlans.values()],
+    subnets: [...state.subnets.values()],
   };
 }
 

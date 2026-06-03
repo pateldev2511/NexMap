@@ -7,8 +7,8 @@
  * Pure: takes devices + links, returns issues. The store runs this debounced in
  * M5; here it's just a function so it's trivially testable and worker-portable.
  */
-import { isValidIpv4, isValidIpv6, parseCidr, stripPrefix } from '@/lib/ipcidr';
-import type { Device, Link, ValidationIssue } from './types';
+import { cidrsOverlap, ipInCidr, isValidIpv4, isValidIpv6, parseCidr, stripPrefix } from '@/lib/ipcidr';
+import type { Device, Link, Subnet, ValidationIssue, Vlan } from './types';
 
 let counter = 0;
 function issueId(): string {
@@ -24,6 +24,8 @@ export function resetIssueIds(): void {
 export interface ValidationInput {
   devices: Device[];
   links: Link[];
+  vlans?: Vlan[];
+  subnets?: Subnet[];
 }
 
 /** Rule: a device must have a non-empty name. */
@@ -147,12 +149,119 @@ function checkMissingEndpoints(devices: Device[], links: Link[]): ValidationIssu
   return issues;
 }
 
-/** Run all MVP validations. Deterministic order: errors-worthy checks first. */
-export function validate({ devices, links }: ValidationInput): ValidationIssue[] {
+/** Rule: VLAN IDs must be unique. */
+function checkDuplicateVlans(vlans: Vlan[]): ValidationIssue[] {
+  const byId = new Map<number, string[]>();
+  for (const v of vlans) {
+    const list = byId.get(v.vlanId) ?? [];
+    list.push(v.id);
+    byId.set(v.vlanId, list);
+  }
+  const issues: ValidationIssue[] = [];
+  for (const [vid, ids] of byId) {
+    if (ids.length > 1) {
+      issues.push({
+        id: issueId(),
+        severity: 'error',
+        code: 'duplicate-vlan',
+        message: `VLAN ID ${vid} is defined ${ids.length} times.`,
+        objectIds: ids,
+      });
+    }
+  }
+  return issues;
+}
+
+/** Rule: VLAN IDs must be within 1–4094. */
+function checkVlanRange(vlans: Vlan[]): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  for (const v of vlans) {
+    if (!Number.isInteger(v.vlanId) || v.vlanId < 1 || v.vlanId > 4094) {
+      issues.push({
+        id: issueId(),
+        severity: 'error',
+        code: 'invalid-vlan-range',
+        message: `VLAN ID ${v.vlanId} is outside the valid range (1–4094).`,
+        objectIds: [v.id],
+      });
+    }
+  }
+  return issues;
+}
+
+/** Rule: subnet CIDRs must be valid and not overlap. */
+function checkSubnets(subnets: Subnet[]): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  for (const s of subnets) {
+    if (!parseCidr(s.cidr)) {
+      issues.push({
+        id: issueId(),
+        severity: 'error',
+        code: 'invalid-subnet-cidr',
+        message: `"${s.cidr}" is not a valid subnet CIDR.`,
+        objectIds: [s.id],
+      });
+    } else if (!s.gateway?.trim()) {
+      issues.push({
+        id: issueId(),
+        severity: 'warn',
+        code: 'subnet-no-gateway',
+        message: `Subnet ${s.cidr} has no gateway.`,
+        objectIds: [s.id],
+      });
+    }
+  }
+  // Pairwise overlap.
+  for (let i = 0; i < subnets.length; i++) {
+    for (let j = i + 1; j < subnets.length; j++) {
+      const a = subnets[i]!;
+      const b = subnets[j]!;
+      if (parseCidr(a.cidr) && parseCidr(b.cidr) && cidrsOverlap(a.cidr, b.cidr)) {
+        issues.push({
+          id: issueId(),
+          severity: 'warn',
+          code: 'overlapping-subnet',
+          message: `Subnets ${a.cidr} and ${b.cidr} overlap.`,
+          objectIds: [a.id, b.id],
+        });
+      }
+    }
+  }
+  return issues;
+}
+
+/** Rule: a device IP should fall within one of the defined subnets. */
+function checkIpOutsideSubnet(devices: Device[], subnets: Subnet[]): ValidationIssue[] {
+  const cidrs = subnets.map((s) => s.cidr).filter((c) => parseCidr(c));
+  if (cidrs.length === 0) return [];
+  const issues: ValidationIssue[] = [];
+  for (const d of devices) {
+    if (!d.managementIp) continue;
+    const ip = stripPrefix(d.managementIp);
+    if (!isValidIpv4(ip)) continue; // IPv6/invalid handled elsewhere
+    if (!cidrs.some((c) => ipInCidr(ip, c))) {
+      issues.push({
+        id: issueId(),
+        severity: 'warn',
+        code: 'ip-outside-subnet',
+        message: `${ip} is not within any defined subnet.`,
+        objectIds: [d.id],
+      });
+    }
+  }
+  return issues;
+}
+
+/** Run all validations. Deterministic order: errors-worthy checks first. */
+export function validate({ devices, links, vlans = [], subnets = [] }: ValidationInput): ValidationIssue[] {
   return [
     ...checkDuplicateIps(devices),
     ...checkInvalidIpCidr(devices),
     ...checkMissingEndpoints(devices, links),
+    ...checkDuplicateVlans(vlans),
+    ...checkVlanRange(vlans),
+    ...checkSubnets(subnets),
+    ...checkIpOutsideSubnet(devices, subnets),
     ...checkDuplicateNames(devices),
     ...checkDeviceNames(devices),
   ];

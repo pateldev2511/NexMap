@@ -16,7 +16,9 @@ import type {
   DeviceType,
   Link,
   NexMapDocument,
+  Subnet,
   ValidationIssue,
+  Vlan,
 } from '@/model/types';
 import {
   createDevice,
@@ -24,7 +26,9 @@ import {
   createLink,
   createImageObject,
   createShapeObject,
+  createSubnet,
   createTextObject,
+  createVlan,
 } from '@/model/schema';
 import { validate, resetIssueIds } from '@/model/validate';
 import { SpatialIndex, type Box } from '@/lib/spatial-index';
@@ -34,13 +38,19 @@ import {
   AddDeviceCommand,
   AddLinkCommand,
   AddObjectCommand,
+  AddSubnetCommand,
+  AddVlanCommand,
   DeleteCommand,
+  DeleteSubnetCommand,
+  DeleteVlanCommand,
   MoveDeviceCommand,
   MoveObjectCommand,
   RenameProjectCommand,
   UpdateDeviceCommand,
   UpdateLinkCommand,
   UpdateObjectCommand,
+  UpdateSubnetCommand,
+  UpdateVlanCommand,
   transaction,
   type Command,
 } from './commands';
@@ -187,6 +197,15 @@ export interface ProjectStore {
   getLink(id: string): Link | undefined;
   devicesAll(): Device[];
   linksAll(): Link[];
+  // VLAN / subnet semantics (Phase 4).
+  addVlan(vlanId: number, name: string): string;
+  updateVlan(id: string, before: Partial<Vlan>, after: Partial<Vlan>): void;
+  deleteVlan(id: string): void;
+  vlansAll(): Vlan[];
+  addSubnet(cidr: string): string;
+  updateSubnet(id: string, before: Partial<Subnet>, after: Partial<Subnet>): void;
+  deleteSubnet(id: string): void;
+  subnetsAll(): Subnet[];
   hitTest(x: number, y: number): string[];
   queryBox(box: Box): string[];
   contentBounds(): Box;
@@ -617,6 +636,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       const issues = validate({
         devices: [...model.devices.values()],
         links: [...model.links.values()],
+        vlans: [...model.vlans.values()],
+        subnets: [...model.subnets.values()],
       });
       set({ issues });
     },
@@ -633,6 +654,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         issues: validate({
           devices: [...model.devices.values()],
           links: [...model.links.values()],
+          vlans: [...model.vlans.values()],
+          subnets: [...model.subnets.values()],
         }),
         canUndo: false,
         canRedo: false,
@@ -685,6 +708,40 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     linksAll() {
       return [...model.links.values()];
+    },
+
+    addVlan(vlanId, name) {
+      const v = createVlan(vlanId, name);
+      commit(new AddVlanCommand(v));
+      history.commitCoalesceBoundary();
+      return v.id;
+    },
+    updateVlan(id, before, after) {
+      commit(new UpdateVlanCommand(id, before, after));
+    },
+    deleteVlan(id) {
+      commit(new DeleteVlanCommand(id));
+      history.commitCoalesceBoundary();
+    },
+    vlansAll() {
+      return [...model.vlans.values()].sort((a, b) => a.vlanId - b.vlanId);
+    },
+
+    addSubnet(cidr) {
+      const s = createSubnet(cidr);
+      commit(new AddSubnetCommand(s));
+      history.commitCoalesceBoundary();
+      return s.id;
+    },
+    updateSubnet(id, before, after) {
+      commit(new UpdateSubnetCommand(id, before, after));
+    },
+    deleteSubnet(id) {
+      commit(new DeleteSubnetCommand(id));
+      history.commitCoalesceBoundary();
+    },
+    subnetsAll() {
+      return [...model.subnets.values()];
     },
 
     hitTest(x, y) {

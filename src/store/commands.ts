@@ -9,7 +9,7 @@
  * `transaction()` composes sub-commands into a single atomic history entry — the
  * basis for build-draft-then-commit import (DA-T2): the whole import is one undo.
  */
-import type { CanvasObject, Device, Link } from '@/model/types';
+import type { CanvasObject, Device, Link, Subnet, Vlan } from '@/model/types';
 import {
   addDevice,
   addLink,
@@ -241,6 +241,102 @@ export class UpdateObjectCommand implements Command {
       return new UpdateObjectCommand(this.id, this.before, next.after);
     }
     return null;
+  }
+}
+
+// --- VLAN / Subnet list-entity commands (Phase 4) ---
+
+export class AddVlanCommand implements Command {
+  readonly label = 'Add VLAN';
+  constructor(private readonly v: Vlan) {}
+  apply(s: ModelState) {
+    s.vlans.set(this.v.id, this.v);
+  }
+  undo(s: ModelState) {
+    s.vlans.delete(this.v.id);
+  }
+}
+
+export class UpdateVlanCommand implements Command {
+  readonly label = 'Edit VLAN';
+  constructor(
+    private readonly id: string,
+    private readonly before: Partial<Vlan>,
+    private readonly after: Partial<Vlan>,
+  ) {}
+  apply(s: ModelState) {
+    const v = s.vlans.get(this.id);
+    if (v) s.vlans.set(this.id, { ...v, ...this.after });
+  }
+  undo(s: ModelState) {
+    const v = s.vlans.get(this.id);
+    if (v) s.vlans.set(this.id, { ...v, ...this.before });
+  }
+  mergeWith(next: Command): Command | null {
+    if (next instanceof UpdateVlanCommand && next.id === this.id && sameKeys(this.after, next.after)) {
+      return new UpdateVlanCommand(this.id, this.before, next.after);
+    }
+    return null;
+  }
+}
+
+export class DeleteVlanCommand implements Command {
+  readonly label = 'Delete VLAN';
+  private removed?: Vlan;
+  constructor(private readonly id: string) {}
+  apply(s: ModelState) {
+    this.removed = s.vlans.get(this.id);
+    s.vlans.delete(this.id);
+  }
+  undo(s: ModelState) {
+    if (this.removed) s.vlans.set(this.id, this.removed);
+  }
+}
+
+export class AddSubnetCommand implements Command {
+  readonly label = 'Add subnet';
+  constructor(private readonly sub: Subnet) {}
+  apply(s: ModelState) {
+    s.subnets.set(this.sub.id, this.sub);
+  }
+  undo(s: ModelState) {
+    s.subnets.delete(this.sub.id);
+  }
+}
+
+export class UpdateSubnetCommand implements Command {
+  readonly label = 'Edit subnet';
+  constructor(
+    private readonly id: string,
+    private readonly before: Partial<Subnet>,
+    private readonly after: Partial<Subnet>,
+  ) {}
+  apply(s: ModelState) {
+    const sub = s.subnets.get(this.id);
+    if (sub) s.subnets.set(this.id, { ...sub, ...this.after });
+  }
+  undo(s: ModelState) {
+    const sub = s.subnets.get(this.id);
+    if (sub) s.subnets.set(this.id, { ...sub, ...this.before });
+  }
+  mergeWith(next: Command): Command | null {
+    if (next instanceof UpdateSubnetCommand && next.id === this.id && sameKeys(this.after, next.after)) {
+      return new UpdateSubnetCommand(this.id, this.before, next.after);
+    }
+    return null;
+  }
+}
+
+export class DeleteSubnetCommand implements Command {
+  readonly label = 'Delete subnet';
+  private removed?: Subnet;
+  constructor(private readonly id: string) {}
+  apply(s: ModelState) {
+    this.removed = s.subnets.get(this.id);
+    s.subnets.delete(this.id);
+  }
+  undo(s: ModelState) {
+    if (this.removed) s.subnets.set(this.id, this.removed);
   }
 }
 

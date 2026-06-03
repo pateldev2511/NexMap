@@ -102,6 +102,55 @@
   font-size: 12px;
 }
 
+.cellInput {
+  width: 100%;
+  min-width: 70px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--chrome-fg);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 4px;
+}
+
+.cellInput:hover {
+  border-color: var(--chrome-border);
+}
+
+.cellInput:focus {
+  border-color: var(--accent);
+  background: var(--canvas-bg);
+  outline: none;
+}
+
+.rowDelete {
+  background: transparent;
+  border: none;
+  color: var(--chrome-fg-muted);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.rowDelete:hover {
+  color: var(--sev-error);
+}
+
+.addRow {
+  margin: 8px 10px;
+  background: transparent;
+  border: 1px dashed var(--chrome-border);
+  color: var(--chrome-fg-muted);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 11px;
+}
+
+.addRow:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .issue {
   display: flex;
   gap: 10px;

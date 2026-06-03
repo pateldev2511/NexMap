@@ -143,6 +143,31 @@ export interface ImageObject extends BaseCanvasObject {
 
 export type CanvasObject = TextObject | ShapeObject | ImageObject;
 
+/** First-class network semantics (Phase 4). */
+export interface Vlan {
+  id: string;
+  /** 802.1Q VLAN ID (valid 1–4094). */
+  vlanId: number;
+  name: string;
+  color?: string;
+  zone?: string;
+  notes?: string;
+  extra?: ExtraFields;
+}
+
+export interface Subnet {
+  id: string;
+  /** CIDR, e.g. "10.0.0.0/24". */
+  cidr: string;
+  name?: string;
+  gateway?: string;
+  /** Associated VLAN ID (802.1Q). */
+  vlanId?: number;
+  zone?: string;
+  notes?: string;
+  extra?: ExtraFields;
+}
+
 export interface ProjectMeta {
   id: string;
   name: string;
@@ -165,11 +190,11 @@ export interface NexMapDocument {
   devices: Device[];
   links: Link[];
   objects: CanvasObject[];
-  // Forward-declared, unused in MVP — preserved verbatim on load→save.
+  vlans: Vlan[];
+  subnets: Subnet[];
+  // Forward-declared, unused yet — preserved verbatim on load→save.
   views: unknown[];
   interfaces: unknown[];
-  vlans: unknown[];
-  subnets: unknown[];
   racks: unknown[];
   assets: unknown[];
   customFields: unknown[];
