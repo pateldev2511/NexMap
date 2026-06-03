@@ -202,6 +202,41 @@ describe('layers', () => {
   });
 });
 
+describe('multi-view', () => {
+  it('captures layer visibility + camera and restores on apply', () => {
+    const base = s().layersAll()[0]!.id;
+    const overlay = s().addLayer();
+    s().reportCamera({ tx: 100, ty: 50, scale: 2 });
+    // View "All" captured with both layers visible.
+    const all = s().addView('All');
+    // Hide the overlay, capture "Base only".
+    s().setLayerVisible(overlay, false);
+    s().reportCamera({ tx: -20, ty: 0, scale: 1 });
+    const baseOnly = s().addView('Base only');
+
+    // Apply "All" → overlay visible again + its camera requested.
+    s().applyView(all);
+    expect(s().isLayerVisible(overlay)).toBe(true);
+    expect(s().cameraRequest()).toEqual({ tx: 100, ty: 50, scale: 2 });
+    expect(s().activeViewId).toBe(all);
+
+    // Apply "Base only" → overlay hidden.
+    s().applyView(baseOnly);
+    expect(s().isLayerVisible(overlay)).toBe(false);
+    expect(s().isLayerVisible(base)).toBe(true);
+  });
+
+  it('views round-trip through the document', () => {
+    s().addLayer();
+    s().addView('Snapshot');
+    const doc = s().getDocument();
+    expect(doc.views).toHaveLength(1);
+    s().loadDoc(doc);
+    expect(s().viewsAll()).toHaveLength(1);
+    expect(s().activeViewId).toBeNull();
+  });
+});
+
 describe('z-order', () => {
   it('bring to front raises z above all others', () => {
     const a = s().addDeviceAt('router', 0, 0);

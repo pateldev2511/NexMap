@@ -174,6 +174,15 @@ export interface Subnet {
   extra?: ExtraFields;
 }
 
+/** A saved perspective (Phase 5 multi-view): which layers show + the camera. */
+export interface View {
+  id: string;
+  name: string;
+  /** Layer IDs hidden in this view. */
+  hiddenLayers: string[];
+  camera?: { tx: number; ty: number; scale: number };
+}
+
 export interface Rack {
   id: string;
   name: string;
@@ -209,8 +218,8 @@ export interface NexMapDocument {
   vlans: Vlan[];
   subnets: Subnet[];
   racks: Rack[];
+  views: View[];
   // Forward-declared, unused yet — preserved verbatim on load→save.
-  views: unknown[];
   interfaces: unknown[];
   assets: unknown[];
   customFields: unknown[];

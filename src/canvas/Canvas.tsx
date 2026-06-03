@@ -81,7 +81,19 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   const focusTick = useProjectStore((s) => s.focusTick);
   const canUndo = useProjectStore((s) => s.canUndo);
   const canRedo = useProjectStore((s) => s.canRedo);
+  const cameraTick = useProjectStore((s) => s.cameraTick);
   const store = useProjectStore.getState;
+
+  // Report the camera so views can capture it; restore it when a view is applied.
+  useEffect(() => {
+    store().reportCamera(viewport);
+  }, [viewport, store]);
+  useEffect(() => {
+    if (cameraTick === 0) return;
+    const c = store().cameraRequest();
+    if (c) setViewport(c);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameraTick]);
 
   // Center on a device when jump-to-object fires (validation/inventory click).
   useEffect(() => {

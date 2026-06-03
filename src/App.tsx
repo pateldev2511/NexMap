@@ -8,6 +8,7 @@ import { RecoveryDialog } from './ui/dialogs/RecoveryDialog';
 import { ImportDialog } from './ui/dialogs/ImportDialog';
 import { ExportDialog } from './ui/dialogs/ExportDialog';
 import { ShortcutsDialog } from './ui/dialogs/ShortcutsDialog';
+import { ViewSwitcher } from './ui/ViewSwitcher';
 import { ReadOnlyBanner, ErrorToast } from './ui/dialogs/ReadOnlyBanner';
 import { Canvas } from './canvas/Canvas';
 import { PerfHarness } from './perf/PerfHarness';
@@ -147,6 +148,7 @@ export function App() {
       <button className={shell.topbarBtn} onClick={() => setPresentation(true)} title="Presentation mode">
         Present
       </button>
+      <ViewSwitcher />
       <button className={shell.topbarBtn} onClick={doUndo} disabled={!canUndo} title="Undo (Ctrl+Z)">
         ↶
       </button>

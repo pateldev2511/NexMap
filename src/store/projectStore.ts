@@ -20,6 +20,7 @@ import type {
   Rack,
   Subnet,
   ValidationIssue,
+  View,
   Vlan,
 } from '@/model/types';
 import {
@@ -32,6 +33,7 @@ import {
   createShapeObject,
   createSubnet,
   createTextObject,
+  createView,
   createVlan,
 } from '@/model/schema';
 import { validate, resetIssueIds } from '@/model/validate';
@@ -81,6 +83,10 @@ let dragOrigins: Map<string, { x: number; y: number }> | null = null;
 /** Clipboard of copied device snapshots (Phase 1). Module-scoped, session-only. */
 let clipboard: Device[] = [];
 let pasteOffset = 0;
+/** Latest canvas camera, reported by the renderer (module-scoped to avoid re-render loops). */
+let currentCamera = { tx: 0, ty: 0, scale: 1 };
+/** Camera the canvas should jump to (set by applyView, read on cameraTick). */
+let pendingCamera: { tx: number; ty: number; scale: number } | null = null;
 
 function deviceBox(d: Device): Box {
   return { x: d.x, y: d.y, width: d.width, height: d.height };
@@ -131,6 +137,9 @@ export interface ProjectStore {
   mode: CanvasMode;
   projectName: string;
   activeLayerId: string;
+  activeViewId: string | null;
+  /** Bumped to ask the canvas to restore the pending camera. */
+  cameraTick: number;
   /** Bumped to ask the canvas to center on `focusTarget` (jump-to-object). */
   focusTarget: string | null;
   focusTick: number;
@@ -167,6 +176,18 @@ export interface ProjectStore {
   moveLayer(id: string, dir: -1 | 1): void;
   isLayerVisible(id: string): boolean;
   isLayerLocked(id: string): boolean;
+  // Multi-view (Phase 5).
+  viewsAll(): View[];
+  /** Renderer reports its camera so views can capture it. */
+  reportCamera(c: { tx: number; ty: number; scale: number }): void;
+  /** Camera the canvas should restore (consumed on cameraTick). */
+  cameraRequest(): { tx: number; ty: number; scale: number } | null;
+  /** Save the current layer-visibility + camera as a named view. */
+  addView(name: string): string;
+  renameView(id: string, name: string): void;
+  deleteView(id: string): void;
+  /** Apply a view: set layer visibility + request its camera. */
+  applyView(id: string): void;
   updateDevice(id: string, before: Partial<Device>, after: Partial<Device>): void;
   updateLink(id: string, before: Partial<Link>, after: Partial<Link>): void;
   renameProject(before: string, after: string): void;
@@ -265,6 +286,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     mode: 'select',
     projectName: model.project.name,
     activeLayerId: firstLayerId(),
+    activeViewId: null,
+    cameraTick: 0,
     focusTarget: null,
     focusTick: 0,
 
@@ -481,6 +504,50 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     isLayerLocked(id) {
       return model.layers.get(id)?.locked ?? false;
+    },
+
+    viewsAll() {
+      return [...model.views.values()];
+    },
+
+    reportCamera(c) {
+      currentCamera = c;
+    },
+
+    cameraRequest() {
+      return pendingCamera;
+    },
+
+    addView(name) {
+      const hiddenLayers = [...model.layers.values()].filter((l) => !l.visible).map((l) => l.id);
+      const view = createView(name, { hiddenLayers, camera: { ...currentCamera } });
+      model.views.set(view.id, view);
+      set({ rev: get().rev + 1, dirty: true, activeViewId: view.id });
+      return view.id;
+    },
+
+    renameView(id, name) {
+      const v = model.views.get(id);
+      if (v) {
+        model.views.set(id, { ...v, name });
+        set({ rev: get().rev + 1, dirty: true });
+      }
+    },
+
+    deleteView(id) {
+      model.views.delete(id);
+      set({ rev: get().rev + 1, dirty: true, activeViewId: get().activeViewId === id ? null : get().activeViewId });
+    },
+
+    applyView(id) {
+      const v = model.views.get(id);
+      if (!v) return;
+      const hidden = new Set(v.hiddenLayers);
+      for (const l of model.layers.values()) {
+        model.layers.set(l.id, { ...l, visible: !hidden.has(l.id) });
+      }
+      pendingCamera = v.camera ?? null;
+      set({ rev: get().rev + 1, activeViewId: id, cameraTick: get().cameraTick + 1 });
     },
 
     copySelection() {
@@ -790,6 +857,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         dirty: false,
         projectName: doc.project.name,
         activeLayerId: model.layers.keys().next().value ?? 'default',
+        activeViewId: null,
       });
     },
 

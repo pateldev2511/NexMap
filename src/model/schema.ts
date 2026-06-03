@@ -16,6 +16,7 @@ import type {
   ShapeObject,
   Subnet,
   TextObject,
+  View,
   Vlan,
 } from './types';
 
@@ -150,6 +151,10 @@ export function createSubnet(cidr: string, partial: Partial<Subnet> = {}): Subne
 
 export function createRack(name: string, ruHeight = 42, partial: Partial<Rack> = {}): Rack {
   return { id: nanoid(), name, ruHeight, ...partial };
+}
+
+export function createView(name: string, partial: Partial<View> = {}): View {
+  return { id: nanoid(), name, hiddenLayers: [], ...partial };
 }
 
 export function isCanvasObject(v: unknown): v is CanvasObject {

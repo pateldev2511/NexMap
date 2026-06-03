@@ -96,14 +96,15 @@ import, export, shortcuts.
   dedicated zones/sites entities (zone fields exist), cloud networks (→ Phase 6),
   link bandwidth mismatch, rack elevation view (→ Phase 6).
 
-## Phase 5 — Views, Layers & Presentation
-- Layer management: visible/hidden, locked/unlocked, reorder, rename, delete confirm,
-  export selected layers.
-- Multi-view projects: overview, physical, logical, rack, site, security zones,
-  cloud, IP plan.
-- Presentation/read-only mode; page boundaries for print/PDF handoff.
-- Edge cases: object in multiple views, hidden validation issues, deleting a layer
-  with objects, exporting empty views, stale view refs.
+## Phase 5 — Views, Layers & Presentation  ✅ COMPLETE
+- [x] Layer management: visible/hidden, locked/unlocked, reorder, rename, delete-with-
+  reassign; active layer; Layers panel
+- [x] Multi-view projects: user-defined saved views (layer visibility + camera),
+  view switcher, round-trip
+- [x] Presentation/read-only mode (chrome hidden, pan/zoom only, Esc exit)
+- [x] Page boundaries (A4-landscape printable overlay)
+- Deferred (low priority): preset view types (overview/physical/logical/...) as
+  auto-generated semantic filters; per-view export scope.
 
 ## Phase 6 — Rack, Cloud & Discovery
 - Rack elevation mode: RU placement, front/rear, patch panels, UPS, cable tracing,
