@@ -6,6 +6,7 @@ import { BottomPanel } from './ui/BottomPanel/BottomPanel';
 import { FirstRun } from './ui/firstrun/FirstRun';
 import { RecoveryDialog } from './ui/dialogs/RecoveryDialog';
 import { ImportDialog } from './ui/dialogs/ImportDialog';
+import { ExportDialog } from './ui/dialogs/ExportDialog';
 import { ReadOnlyBanner, ErrorToast } from './ui/dialogs/ReadOnlyBanner';
 import { Canvas } from './canvas/Canvas';
 import { PerfHarness } from './perf/PerfHarness';
@@ -68,6 +69,7 @@ export function App() {
   const [view, setView] = useState<'editor' | 'perf'>('editor');
   const [firstRunDone, setFirstRunDone] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const canUndo = useProjectStore((s) => s.canUndo);
   const canRedo = useProjectStore((s) => s.canRedo);
   const undo = useProjectStore((s) => s.undo);
@@ -127,6 +129,9 @@ export function App() {
       <button className={shell.topbarBtn} onClick={() => setImporting(true)} title="Import CSV">
         Import
       </button>
+      <button className={shell.topbarBtn} onClick={() => setExporting(true)} title="Export (Ctrl+E)">
+        Export
+      </button>
       <button className={shell.topbarBtn} onClick={doUndo} disabled={!canUndo} title="Undo (Ctrl+Z)">
         ↶
       </button>
@@ -159,6 +164,9 @@ export function App() {
       } else if (k === 'o') {
         e.preventDefault();
         void handleOpen();
+      } else if (k === 'e') {
+        e.preventDefault();
+        setExporting(true);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -207,6 +215,7 @@ export function App() {
           )}
           {persistence.error && <ErrorToast message={persistence.error} />}
           {importing && <ImportDialog onClose={() => setImporting(false)} />}
+          {exporting && <ExportDialog onClose={() => setExporting(false)} />}
           <input
             ref={fileInputRef}
             type="file"

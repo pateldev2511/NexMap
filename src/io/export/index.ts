@@ -1,0 +1,94 @@
+/**
+ * Export orchestrator: format → build-from-model → download. One entry point so
+ * the dialog stays declarative and the build/download wiring lives in one place.
+ */
+import type { Device, Link } from '@/model/types';
+import { buildSvg } from './buildSvg';
+import { rasterize, downloadBlob } from './raster';
+import { buildPdfBlob, type PageSize } from './pdf';
+import { exportInventoryCsv, exportLinksCsv } from './csvExport';
+
+export type ExportFormat = 'png' | 'jpg' | 'svg' | 'pdf' | 'csv-inventory' | 'csv-links';
+
+export interface ExportScene {
+  devices: Device[];
+  links: Link[];
+  projectName: string;
+}
+
+export interface ExportOptions {
+  format: ExportFormat;
+  scale: number;
+  background: string | null; // null = transparent (png/svg)
+  includeLabels: boolean;
+  quality: number; // jpg
+  pageSize: PageSize;
+  orientation: 'portrait' | 'landscape';
+  fileName: string;
+}
+
+function safeName(name: string, ext: string): string {
+  const base = name.trim().replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80) || 'nexmap';
+  return base.endsWith(`.${ext}`) ? base : `${base}.${ext}`;
+}
+
+export interface ExportOutcome {
+  fileName: string;
+  warning?: string;
+}
+
+export async function runExport(scene: ExportScene, opts: ExportOptions): Promise<ExportOutcome> {
+  const { devices, links } = scene;
+
+  if (opts.format === 'csv-inventory') {
+    const csv = exportInventoryCsv(devices);
+    const fn = safeName(opts.fileName || `${scene.projectName}-inventory`, 'csv');
+    downloadBlob(new Blob([csv], { type: 'text/csv' }), fn);
+    return { fileName: fn };
+  }
+  if (opts.format === 'csv-links') {
+    const csv = exportLinksCsv(links, devices);
+    const fn = safeName(opts.fileName || `${scene.projectName}-links`, 'csv');
+    downloadBlob(new Blob([csv], { type: 'text/csv' }), fn);
+    return { fileName: fn };
+  }
+
+  const svg = buildSvg(devices, links, {
+    background: opts.format === 'jpg' ? (opts.background ?? '#ffffff') : opts.background,
+    includeLabels: opts.includeLabels,
+  });
+
+  if (opts.format === 'svg') {
+    const fn = safeName(opts.fileName || scene.projectName, 'svg');
+    downloadBlob(new Blob([svg], { type: 'image/svg+xml' }), fn);
+    return { fileName: fn };
+  }
+
+  if (opts.format === 'pdf') {
+    const blob = await buildPdfBlob(svg, {
+      pageSize: opts.pageSize,
+      orientation: opts.orientation,
+      scale: opts.scale,
+    });
+    const fn = safeName(opts.fileName || scene.projectName, 'pdf');
+    downloadBlob(blob, fn);
+    return { fileName: fn };
+  }
+
+  // png / jpg
+  const mime = opts.format === 'png' ? 'image/png' : 'image/jpeg';
+  const result = await rasterize(svg, {
+    scale: opts.scale,
+    mimeType: mime,
+    background: opts.format === 'jpg' ? (opts.background ?? '#ffffff') : opts.background,
+    quality: opts.quality,
+  });
+  const fn = safeName(opts.fileName || scene.projectName, opts.format);
+  downloadBlob(result.blob, fn);
+  return {
+    fileName: fn,
+    warning: result.clamped
+      ? `Diagram too large at ${opts.scale}× — exported at ${result.effectiveScale.toFixed(2)}× to fit the browser canvas limit.`
+      : undefined,
+  };
+}
