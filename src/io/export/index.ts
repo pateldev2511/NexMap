@@ -7,14 +7,24 @@ import { buildSvg } from './buildSvg';
 import { rasterize, downloadBlob } from './raster';
 import { buildPdfBlob, type PageSize } from './pdf';
 import { exportInventoryCsv, exportLinksCsv } from './csvExport';
+import { buildPackageZip } from './zip';
 
-export type ExportFormat = 'png' | 'jpg' | 'svg' | 'pdf' | 'csv-inventory' | 'csv-links';
+export type ExportFormat =
+  | 'png'
+  | 'jpg'
+  | 'svg'
+  | 'pdf'
+  | 'csv-inventory'
+  | 'csv-links'
+  | 'zip';
 
 export interface ExportScene {
   devices: Device[];
   links: Link[];
   objects: CanvasObject[];
   projectName: string;
+  /** Serialized .nexmap JSON (for the ZIP package's editable file). */
+  docJson: string;
 }
 
 export interface ExportOptions {
@@ -51,6 +61,16 @@ export async function runExport(scene: ExportScene, opts: ExportOptions): Promis
     const csv = exportLinksCsv(links, devices);
     const fn = safeName(opts.fileName || `${scene.projectName}-links`, 'csv');
     downloadBlob(new Blob([csv], { type: 'text/csv' }), fn);
+    return { fileName: fn };
+  }
+
+  if (opts.format === 'zip') {
+    const blob = await buildPackageZip(
+      { devices, links, objects: scene.objects, projectName: scene.projectName, docJson: scene.docJson },
+      opts.scale,
+    );
+    const fn = safeName(opts.fileName || `${scene.projectName}-package`, 'zip');
+    downloadBlob(blob, fn);
     return { fileName: fn };
   }
 
