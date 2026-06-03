@@ -537,14 +537,15 @@ export function Canvas() {
 
   void rev;
   const box = visibleBox(viewport, size.w, size.h);
-  const devices = size.w > 0 ? store().visibleDevices(box) : [];
+  const vis = (layerId: string) => store().isLayerVisible(layerId);
+  const devices = (size.w > 0 ? store().visibleDevices(box) : []).filter((d) => vis(d.layerId));
   // Stacking order: lower z renders first (underneath).
   devices.sort((a, b) => (a.z ?? 0) - (b.z ?? 0));
-  const allObjects = size.w > 0 ? store().objectsAll() : [];
+  const allObjects = (size.w > 0 ? store().objectsAll() : []).filter((o) => vis(o.layerId));
   const images = allObjects.filter((o) => o.kind === 'image'); // back-most underlays
   const shapes = allObjects.filter((o) => o.kind === 'shape'); // render under links
   const texts = allObjects.filter((o) => o.kind === 'text'); // render on top
-  const links = size.w > 0 ? store().visibleLinks(box) : [];
+  const links = (size.w > 0 ? store().visibleLinks(box) : []).filter((l) => vis(l.layerId));
   // Group parallel links (same device pair) so they fan out instead of overlapping.
   const linkGroups = new Map<string, string[]>();
   for (const l of links) {

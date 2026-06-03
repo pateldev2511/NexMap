@@ -1,0 +1,90 @@
+.panel {
+  border-top: 1px solid var(--chrome-border);
+  display: flex;
+  flex-direction: column;
+  max-height: 40%;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--chrome-fg-muted);
+}
+
+.add {
+  background: transparent;
+  border: none;
+  color: var(--chrome-fg-muted);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.add:hover {
+  color: var(--accent);
+}
+
+.list {
+  overflow-y: auto;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+
+.row.active {
+  background: var(--canvas-bg);
+  border-left-color: var(--accent);
+}
+
+.iconBtn {
+  background: transparent;
+  border: none;
+  color: var(--chrome-fg-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 3px;
+  line-height: 1;
+}
+
+.iconBtn:hover {
+  color: var(--chrome-fg);
+}
+
+.iconBtn.off {
+  opacity: 0.35;
+}
+
+.name {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--chrome-fg);
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.name:focus {
+  border-color: var(--accent);
+  background: var(--chrome-bg);
+  outline: none;
+}
+
+.del:hover {
+  color: var(--sev-error);
+}

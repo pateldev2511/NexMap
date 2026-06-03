@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AppShell } from './ui/shell/AppShell';
-import { Library } from './ui/LeftSidebar/Library';
+import { LeftPanel } from './ui/LeftSidebar/LeftPanel';
 import { Inspector } from './ui/Inspector/Inspector';
 import { BottomPanel } from './ui/BottomPanel/BottomPanel';
 import { FirstRun } from './ui/firstrun/FirstRun';
@@ -212,7 +212,7 @@ export function App() {
     <AppShell
       actions={actions}
       titleNode={<EditableTitle />}
-      left={<Library />}
+      left={<LeftPanel />}
       right={<Inspector />}
       canvas={
         <>

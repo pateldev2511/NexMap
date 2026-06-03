@@ -15,6 +15,7 @@ import type {
   Device,
   DeviceType,
   Link,
+  Layer,
   NexMapDocument,
   Rack,
   Subnet,
@@ -26,6 +27,7 @@ import {
   createEmptyDocument,
   createLink,
   createImageObject,
+  createLayer,
   createRack,
   createShapeObject,
   createSubnet,
@@ -128,6 +130,7 @@ export interface ProjectStore {
   dirty: boolean;
   mode: CanvasMode;
   projectName: string;
+  activeLayerId: string;
   /** Bumped to ask the canvas to center on `focusTarget` (jump-to-object). */
   focusTarget: string | null;
   focusTick: number;
@@ -151,8 +154,19 @@ export interface ProjectStore {
   importObjects(devices: Device[], links: Link[]): void;
   /** Apply imported VLANs/subnets as one atomic, undoable transaction. */
   importSemantics(subnets: Subnet[], vlans: Vlan[]): void;
-  /** Layer id new imported/created objects attach to. */
+  /** Layer id new imported/created objects attach to (the active layer). */
   defaultLayerId(): string;
+  // Layer management (Phase 5). Layer config is document state but not on the undo stack.
+  layersAll(): Layer[];
+  setActiveLayer(id: string): void;
+  addLayer(): string;
+  renameLayer(id: string, name: string): void;
+  deleteLayer(id: string): void;
+  setLayerVisible(id: string, visible: boolean): void;
+  setLayerLocked(id: string, locked: boolean): void;
+  moveLayer(id: string, dir: -1 | 1): void;
+  isLayerVisible(id: string): boolean;
+  isLayerLocked(id: string): boolean;
   updateDevice(id: string, before: Partial<Device>, after: Partial<Device>): void;
   updateLink(id: string, before: Partial<Link>, after: Partial<Link>): void;
   renameProject(before: string, after: string): void;
@@ -228,7 +242,10 @@ function snapValue(v: number, suspend: boolean): number {
 }
 
 export const useProjectStore = create<ProjectStore>((set, get) => {
+  // New objects/devices/links attach to the active layer (falling back to the first).
   function firstLayerId(): string {
+    const active = get()?.activeLayerId; // get() is undefined during store init
+    if (active && model.layers.has(active)) return active;
     return model.layers.keys().next().value ?? 'default';
   }
 
@@ -247,6 +264,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     dirty: false,
     mode: 'select',
     projectName: model.project.name,
+    activeLayerId: firstLayerId(),
     focusTarget: null,
     focusTick: 0,
 
@@ -305,7 +323,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       const origins = new Map<string, { x: number; y: number }>();
       for (const id of get().selection) {
         const m = movable(id);
-        if (m && !m.locked) origins.set(id, { x: m.x, y: m.y }); // locked entities don't move
+        // Locked entities and entities on a locked layer don't move.
+        if (m && !m.locked && !(model.layers.get(m.layerId)?.locked)) {
+          origins.set(id, { x: m.x, y: m.y });
+        }
       }
       dragOrigins = origins;
     },
@@ -386,7 +407,80 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     },
 
     defaultLayerId() {
-      return firstLayerId();
+      const active = get().activeLayerId;
+      return model.layers.has(active) ? active : firstLayerId();
+    },
+
+    layersAll() {
+      return [...model.layers.values()].sort((a, b) => a.order - b.order);
+    },
+
+    setActiveLayer(id) {
+      if (model.layers.has(id)) set({ activeLayerId: id });
+    },
+
+    addLayer() {
+      const order = Math.max(-1, ...[...model.layers.values()].map((l) => l.order)) + 1;
+      const layer = createLayer(`Layer ${model.layers.size + 1}`, order);
+      model.layers.set(layer.id, layer);
+      set({ rev: get().rev + 1, dirty: true, activeLayerId: layer.id });
+      return layer.id;
+    },
+
+    renameLayer(id, name) {
+      const l = model.layers.get(id);
+      if (l) {
+        model.layers.set(id, { ...l, name });
+        set({ rev: get().rev + 1, dirty: true });
+      }
+    },
+
+    deleteLayer(id) {
+      if (model.layers.size <= 1) return; // keep at least one layer
+      const fallback = [...model.layers.keys()].find((k) => k !== id)!;
+      // Reassign anything on this layer to the fallback.
+      for (const d of model.devices.values()) if (d.layerId === id) model.devices.set(d.id, { ...d, layerId: fallback });
+      for (const l of model.links.values()) if (l.layerId === id) model.links.set(l.id, { ...l, layerId: fallback });
+      for (const o of model.objects.values()) if (o.layerId === id) model.objects.set(o.id, { ...o, layerId: fallback } as typeof o);
+      model.layers.delete(id);
+      const active = get().activeLayerId === id ? fallback : get().activeLayerId;
+      set({ rev: get().rev + 1, dirty: true, activeLayerId: active });
+    },
+
+    setLayerVisible(id, visible) {
+      const l = model.layers.get(id);
+      if (l) {
+        model.layers.set(id, { ...l, visible });
+        set({ rev: get().rev + 1, dirty: true });
+      }
+    },
+
+    setLayerLocked(id, locked) {
+      const l = model.layers.get(id);
+      if (l) {
+        model.layers.set(id, { ...l, locked });
+        set({ rev: get().rev + 1, dirty: true });
+      }
+    },
+
+    moveLayer(id, dir) {
+      const sorted = [...model.layers.values()].sort((a, b) => a.order - b.order);
+      const i = sorted.findIndex((l) => l.id === id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= sorted.length) return;
+      const a = sorted[i]!;
+      const b = sorted[j]!;
+      model.layers.set(a.id, { ...a, order: b.order });
+      model.layers.set(b.id, { ...b, order: a.order });
+      set({ rev: get().rev + 1, dirty: true });
+    },
+
+    isLayerVisible(id) {
+      return model.layers.get(id)?.visible ?? true;
+    },
+
+    isLayerLocked(id) {
+      return model.layers.get(id)?.locked ?? false;
     },
 
     copySelection() {
@@ -548,10 +642,20 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     deleteSelection() {
       const ids = [...get().selection];
       if (ids.length === 0) return;
-      // Locked devices/objects are protected from deletion.
-      const deviceIds = ids.filter((id) => model.devices.has(id) && !model.devices.get(id)!.locked);
-      const linkIds = ids.filter((id) => model.links.has(id));
-      const objectIds = ids.filter((id) => model.objects.has(id) && !model.objects.get(id)!.locked);
+      // Locked devices/objects, and anything on a locked layer, are protected.
+      const layerLocked = (lid: string) => model.layers.get(lid)?.locked ?? false;
+      const deviceIds = ids.filter((id) => {
+        const d = model.devices.get(id);
+        return d && !d.locked && !layerLocked(d.layerId);
+      });
+      const linkIds = ids.filter((id) => {
+        const l = model.links.get(id);
+        return l && !layerLocked(l.layerId);
+      });
+      const objectIds = ids.filter((id) => {
+        const o = model.objects.get(id);
+        return o && !o.locked && !layerLocked(o.layerId);
+      });
       commit(new DeleteCommand(deviceIds, linkIds, objectIds), { reindex: true });
       history.commitCoalesceBoundary();
       set({ selection: new Set() });
@@ -685,6 +789,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         canRedo: false,
         dirty: false,
         projectName: doc.project.name,
+        activeLayerId: model.layers.keys().next().value ?? 'default',
       });
     },
 

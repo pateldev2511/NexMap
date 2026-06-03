@@ -162,6 +162,46 @@ describe('canvas objects (text + shape)', () => {
   });
 });
 
+describe('layers', () => {
+  it('adds, sets active, and routes new devices to the active layer', () => {
+    const first = s().layersAll()[0]!.id;
+    const l2 = s().addLayer();
+    expect(s().activeLayerId).toBe(l2); // add activates
+    const d = s().addDeviceAt('router', 0, 0);
+    expect(s().getDevice(d)!.layerId).toBe(l2);
+    s().setActiveLayer(first);
+    expect(s().defaultLayerId()).toBe(first);
+  });
+
+  it('hides via visibility and reports it', () => {
+    const l = s().addLayer();
+    s().setLayerVisible(l, false);
+    expect(s().isLayerVisible(l)).toBe(false);
+    s().setLayerVisible(l, true);
+    expect(s().isLayerVisible(l)).toBe(true);
+  });
+
+  it('locked layer protects its devices from delete', () => {
+    const l = s().addLayer();
+    const d = s().addDeviceAt('switch', 0, 0); // on layer l (active)
+    s().setLayerLocked(l, true);
+    s().select([d]);
+    s().deleteSelection();
+    expect(s().getDevice(d)).toBeDefined(); // protected
+  });
+
+  it('deleting a layer reassigns its devices and keeps at least one layer', () => {
+    const first = s().layersAll()[0]!.id;
+    const l = s().addLayer();
+    const d = s().addDeviceAt('server', 0, 0);
+    s().deleteLayer(l);
+    expect(s().getDevice(d)!.layerId).toBe(first); // reassigned
+    // Can't delete the last remaining layer.
+    s().deleteLayer(first);
+    expect(s().layersAll().length).toBeGreaterThanOrEqual(1);
+  });
+});
+
 describe('z-order', () => {
   it('bring to front raises z above all others', () => {
     const a = s().addDeviceAt('router', 0, 0);
