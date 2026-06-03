@@ -4,6 +4,7 @@ import { useProjectStore } from '@/store/projectStore';
 import { DeviceNode } from './DeviceNode';
 import { ObjectNode } from './ObjectNode';
 import { CanvasToolbar } from './CanvasToolbar';
+import { connectorPoints, pathD, segmentMidpoints, labelAnchor, connectorLabel } from './connector';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import {
   fitToBox,
@@ -24,7 +25,8 @@ type Gesture =
   | { kind: 'marquee'; startX: number; startY: number; additive: boolean }
   | { kind: 'lasso'; additive: boolean }
   | { kind: 'shape'; startX: number; startY: number }
-  | { kind: 'link'; sourceId: string };
+  | { kind: 'link'; sourceId: string }
+  | { kind: 'waypoint'; linkId: string; index: number; origBefore: { x: number; y: number }[] };
 
 const ZOOM_STEP = 1.0015;
 
@@ -247,6 +249,38 @@ export function Canvas() {
     return screenToCanvas(viewport, sx, sy);
   }
 
+  const onWaypointDown = useCallback(
+    (e: React.PointerEvent, linkId: string, index: number) => {
+      e.stopPropagation();
+      rootRef.current!.setPointerCapture(e.pointerId);
+      const link = store().getLink(linkId);
+      gesture.current = { kind: 'waypoint', linkId, index, origBefore: [...(link?.waypoints ?? [])] };
+    },
+    [store],
+  );
+
+  const onAddWaypoint = useCallback(
+    (e: React.PointerEvent, linkId: string, segIndex: number, point: { x: number; y: number }) => {
+      e.stopPropagation();
+      rootRef.current!.setPointerCapture(e.pointerId);
+      const before = [...(store().getLink(linkId)?.waypoints ?? [])];
+      const after = [...before];
+      after.splice(segIndex, 0, { x: point.x, y: point.y });
+      store().updateLink(linkId, { waypoints: before }, { waypoints: after });
+      gesture.current = { kind: 'waypoint', linkId, index: segIndex, origBefore: before };
+    },
+    [store],
+  );
+
+  const onRemoveWaypoint = useCallback(
+    (linkId: string, index: number) => {
+      const before = [...(store().getLink(linkId)?.waypoints ?? [])];
+      store().updateLink(linkId, { waypoints: before }, { waypoints: before.filter((_, i) => i !== index) });
+      store().endEdit();
+    },
+    [store],
+  );
+
   const onDevicePointerDown = useCallback(
     (e: React.PointerEvent, id: string) => {
       if (spaceHeld || store().mode === 'pan') return; // let the root handler pan
@@ -320,6 +354,12 @@ export function Canvas() {
         setLinkTarget(target ?? null);
         return;
       }
+      if (g.kind === 'waypoint') {
+        const wps = [...(store().getLink(g.linkId)?.waypoints ?? [])];
+        wps[g.index] = { x: canvasPt.x, y: canvasPt.y };
+        store().updateLink(g.linkId, { waypoints: g.origBefore }, { waypoints: wps });
+        return;
+      }
       if (g.kind === 'drag') {
         const dx = (sx - g.startX) / viewport.scale;
         const dy = (sy - g.startY) / viewport.scale;
@@ -353,6 +393,10 @@ export function Canvas() {
       const g = gesture.current;
       gesture.current = { kind: 'none' };
       rootRef.current?.releasePointerCapture?.(e.pointerId);
+      if (g.kind === 'waypoint') {
+        store().endEdit();
+        return;
+      }
       if (g.kind === 'drag') {
         store().endDrag();
         if (g.moved) store().runValidation();
@@ -503,6 +547,17 @@ export function Canvas() {
           >
             <circle cx={0} cy={0} r={Math.max(0.5, viewport.scale)} fill="var(--canvas-grid)" />
           </pattern>
+          <marker
+            id="nexmap-arrow"
+            viewBox="0 0 10 10"
+            refX="9"
+            refY="5"
+            markerWidth="7"
+            markerHeight="7"
+            orient="auto-start-reverse"
+          >
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--chrome-fg-muted)" />
+          </marker>
         </defs>
         <rect x={0} y={0} width="100%" height="100%" fill="url(#nexmap-grid)" />
 
@@ -519,12 +574,12 @@ export function Canvas() {
             const a = store().getDevice(l.sourceId);
             const b = store().getDevice(l.targetId);
             if (!a || !b) return null;
-            const x1 = a.x + a.width / 2;
-            const y1 = a.y + a.height / 2;
-            const x2 = b.x + b.width / 2;
-            const y2 = b.y + b.height / 2;
-            const d = `M${x1} ${y1} L${x2} ${y2}`;
+            const pts = connectorPoints(l, a, b);
+            const d = pathD(pts);
             const sel = selection.has(l.id);
+            const label = connectorLabel(l);
+            const lblAt = label ? labelAnchor(pts) : null;
+            const arrow = l.arrow ?? 'end';
             return (
               <g key={l.id}>
                 <path
@@ -536,10 +591,63 @@ export function Canvas() {
                     store().select([l.id], e.shiftKey);
                   }}
                 />
-                <path className={`${styles.link} ${sel ? styles.selected : ''}`} d={d} />
+                <path
+                  className={`${styles.link} ${sel ? styles.selected : ''}`}
+                  d={d}
+                  strokeDasharray={l.style === 'dashed' ? '6 4' : undefined}
+                  markerEnd={arrow === 'end' || arrow === 'both' ? 'url(#nexmap-arrow)' : undefined}
+                  markerStart={arrow === 'both' ? 'url(#nexmap-arrow)' : undefined}
+                />
+                {lblAt && (
+                  <text className={styles.linkLabel} x={lblAt.x} y={lblAt.y - 4}>
+                    {label}
+                  </text>
+                )}
               </g>
             );
           })}
+
+          {/* Reroute handles for the single selected connector. */}
+          {(() => {
+            if (selection.size !== 1) return null;
+            const id = [...selection][0]!;
+            const link = store().getLink(id);
+            if (!link) return null;
+            const a = store().getDevice(link.sourceId);
+            const b = store().getDevice(link.targetId);
+            if (!a || !b) return null;
+            const pts = connectorPoints(link, a, b);
+            const wps = link.waypoints ?? [];
+            const r = 5 / viewport.scale;
+            return (
+              <g>
+                {segmentMidpoints(pts).map((m, i) => (
+                  <circle
+                    key={`add-${i}`}
+                    className={styles.addWaypoint}
+                    cx={m.x}
+                    cy={m.y}
+                    r={r}
+                    onPointerDown={(e) => onAddWaypoint(e, id, i, m)}
+                  />
+                ))}
+                {wps.map((w, i) => (
+                  <circle
+                    key={`wp-${i}`}
+                    className={styles.waypoint}
+                    cx={w.x}
+                    cy={w.y}
+                    r={r * 1.3}
+                    onPointerDown={(e) => onWaypointDown(e, id, i)}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      onRemoveWaypoint(id, i);
+                    }}
+                  />
+                ))}
+              </g>
+            );
+          })()}
 
           {/* Rubber-band while connecting. */}
           {linkSource && linkCursor && (

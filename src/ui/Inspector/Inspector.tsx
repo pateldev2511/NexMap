@@ -117,6 +117,36 @@ function LinkInspector({ link }: { link: Link }) {
         </Field>
       </div>
       <div className={styles.group}>
+        <div className={styles.groupTitle}>Connector</div>
+        <Field label="Line">
+          <select value={link.style ?? 'solid'} onChange={(e) => { set('style', e.target.value as 'solid' | 'dashed'); endEdit(); }}>
+            <option value="solid">Solid</option>
+            <option value="dashed">Dashed</option>
+          </select>
+        </Field>
+        <Field label="Arrows">
+          <select value={link.arrow ?? 'end'} onChange={(e) => { set('arrow', e.target.value as 'none' | 'end' | 'both'); endEdit(); }}>
+            <option value="none">None</option>
+            <option value="end">End</option>
+            <option value="both">Both ends</option>
+          </select>
+        </Field>
+        {(link.waypoints?.length ?? 0) > 0 && (
+          <Field label="Waypoints">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className={styles.readonly}>{link.waypoints!.length}</span>
+              <button
+                className={styles.openBtn ?? ''}
+                style={{ border: '1px solid var(--chrome-border)', background: 'transparent', color: 'var(--chrome-fg)', borderRadius: 5, padding: '3px 8px', fontSize: 11 }}
+                onClick={() => { set('waypoints', []); endEdit(); }}
+              >
+                Clear
+              </button>
+            </div>
+          </Field>
+        )}
+      </div>
+      <div className={styles.group}>
         <div className={styles.groupTitle}>Endpoints</div>
         <Field label="Source">
           <div className={styles.readonly}>{source?.name ?? '(missing)'}</div>

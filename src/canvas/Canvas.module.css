@@ -167,6 +167,36 @@
   stroke-width: 2.5;
 }
 
+.linkLabel {
+  fill: var(--chrome-fg-muted);
+  font-size: 10px;
+  font-family: var(--font-ui);
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--canvas-bg);
+  stroke-width: 3;
+  pointer-events: none;
+}
+
+.waypoint {
+  fill: var(--accent);
+  stroke: #fff;
+  stroke-width: 1.5;
+  cursor: grab;
+}
+
+.addWaypoint {
+  fill: var(--canvas-bg);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  opacity: 0.5;
+  cursor: copy;
+}
+
+.addWaypoint:hover {
+  opacity: 1;
+}
+
 .marquee {
   fill: color-mix(in srgb, var(--accent) 12%, transparent);
   stroke: var(--accent);

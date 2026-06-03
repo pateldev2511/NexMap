@@ -85,6 +85,12 @@ export interface Link {
   linkType?: string;
   bandwidth?: string;
   layerId: string;
+  /** Intermediate reroute points (canvas coords); path runs source → waypoints → target. */
+  waypoints?: { x: number; y: number }[];
+  /** Arrowhead placement. */
+  arrow?: 'none' | 'end' | 'both';
+  /** Line style. */
+  style?: 'solid' | 'dashed';
   extra?: ExtraFields;
 }
 
