@@ -9,7 +9,13 @@ import styles from './FirstRun.module.css';
  * regions greet a new user". Blank / template / open. The `.nexmap` open works
  * already because loadDocument + the migration guard exist (M1).
  */
-export function FirstRun({ onDone }: { onDone: () => void }) {
+export function FirstRun({
+  onDone,
+  onOpenText,
+}: {
+  onDone: () => void;
+  onOpenText?: (text: string) => void;
+}) {
   const loadDoc = useProjectStore((s) => s.loadDoc);
   const fileRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -22,6 +28,11 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   async function openFile(file: File) {
     setError(null);
     const text = await file.text();
+    if (onOpenText) {
+      onOpenText(text);
+      onDone();
+      return;
+    }
     const result = loadDocument(text);
     if (result.ok) {
       loadDoc(result.doc);

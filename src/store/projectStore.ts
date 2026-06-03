@@ -78,6 +78,8 @@ export interface ProjectStore {
   renameProject(before: string, after: string): void;
   setMode(mode: CanvasMode): void;
   endEdit(): void;
+  /** Mark the model as saved to a file (clears the unsaved-changes dot). */
+  markSaved(): void;
   deleteSelection(): void;
   select(ids: string[], additive?: boolean): void;
   boxSelect(box: Box, additive?: boolean): void;
@@ -205,6 +207,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       // Close the current coalescing window so the next field edit is its own undo.
       history.commitCoalesceBoundary();
       set({ canUndo: history.canUndo, canRedo: history.canRedo });
+    },
+
+    markSaved() {
+      set({ dirty: false });
     },
 
     deleteSelection() {

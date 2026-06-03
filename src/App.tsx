@@ -1,21 +1,24 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AppShell } from './ui/shell/AppShell';
 import { Library } from './ui/LeftSidebar/Library';
 import { Inspector } from './ui/Inspector/Inspector';
 import { FirstRun } from './ui/firstrun/FirstRun';
+import { RecoveryDialog } from './ui/dialogs/RecoveryDialog';
+import { ReadOnlyBanner, ErrorToast } from './ui/dialogs/ReadOnlyBanner';
 import { Canvas } from './canvas/Canvas';
 import { PerfHarness } from './perf/PerfHarness';
 import { useProjectStore } from './store/projectStore';
+import { usePersistence } from './persistence/usePersistence';
+import { canOpenPicker } from './persistence/fsaccess';
 import { severityRank } from './model/validate';
 import shell from './ui/shell/AppShell.module.css';
 
 type Theme = 'light' | 'dark';
 
 function useTheme(): [Theme, () => void] {
-  const [theme, setTheme] = useState<Theme>(() => {
-    const stored = localStorage.getItem('nexmap.theme');
-    return stored === 'dark' ? 'dark' : 'light';
-  });
+  const [theme, setTheme] = useState<Theme>(() =>
+    localStorage.getItem('nexmap.theme') === 'dark' ? 'dark' : 'light',
+  );
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem('nexmap.theme', theme);
@@ -67,6 +70,11 @@ export function App() {
   const undo = useProjectStore((s) => s.undo);
   const redo = useProjectStore((s) => s.redo);
   const runValidation = useProjectStore((s) => s.runValidation);
+  const newProject = useProjectStore((s) => s.newProject);
+  const dirty = useProjectStore((s) => s.dirty);
+
+  const persistence = usePersistence();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   function doUndo() {
     undo();
@@ -77,22 +85,42 @@ export function App() {
     runValidation();
   }
 
+  function handleNew() {
+    if (dirty && !confirm('Discard unsaved changes and start a new project?')) return;
+    newProject(new Date().toISOString());
+    setFirstRunDone(true);
+  }
+
+  async function handleOpen() {
+    if (canOpenPicker) await persistence.open();
+    else fileInputRef.current?.click();
+  }
+
   const actions = (
     <>
+      <button className={shell.topbarBtn} onClick={handleNew} title="New project (Ctrl+N)">
+        New
+      </button>
+      <button className={shell.topbarBtn} onClick={handleOpen} title="Open .nexmap (Ctrl+O)">
+        Open
+      </button>
+      <button className={shell.topbarBtn} onClick={() => persistence.save()} title="Save (Ctrl+S)">
+        Save
+      </button>
       <button className={shell.topbarBtn} onClick={doUndo} disabled={!canUndo} title="Undo (Ctrl+Z)">
-        ↶ Undo
+        ↶
       </button>
       <button className={shell.topbarBtn} onClick={doRedo} disabled={!canRedo} title="Redo">
-        ↷ Redo
+        ↷
       </button>
       <button
         className={shell.topbarBtn}
         onClick={() => setView((v) => (v === 'editor' ? 'perf' : 'editor'))}
       >
-        {view === 'editor' ? 'Perf harness' : 'Back to editor'}
+        {view === 'editor' ? 'Perf' : 'Editor'}
       </button>
       <button className={shell.topbarBtn} onClick={toggleTheme} aria-label="Toggle theme">
-        {theme === 'light' ? '☽ Dark' : '☀ Light'}
+        {theme === 'light' ? '☽' : '☀'}
       </button>
     </>
   );
@@ -100,16 +128,23 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
-      if (e.key.toLowerCase() === 'z') {
+      const k = e.key.toLowerCase();
+      if (k === 'z') {
         e.preventDefault();
         if (e.shiftKey) doRedo();
         else doUndo();
+      } else if (k === 's') {
+        e.preventDefault();
+        void persistence.save();
+      } else if (k === 'o') {
+        e.preventDefault();
+        void handleOpen();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [persistence]);
 
   if (view === 'perf') {
     return (
@@ -122,6 +157,9 @@ export function App() {
     );
   }
 
+  const showRecovery = !firstRunDone && persistence.recoverable !== null;
+  const showFirstRun = !firstRunDone && persistence.recoverable === null;
+
   return (
     <AppShell
       actions={actions}
@@ -130,17 +168,59 @@ export function App() {
       right={<Inspector />}
       canvas={
         <>
+          {persistence.readOnly && <ReadOnlyBanner />}
           <Canvas />
-          {!firstRunDone && <FirstRun onDone={() => setFirstRunDone(true)} />}
+          {showFirstRun && (
+            <FirstRun onDone={() => setFirstRunDone(true)} onOpenText={persistence.openText} />
+          )}
+          {showRecovery && persistence.recoverable && (
+            <RecoveryDialog
+              draft={persistence.recoverable}
+              onRecover={() => {
+                persistence.recover();
+                setFirstRunDone(true);
+              }}
+              onDiscard={() => {
+                persistence.discardDraft();
+              }}
+            />
+          )}
+          {persistence.error && <ErrorToast message={persistence.error} />}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".nexmap,.json,application/json"
+            style={{ display: 'none' }}
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (file) persistence.openText(await file.text());
+              e.target.value = '';
+            }}
+          />
         </>
       }
-      status={
-        <>
-          <span>Drag a device, or hover one and drag the blue handle to connect</span>
-          <span style={{ marginLeft: 'auto' }} />
-          <ValidationSummary />
-        </>
-      }
+      status={<StatusBar persistence={persistence} />}
     />
+  );
+}
+
+function StatusBar({ persistence }: { persistence: ReturnType<typeof usePersistence> }) {
+  const label =
+    persistence.status === 'saving'
+      ? 'Saving…'
+      : persistence.status === 'readonly'
+        ? 'Read-only'
+        : persistence.status === 'error'
+          ? 'Autosave failed'
+          : persistence.lastSavedAt
+            ? `Autosaved ${persistence.lastSavedAt}`
+            : 'All changes saved locally';
+  return (
+    <>
+      <span>{persistence.fileName ?? 'Not saved to a file yet'}</span>
+      <span>{label}</span>
+      <span style={{ marginLeft: 'auto' }} />
+      <ValidationSummary />
+    </>
   );
 }
