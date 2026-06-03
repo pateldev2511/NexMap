@@ -90,7 +90,10 @@ export interface ProjectStore {
   deleteSelection(): void;
   select(ids: string[], additive?: boolean): void;
   boxSelect(box: Box, additive?: boolean): void;
+  selectAll(): void;
   clearSelection(): void;
+  /** Duplicate selected devices (offset, new IDs) as one undoable entry. */
+  duplicateSelection(): void;
   /** Select an object and ask the canvas to center on it (jump-to-object). */
   focusObject(id: string): void;
   undo(): void;
@@ -264,8 +267,43 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       set({ selection: next });
     },
 
+    selectAll() {
+      set({ selection: new Set(model.devices.keys()) });
+    },
+
     clearSelection() {
       set({ selection: new Set() });
+    },
+
+    duplicateSelection() {
+      const ids = [...get().selection].filter((id) => model.devices.has(id));
+      if (ids.length === 0) return;
+      const clones = ids.map((id) => {
+        const d = model.devices.get(id)!;
+        return createDevice(d.type, d.x + 24, d.y + 24, d.layerId, {
+          name: d.name,
+          vendor: d.vendor,
+          model: d.model,
+          role: d.role,
+          location: d.location,
+          managementIp: undefined, // avoid instant duplicate-IP on copy
+          notes: d.notes,
+          fill: d.fill,
+        });
+      });
+      history.dispatch(
+        transaction('Duplicate', clones.map((c) => new AddDeviceCommand(c))),
+        model,
+      );
+      for (const c of clones) index.insert(c.id, deviceBox(c));
+      history.commitCoalesceBoundary();
+      set({
+        rev: get().rev + 1,
+        selection: new Set(clones.map((c) => c.id)),
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+      });
     },
 
     focusObject(id) {

@@ -81,6 +81,37 @@ export function Canvas() {
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (isTextTarget(e.target)) return;
+      const mod = e.metaKey || e.ctrlKey;
+
+      // Viewport + selection shortcuts (viewport lives here in the canvas).
+      if (mod && e.key === '0') {
+        e.preventDefault();
+        setViewport(fitToBox(store().contentBounds(), size.w, size.h));
+        return;
+      }
+      if (mod && (e.key === '=' || e.key === '+')) {
+        e.preventDefault();
+        setViewport((v) => zoomAt(v, 1.2, size.w / 2, size.h / 2));
+        return;
+      }
+      if (mod && e.key === '-') {
+        e.preventDefault();
+        setViewport((v) => zoomAt(v, 1 / 1.2, size.w / 2, size.h / 2));
+        return;
+      }
+      if (mod && (e.key === 'a' || e.key === 'A')) {
+        e.preventDefault();
+        store().selectAll();
+        return;
+      }
+      if (mod && (e.key === 'd' || e.key === 'D')) {
+        e.preventDefault();
+        store().duplicateSelection();
+        store().runValidation();
+        return;
+      }
+      if (mod) return; // leave other mod combos to the app-level handler
+
       if (e.code === 'Space') {
         e.preventDefault();
         setSpaceHeld(true);
@@ -110,8 +141,9 @@ export function Canvas() {
       window.removeEventListener('keydown', down);
       window.removeEventListener('keyup', up);
     };
+    // Re-bind when size changes so Cmd+0/zoom use current dimensions.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store]);
+  }, [store, size]);
 
   useEffect(() => {
     const el = rootRef.current;

@@ -7,6 +7,7 @@ import { FirstRun } from './ui/firstrun/FirstRun';
 import { RecoveryDialog } from './ui/dialogs/RecoveryDialog';
 import { ImportDialog } from './ui/dialogs/ImportDialog';
 import { ExportDialog } from './ui/dialogs/ExportDialog';
+import { ShortcutsDialog } from './ui/dialogs/ShortcutsDialog';
 import { ReadOnlyBanner, ErrorToast } from './ui/dialogs/ReadOnlyBanner';
 import { Canvas } from './canvas/Canvas';
 import { PerfHarness } from './perf/PerfHarness';
@@ -70,6 +71,7 @@ export function App() {
   const [firstRunDone, setFirstRunDone] = useState(false);
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const canUndo = useProjectStore((s) => s.canUndo);
   const canRedo = useProjectStore((s) => s.canRedo);
   const undo = useProjectStore((s) => s.undo);
@@ -147,6 +149,9 @@ export function App() {
       <button className={shell.topbarBtn} onClick={toggleTheme} aria-label="Toggle theme">
         {theme === 'light' ? '☽' : '☀'}
       </button>
+      <button className={shell.topbarBtn} onClick={() => setShowHelp(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">
+        ?
+      </button>
     </>
   );
 
@@ -169,8 +174,20 @@ export function App() {
         setExporting(true);
       }
     };
+    const onHelp = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement;
+      if (el?.tagName === 'INPUT' || el?.tagName === 'TEXTAREA') return;
+      if (e.key === '?') {
+        e.preventDefault();
+        setShowHelp(true);
+      }
+    };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onHelp);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keydown', onHelp);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [persistence]);
 
@@ -216,6 +233,7 @@ export function App() {
           {persistence.error && <ErrorToast message={persistence.error} />}
           {importing && <ImportDialog onClose={() => setImporting(false)} />}
           {exporting && <ExportDialog onClose={() => setExporting(false)} />}
+          {showHelp && <ShortcutsDialog onClose={() => setShowHelp(false)} />}
           <input
             ref={fileInputRef}
             type="file"
