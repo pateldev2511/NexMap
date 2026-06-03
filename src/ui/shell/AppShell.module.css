@@ -1,14 +1,21 @@
 /* Canvas-primary editor shell. Grid: topbar / [left | canvas | right] / statusbar. */
 .shell {
   display: grid;
-  grid-template-rows: var(--topbar-h) 1fr var(--statusbar-h);
+  grid-template-rows: var(--topbar-h) 1fr auto var(--statusbar-h);
   grid-template-columns: auto 1fr auto;
   grid-template-areas:
     'topbar topbar topbar'
     'left   canvas right'
+    'bottom bottom bottom'
     'status status status';
   height: 100%;
   width: 100%;
+}
+
+.bottom {
+  grid-area: bottom;
+  border-top: 1px solid var(--chrome-border);
+  background: var(--chrome-bg);
 }
 
 .topbar {

@@ -41,7 +41,32 @@ export function Canvas() {
   const rev = useProjectStore((s) => s.rev);
   const selection = useProjectStore((s) => s.selection);
   const mode = useProjectStore((s) => s.mode);
+  const issues = useProjectStore((s) => s.issues);
+  const focusTick = useProjectStore((s) => s.focusTick);
   const store = useProjectStore.getState;
+
+  // Center on a device when jump-to-object fires (validation/inventory click).
+  useEffect(() => {
+    if (focusTick === 0) return;
+    const id = store().focusTarget;
+    const d = id ? store().getDevice(id) : undefined;
+    if (!d || size.w === 0) return;
+    setViewport((v) => {
+      const scale = Math.max(v.scale, 0.75);
+      const cx = d.x + d.width / 2;
+      const cy = d.y + d.height / 2;
+      return { scale, tx: size.w / 2 - cx * scale, ty: size.h / 2 - cy * scale };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusTick]);
+
+  // Object IDs carrying an error/critical issue → canvas badge.
+  const errorIds = new Set<string>();
+  for (const i of issues) {
+    if (i.severity === 'error' || i.severity === 'critical') {
+      for (const id of i.objectIds) errorIds.add(id);
+    }
+  }
 
   useLayoutEffect(() => {
     const el = rootRef.current;
@@ -357,6 +382,7 @@ export function Canvas() {
               selected={selection.has(dev.id)}
               scale={viewport.scale}
               validTarget={linkTarget === dev.id}
+              hasIssue={errorIds.has(dev.id)}
               onPointerDown={onDevicePointerDown}
             />
           ))}

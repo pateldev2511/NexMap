@@ -10,6 +10,8 @@ interface DeviceNodeProps {
   scale: number;
   /** Highlighted as a valid drop target while connecting. */
   validTarget?: boolean;
+  /** Carries an error/critical validation issue → badge. */
+  hasIssue?: boolean;
   onPointerDown: (e: React.PointerEvent, id: string) => void;
 }
 
@@ -23,6 +25,7 @@ function DeviceNodeImpl({
   selected,
   scale,
   validTarget,
+  hasIssue,
   onPointerDown,
 }: DeviceNodeProps) {
   const visual = deviceVisual(device.type);
@@ -50,6 +53,13 @@ function DeviceNodeImpl({
         <text className={styles.label} x={width / 2} y={height + 4}>
           {device.name}
         </text>
+      )}
+      {/* Validation badge — color + glyph (non-color indicator, DA-DES-6.2). */}
+      {hasIssue && detailed && (
+        <g className={styles.issueBadge} transform={`translate(${width - 6} -6)`}>
+          <circle r={7} />
+          <text y={0.5}>!</text>
+        </g>
       )}
     </g>
   );

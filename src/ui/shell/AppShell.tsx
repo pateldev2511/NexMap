@@ -10,6 +10,8 @@ interface AppShellProps {
   right?: ReactNode;
   /** Top bar trailing actions (e.g. theme toggle, perf-harness link). */
   actions?: ReactNode;
+  /** Collapsible bottom data panel (inventory, links, validation). */
+  bottom?: ReactNode;
   /** Status bar content (zoom, autosave, validation summary). */
   status?: ReactNode;
   projectName?: string;
@@ -27,6 +29,7 @@ export function AppShell({
   left,
   right,
   actions,
+  bottom,
   status,
   projectName = 'Untitled NexMap Project',
   titleNode,
@@ -53,6 +56,8 @@ export function AppShell({
       <aside className={styles.right} aria-label="Properties inspector">
         {right ?? <div className={styles.panelHeader}>Inspector</div>}
       </aside>
+
+      {bottom && <div className={styles.bottom}>{bottom}</div>}
 
       <footer className={styles.status}>{status}</footer>
     </div>

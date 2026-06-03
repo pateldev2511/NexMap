@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AppShell } from './ui/shell/AppShell';
 import { Library } from './ui/LeftSidebar/Library';
 import { Inspector } from './ui/Inspector/Inspector';
+import { BottomPanel } from './ui/BottomPanel/BottomPanel';
 import { FirstRun } from './ui/firstrun/FirstRun';
 import { RecoveryDialog } from './ui/dialogs/RecoveryDialog';
 import { ReadOnlyBanner, ErrorToast } from './ui/dialogs/ReadOnlyBanner';
@@ -75,6 +76,20 @@ export function App() {
 
   const persistence = usePersistence();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Live validation: re-run debounced on any model change (the wedge — DA-DES-2.5).
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const unsub = useProjectStore.subscribe((s, prev) => {
+      if (s.rev === prev.rev) return;
+      clearTimeout(t);
+      t = setTimeout(() => useProjectStore.getState().runValidation(), 300);
+    });
+    return () => {
+      unsub();
+      clearTimeout(t);
+    };
+  }, []);
 
   function doUndo() {
     undo();
@@ -199,6 +214,7 @@ export function App() {
           />
         </>
       }
+      bottom={<BottomPanel />}
       status={<StatusBar persistence={persistence} />}
     />
   );

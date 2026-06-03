@@ -63,6 +63,9 @@ export interface ProjectStore {
   dirty: boolean;
   mode: CanvasMode;
   projectName: string;
+  /** Bumped to ask the canvas to center on `focusTarget` (jump-to-object). */
+  focusTarget: string | null;
+  focusTick: number;
 
   // --- actions (the only writers) ---
   addDeviceAt(type: DeviceType, x: number, y: number): string;
@@ -84,6 +87,8 @@ export interface ProjectStore {
   select(ids: string[], additive?: boolean): void;
   boxSelect(box: Box, additive?: boolean): void;
   clearSelection(): void;
+  /** Select an object and ask the canvas to center on it (jump-to-object). */
+  focusObject(id: string): void;
   undo(): void;
   redo(): void;
   runValidation(): void;
@@ -96,6 +101,8 @@ export interface ProjectStore {
   visibleLinks(viewport: Box): Link[];
   getDevice(id: string): Device | undefined;
   getLink(id: string): Link | undefined;
+  devicesAll(): Device[];
+  linksAll(): Link[];
   hitTest(x: number, y: number): string[];
   queryBox(box: Box): string[];
   contentBounds(): Box;
@@ -126,6 +133,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     dirty: false,
     mode: 'select',
     projectName: model.project.name,
+    focusTarget: null,
+    focusTick: 0,
 
     addDeviceAt(type, x, y) {
       const device = createDevice(type, x, y, firstLayerId());
@@ -239,6 +248,13 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       set({ selection: new Set() });
     },
 
+    focusObject(id) {
+      // For a link, focus its source device (links have no box of their own).
+      const link = model.links.get(id);
+      const targetId = link ? link.sourceId : id;
+      set({ selection: new Set([id]), focusTarget: targetId, focusTick: get().focusTick + 1 });
+    },
+
     undo() {
       if (history.undo(model)) {
         rebuildIndex();
@@ -330,6 +346,14 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     getLink(id) {
       return model.links.get(id);
+    },
+
+    devicesAll() {
+      return [...model.devices.values()];
+    },
+
+    linksAll() {
+      return [...model.links.values()];
     },
 
     hitTest(x, y) {

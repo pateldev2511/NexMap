@@ -1,0 +1,146 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.tabs {
+  display: flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 8px;
+  gap: 2px;
+}
+
+.tab {
+  background: transparent;
+  border: none;
+  color: var(--chrome-fg-muted);
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tab:hover {
+  background: var(--canvas-bg);
+}
+
+.tab.active {
+  color: var(--chrome-fg);
+  background: var(--canvas-bg);
+  font-weight: 600;
+}
+
+.count {
+  font-size: 10px;
+  background: var(--chrome-border);
+  color: var(--chrome-fg);
+  border-radius: 8px;
+  padding: 0 5px;
+  min-width: 16px;
+  text-align: center;
+}
+
+.count.err {
+  background: var(--sev-error);
+  color: #fff;
+}
+
+.collapseBtn {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--chrome-fg-muted);
+  font-size: 14px;
+  padding: 2px 8px;
+}
+
+.body {
+  height: 220px;
+  overflow: auto;
+  border-top: 1px solid var(--chrome-border);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.table th {
+  position: sticky;
+  top: 0;
+  background: var(--chrome-bg);
+  text-align: left;
+  color: var(--chrome-fg-muted);
+  font-weight: 600;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--chrome-border);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--chrome-border);
+  white-space: nowrap;
+}
+
+.row {
+  cursor: pointer;
+}
+
+.row:hover td {
+  background: var(--canvas-bg);
+}
+
+.empty {
+  color: var(--chrome-fg-muted);
+  padding: 20px;
+  text-align: center;
+  font-size: 12px;
+}
+
+.issue {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--chrome-border);
+  cursor: pointer;
+}
+
+.issue:hover {
+  background: var(--canvas-bg);
+}
+
+.sev {
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: #fff;
+  flex: none;
+}
+
+.sevError {
+  background: var(--sev-error);
+}
+.sevWarn {
+  background: var(--sev-warn);
+}
+.sevInfo {
+  background: var(--sev-info);
+}
+
+.issueMsg {
+  color: var(--chrome-fg);
+}
+
+.cleanState {
+  color: var(--sev-info);
+  padding: 20px;
+  text-align: center;
+  font-size: 12px;
+}

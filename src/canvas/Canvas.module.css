@@ -84,6 +84,21 @@
   pointer-events: none;
 }
 
+.issueBadge circle {
+  fill: var(--sev-error);
+  stroke: #fff;
+  stroke-width: 1;
+}
+
+.issueBadge text {
+  fill: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+}
+
 .link {
   stroke: var(--chrome-fg-muted);
   stroke-width: 1.5;
