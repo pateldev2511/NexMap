@@ -56,6 +56,27 @@ function rebuildIndex(): void {
   for (const d of model.devices.values()) index.insert(d.id, deviceBox(d));
 }
 
+/** Shared z-order transaction: compute new z per selected device, commit as one entry. */
+function applyZ(
+  get: () => ProjectStore,
+  set: (partial: Partial<ProjectStore>) => void,
+  hist: History,
+  mdl: ModelState,
+  compute: (sel: Device[], allZ: number[]) => { id: string; z: number }[],
+): void {
+  const sel = [...get().selection]
+    .map((id) => mdl.devices.get(id))
+    .filter((d): d is Device => d !== undefined);
+  if (sel.length === 0) return;
+  const allZ = [...mdl.devices.values()].map((d) => d.z ?? 0);
+  const cmds = compute(sel, allZ).map(
+    (u) => new UpdateDeviceCommand(u.id, { z: mdl.devices.get(u.id)!.z }, { z: u.z }),
+  );
+  hist.dispatch(transaction('Reorder', cmds), mdl);
+  hist.commitCoalesceBoundary();
+  set({ rev: get().rev + 1, canUndo: hist.canUndo, canRedo: hist.canRedo, dirty: true });
+}
+
 export interface ProjectStore {
   /** Bumps on every model change — subscribe to trigger renders. */
   rev: number;
@@ -105,6 +126,17 @@ export interface ProjectStore {
   toggleLockSelection(): void;
   /** Move unlocked selected devices by a delta as one undoable entry. */
   nudgeSelection(dx: number, dy: number): void;
+  /** Group selected devices so they select/move together. */
+  groupSelection(): void;
+  /** Clear the group of selected devices. */
+  ungroupSelection(): void;
+  /** All device IDs in the same group as `id` (or just `id` if ungrouped). */
+  groupMembers(id: string): string[];
+  /** Z-order operations on the current selection. */
+  bringToFront(): void;
+  sendToBack(): void;
+  bringForward(): void;
+  sendBackward(): void;
   /** Select an object and ask the canvas to center on it (jump-to-object). */
   focusObject(id: string): void;
   undo(): void;
@@ -301,6 +333,57 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         index.update(id, deviceBox(d));
       }
       set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
+    },
+
+    groupSelection() {
+      const ids = [...get().selection].filter((id) => model.devices.has(id));
+      if (ids.length < 2) return;
+      const gid = nanoid();
+      const cmds = ids.map(
+        (id) => new UpdateDeviceCommand(id, { groupId: model.devices.get(id)!.groupId }, { groupId: gid }),
+      );
+      history.dispatch(transaction('Group', cmds), model);
+      history.commitCoalesceBoundary();
+      set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
+    },
+
+    ungroupSelection() {
+      const ids = [...get().selection].filter((id) => model.devices.get(id)?.groupId);
+      if (ids.length === 0) return;
+      const cmds = ids.map(
+        (id) => new UpdateDeviceCommand(id, { groupId: model.devices.get(id)!.groupId }, { groupId: undefined }),
+      );
+      history.dispatch(transaction('Ungroup', cmds), model);
+      history.commitCoalesceBoundary();
+      set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
+    },
+
+    groupMembers(id) {
+      const gid = model.devices.get(id)?.groupId;
+      if (!gid) return [id];
+      const out: string[] = [];
+      for (const d of model.devices.values()) if (d.groupId === gid) out.push(d.id);
+      return out;
+    },
+
+    bringToFront() {
+      applyZ(get, set, history, model, (sel, allZ) => {
+        const top = Math.max(0, ...allZ) + 1;
+        // Preserve relative order among the selected.
+        return sel.map((d, i) => ({ id: d.id, z: top + i }));
+      });
+    },
+    sendToBack() {
+      applyZ(get, set, history, model, (sel, allZ) => {
+        const bottom = Math.min(0, ...allZ) - sel.length;
+        return sel.map((d, i) => ({ id: d.id, z: bottom + i }));
+      });
+    },
+    bringForward() {
+      applyZ(get, set, history, model, (sel) => sel.map((d) => ({ id: d.id, z: (d.z ?? 0) + 1 })));
+    },
+    sendBackward() {
+      applyZ(get, set, history, model, (sel) => sel.map((d) => ({ id: d.id, z: (d.z ?? 0) - 1 })));
     },
 
     updateDevice(id, before, after) {

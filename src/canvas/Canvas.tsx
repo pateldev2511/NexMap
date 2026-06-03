@@ -131,6 +131,22 @@ export function Canvas() {
         store().runValidation();
         return;
       }
+      if (mod && (e.key === 'g' || e.key === 'G')) {
+        e.preventDefault();
+        if (e.shiftKey) store().ungroupSelection();
+        else store().groupSelection();
+        return;
+      }
+      if (mod && e.key === ']') {
+        e.preventDefault();
+        store().bringForward();
+        return;
+      }
+      if (mod && e.key === '[') {
+        e.preventDefault();
+        store().sendBackward();
+        return;
+      }
       if (mod) return; // leave other mod combos to the app-level handler
 
       // Arrow-key nudge: 1px, or one grid step with Shift (DA-DES — keyboard move).
@@ -234,8 +250,10 @@ export function Canvas() {
       e.stopPropagation();
       (e.target as Element).setPointerCapture?.(e.pointerId);
       const s = store();
-      if (!s.selection.has(id)) s.select([id], e.shiftKey);
-      else if (e.shiftKey) s.select([id], true);
+      // Clicking a grouped device selects the whole group (Phase 1 grouping).
+      const members = s.groupMembers(id);
+      if (!s.selection.has(id)) s.select(members, e.shiftKey);
+      else if (e.shiftKey) s.select(members, true);
       s.beginDrag();
       const { sx, sy } = localPoint(e);
       gesture.current = { kind: 'drag', startX: sx, startY: sy, moved: false };
@@ -369,6 +387,10 @@ export function Canvas() {
             { label: 'Cut', shortcut: '⌘X', onClick: () => { s.cutSelection(); s.runValidation(); } },
             { label: 'Duplicate', shortcut: '⌘D', onClick: () => { s.duplicateSelection(); s.runValidation(); } },
             { label: 'Paste', shortcut: '⌘V', onClick: () => { s.paste(); s.runValidation(); }, disabled: !s.hasClipboard() },
+            { label: 'Bring to front', onClick: () => s.bringToFront(), separatorBefore: true },
+            { label: 'Send to back', onClick: () => s.sendToBack() },
+            { label: 'Group', shortcut: '⌘G', onClick: () => s.groupSelection(), separatorBefore: true, disabled: s.selection.size < 2 },
+            { label: 'Ungroup', shortcut: '⌘⇧G', onClick: () => s.ungroupSelection() },
             { label: locked ? 'Unlock' : 'Lock', onClick: () => s.toggleLockSelection(), separatorBefore: true },
             { label: 'Delete', shortcut: '⌫', onClick: () => { s.deleteSelection(); s.runValidation(); } },
           ]
@@ -385,6 +407,8 @@ export function Canvas() {
   void rev;
   const box = visibleBox(viewport, size.w, size.h);
   const devices = size.w > 0 ? store().visibleDevices(box) : [];
+  // Stacking order: lower z renders first (underneath).
+  devices.sort((a, b) => (a.z ?? 0) - (b.z ?? 0));
   const links = size.w > 0 ? store().visibleLinks(box) : [];
   const handleDevice = hoveredId ? store().getDevice(hoveredId) : undefined;
   const linkSource =

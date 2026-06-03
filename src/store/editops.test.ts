@@ -90,3 +90,54 @@ describe('nudge', () => {
     expect(s().getDevice(a)!.y).toBe(0);
   });
 });
+
+describe('grouping', () => {
+  it('groups members and resolves the whole group from any member', () => {
+    const a = s().addDeviceAt('router', 0, 0);
+    const b = s().addDeviceAt('switch', 100, 0);
+    s().select([a, b]);
+    s().groupSelection();
+    const gid = s().getDevice(a)!.groupId;
+    expect(gid).toBeTruthy();
+    expect(s().getDevice(b)!.groupId).toBe(gid);
+    expect(s().groupMembers(a).sort()).toEqual([a, b].sort());
+  });
+
+  it('ungroup clears the group; single selection does not group', () => {
+    const a = s().addDeviceAt('router', 0, 0);
+    s().select([a]);
+    s().groupSelection(); // <2 → no-op
+    expect(s().getDevice(a)!.groupId).toBeUndefined();
+    const b = s().addDeviceAt('switch', 50, 0);
+    s().select([a, b]);
+    s().groupSelection();
+    s().select([a]);
+    s().ungroupSelection();
+    expect(s().getDevice(a)!.groupId).toBeUndefined();
+  });
+});
+
+describe('z-order', () => {
+  it('bring to front raises z above all others', () => {
+    const a = s().addDeviceAt('router', 0, 0);
+    const b = s().addDeviceAt('switch', 50, 0);
+    const c = s().addDeviceAt('server', 100, 0);
+    s().select([a]);
+    s().bringToFront();
+    const za = s().getDevice(a)!.z ?? 0;
+    expect(za).toBeGreaterThan(s().getDevice(b)!.z ?? 0);
+    expect(za).toBeGreaterThan(s().getDevice(c)!.z ?? 0);
+  });
+
+  it('send to back lowers z below all others and is undoable', () => {
+    const a = s().addDeviceAt('router', 0, 0);
+    const b = s().addDeviceAt('switch', 50, 0);
+    s().select([b]);
+    s().bringToFront(); // b on top
+    s().select([a]);
+    s().sendToBack();
+    expect(s().getDevice(a)!.z ?? 0).toBeLessThan(s().getDevice(b)!.z ?? 0);
+    s().undo();
+    expect(s().getDevice(a)!.z ?? 0).toBe(0);
+  });
+});

@@ -65,6 +65,10 @@ export interface Device {
   fill?: string;
   /** Locked devices can't be moved or deleted until unlocked. */
   locked?: boolean;
+  /** Stacking order; higher renders on top. Default 0. */
+  z?: number;
+  /** Devices sharing a groupId select and move together. */
+  groupId?: string;
   extra?: ExtraFields;
 }
 
