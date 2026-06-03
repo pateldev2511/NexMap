@@ -1,0 +1,129 @@
+.root {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  touch-action: none; /* we handle pan/zoom ourselves */
+}
+
+.svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: default;
+}
+
+.svg.panning {
+  cursor: grabbing;
+}
+
+.svg.spaceReady {
+  cursor: grab;
+}
+
+.node {
+  cursor: pointer;
+}
+
+.node .body {
+  fill: var(--chrome-bg);
+  stroke: var(--chrome-border);
+  stroke-width: 1.5;
+}
+
+.node.selected .body {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.node .accent {
+  /* fill set inline per device family */
+}
+
+.node .glyph {
+  fill: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: central;
+  font-family: var(--font-ui);
+}
+
+.node .label {
+  fill: var(--chrome-fg);
+  font-size: 11px;
+  text-anchor: middle;
+  dominant-baseline: hanging;
+  font-family: var(--font-ui);
+  pointer-events: none;
+}
+
+.link {
+  stroke: var(--chrome-fg-muted);
+  stroke-width: 1.5;
+  fill: none;
+}
+
+/* Invisible fat hit-stroke so thin links are clickable (DA-DES-3.3). */
+.linkHit {
+  stroke: transparent;
+  stroke-width: 12;
+  fill: none;
+  cursor: pointer;
+}
+
+.link.selected {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.marquee {
+  fill: color-mix(in srgb, var(--accent) 12%, transparent);
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.dropHint {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+}
+
+.zoomBar {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  padding: 2px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.zoomBar button {
+  background: transparent;
+  border: none;
+  color: var(--chrome-fg);
+  border-radius: 6px;
+  padding: 4px 9px;
+  font-size: 13px;
+}
+
+.zoomBar button:hover {
+  background: var(--canvas-bg);
+}
+
+.zoomPct {
+  font-size: 11px;
+  color: var(--chrome-fg-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 42px;
+  text-align: center;
+}
+

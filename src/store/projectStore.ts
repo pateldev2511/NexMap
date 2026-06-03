@@ -21,6 +21,7 @@ import {
   DeleteCommand,
   MoveDeviceCommand,
   UpdateDeviceCommand,
+  transaction,
   type Command,
 } from './commands';
 import {
@@ -36,6 +37,8 @@ let model: ModelState = emptyModel('1970-01-01T00:00:00.000Z');
 let baseDoc: NexMapDocument = createEmptyDocument('1970-01-01T00:00:00.000Z');
 const history = new History();
 const index = new SpatialIndex();
+/** Origin positions captured at drag start (transient, not in history). */
+let dragOrigins: Map<string, { x: number; y: number }> | null = null;
 
 function deviceBox(d: Device): Box {
   return { x: d.x, y: d.y, width: d.width, height: d.height };
@@ -57,12 +60,17 @@ export interface ProjectStore {
 
   // --- actions (the only writers) ---
   addDeviceAt(type: DeviceType, x: number, y: number): string;
-  moveDevice(id: string, from: { x: number; y: number }, to: { x: number; y: number }): void;
+  /** Begin dragging the current selection — snapshots origin positions. */
+  beginDrag(): void;
+  /** Move dragged devices by a canvas-space delta (transient, no history). */
+  dragTo(dx: number, dy: number, suspendSnap: boolean): void;
+  /** Commit the drag as a single undoable entry (no-op if nothing moved). */
   endDrag(): void;
   connect(sourceId: string, targetId: string): string | null;
   updateDevice(id: string, before: Partial<Device>, after: Partial<Device>): void;
   deleteSelection(): void;
   select(ids: string[], additive?: boolean): void;
+  boxSelect(box: Box, additive?: boolean): void;
   clearSelection(): void;
   undo(): void;
   redo(): void;
@@ -76,6 +84,13 @@ export interface ProjectStore {
   visibleLinks(viewport: Box): Link[];
   getDevice(id: string): Device | undefined;
   hitTest(x: number, y: number): string[];
+  queryBox(box: Box): string[];
+  contentBounds(): Box;
+}
+
+const GRID = 16;
+function snapValue(v: number, suspend: boolean): number {
+  return suspend ? v : Math.round(v / GRID) * GRID;
 }
 
 export const useProjectStore = create<ProjectStore>((set, get) => {
@@ -106,16 +121,45 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       return device.id;
     },
 
-    moveDevice(id, from, to) {
-      history.dispatch(new MoveDeviceCommand(id, from, to), model);
-      const d = model.devices.get(id);
-      if (d) index.update(id, deviceBox(d));
+    beginDrag() {
+      const origins = new Map<string, { x: number; y: number }>();
+      for (const id of get().selection) {
+        const d = model.devices.get(id);
+        if (d) origins.set(id, { x: d.x, y: d.y });
+      }
+      dragOrigins = origins;
+    },
+
+    dragTo(dx, dy, suspendSnap) {
+      if (!dragOrigins) return;
+      for (const [id, origin] of dragOrigins) {
+        const d = model.devices.get(id);
+        if (!d) continue;
+        const x = snapValue(origin.x + dx, suspendSnap);
+        const y = snapValue(origin.y + dy, suspendSnap);
+        model.devices.set(id, { ...d, x, y });
+        index.update(id, { x, y, width: d.width, height: d.height });
+      }
       set({ rev: get().rev + 1, dirty: true });
     },
 
     endDrag() {
+      if (!dragOrigins) return;
+      // Commit the net move of each device as ONE atomic history entry.
+      const moves: Command[] = [];
+      for (const [id, origin] of dragOrigins) {
+        const d = model.devices.get(id);
+        if (!d) continue;
+        if (d.x !== origin.x || d.y !== origin.y) {
+          moves.push(new MoveDeviceCommand(id, origin, { x: d.x, y: d.y }));
+        }
+      }
+      dragOrigins = null;
+      if (moves.length === 0) return;
+      // Already applied during dragTo; record without disturbing positions.
+      history.dispatch(transaction('Move', moves), model);
       history.commitCoalesceBoundary();
-      set({ canUndo: history.canUndo, canRedo: history.canRedo });
+      set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
     },
 
     connect(sourceId, targetId) {
@@ -144,6 +188,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     select(ids, additive = false) {
       const next = additive ? new Set(get().selection) : new Set<string>();
       for (const id of ids) next.add(id);
+      set({ selection: next });
+    },
+
+    boxSelect(box, additive = false) {
+      const next = additive ? new Set(get().selection) : new Set<string>();
+      for (const id of index.query(box)) next.add(id);
       set({ selection: next });
     },
 
@@ -230,6 +280,25 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     hitTest(x, y) {
       return index.hit(x, y);
     },
+
+    queryBox(box) {
+      return index.query(box);
+    },
+
+    contentBounds() {
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const d of model.devices.values()) {
+        minX = Math.min(minX, d.x);
+        minY = Math.min(minY, d.y);
+        maxX = Math.max(maxX, d.x + d.width);
+        maxY = Math.max(maxY, d.y + d.height);
+      }
+      if (!Number.isFinite(minX)) return { x: 0, y: 0, width: 0, height: 0 };
+      return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+    },
   };
 });
 
@@ -241,4 +310,9 @@ export function __debugModelSize(): { devices: number; links: number; indexed: n
 /** Generate a stable id (re-exported so UI code doesn't import nanoid directly). */
 export function newId(): string {
   return nanoid();
+}
+
+// Dev-only handle for debugging and E2E driving. Stripped from production builds.
+if (import.meta.env.DEV) {
+  (globalThis as unknown as { __nexmap?: typeof useProjectStore }).__nexmap = useProjectStore;
 }

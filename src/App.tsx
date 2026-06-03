@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
 import { AppShell } from './ui/shell/AppShell';
+import { Library } from './ui/LeftSidebar/Library';
+import { Canvas } from './canvas/Canvas';
 import { PerfHarness } from './perf/PerfHarness';
+import { useProjectStore } from './store/projectStore';
+import { severityRank } from './model/validate';
 import shell from './ui/shell/AppShell.module.css';
 
 type Theme = 'light' | 'dark';
@@ -17,40 +21,50 @@ function useTheme(): [Theme, () => void] {
   return [theme, () => setTheme((t) => (t === 'light' ? 'dark' : 'light'))];
 }
 
-/** Empty-canvas hint (design review DA-DES-1.3). The real first-run flow lands in M3. */
-function CanvasPlaceholder() {
+/** Status-bar validation summary — a preview of the M5 wedge UI. */
+function ValidationSummary() {
+  const issues = useProjectStore((s) => s.issues);
+  if (issues.length === 0) return <span>No issues</span>;
+  const worst = issues.reduce(
+    (max, i) => (severityRank(i.severity) > severityRank(max) ? i.severity : max),
+    'info' as (typeof issues)[number]['severity'],
+  );
+  const color =
+    worst === 'error' || worst === 'critical' ? 'var(--sev-error)' : 'var(--sev-warn)';
   return (
-    <div
-      style={{
-        position: 'absolute',
-        inset: 0,
-        display: 'grid',
-        placeItems: 'center',
-        color: 'var(--chrome-fg-muted)',
-        textAlign: 'center',
-        fontSize: 13,
-        lineHeight: 1.6,
-      }}
-    >
-      <div>
-        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--chrome-fg)' }}>
-          Your canvas is empty
-        </div>
-        Drag a device from the left, or press <kbd>/</kbd> to search the library.
-        <div style={{ marginTop: 8, fontSize: 11 }}>
-          (Canvas, library, and inspector arrive in M2–M3.)
-        </div>
-      </div>
-    </div>
+    <span style={{ color }}>
+      {issues.length} issue{issues.length === 1 ? '' : 's'}
+    </span>
   );
 }
 
 export function App() {
   const [theme, toggleTheme] = useTheme();
   const [view, setView] = useState<'editor' | 'perf'>('editor');
+  const canUndo = useProjectStore((s) => s.canUndo);
+  const canRedo = useProjectStore((s) => s.canRedo);
+  const undo = useProjectStore((s) => s.undo);
+  const redo = useProjectStore((s) => s.redo);
+  const runValidation = useProjectStore((s) => s.runValidation);
+
+  // Validation re-runs after undo/redo (live-validation preview ahead of M5).
+  function doUndo() {
+    undo();
+    runValidation();
+  }
+  function doRedo() {
+    redo();
+    runValidation();
+  }
 
   const actions = (
     <>
+      <button className={shell.topbarBtn} onClick={doUndo} disabled={!canUndo} title="Undo (Ctrl+Z)">
+        ↶ Undo
+      </button>
+      <button className={shell.topbarBtn} onClick={doRedo} disabled={!canRedo} title="Redo">
+        ↷ Redo
+      </button>
       <button
         className={shell.topbarBtn}
         onClick={() => setView((v) => (v === 'editor' ? 'perf' : 'editor'))}
@@ -62,6 +76,21 @@ export function App() {
       </button>
     </>
   );
+
+  // Global undo/redo keyboard shortcuts.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) doRedo();
+        else doUndo();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (view === 'perf') {
     return (
@@ -77,12 +106,13 @@ export function App() {
   return (
     <AppShell
       actions={actions}
-      canvas={<CanvasPlaceholder />}
+      left={<Library />}
+      canvas={<Canvas />}
       status={
         <>
-          <span>100%</span>
-          <span>Saved</span>
-          <span>No issues</span>
+          <span>Drag a device from the left to start</span>
+          <span style={{ marginLeft: 'auto' }} />
+          <ValidationSummary />
         </>
       }
     />
