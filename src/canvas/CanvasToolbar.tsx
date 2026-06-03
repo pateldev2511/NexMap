@@ -31,6 +31,7 @@ export function CanvasToolbar({ mode, onMode, canUndo, canRedo, onUndo, onRedo, 
   return (
     <div className={styles.toolbar} role="toolbar" aria-label="Canvas tools">
       {tool('select', '⬚', 'V', 'Select')}
+      {tool('lasso', '◌', 'Q', 'Lasso select')}
       {tool('pan', '✋', 'H', 'Pan')}
       {tool('connect', '⤴', 'C', 'Connect')}
       <span className={styles.divider} />

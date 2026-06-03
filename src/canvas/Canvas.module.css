@@ -55,11 +55,16 @@
   fill: var(--chrome-bg);
   stroke: var(--chrome-border);
   stroke-width: 1.5;
+  filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.18));
 }
 
 .node.selected .body {
   stroke: var(--accent);
   stroke-width: 2.5;
+}
+
+.node.lassoMode {
+  cursor: crosshair;
 }
 
 .node .accent {

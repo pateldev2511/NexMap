@@ -21,6 +21,7 @@ type Gesture =
   | { kind: 'pan'; lastX: number; lastY: number }
   | { kind: 'drag'; startX: number; startY: number; moved: boolean }
   | { kind: 'marquee'; startX: number; startY: number; additive: boolean }
+  | { kind: 'lasso'; additive: boolean }
   | { kind: 'link'; sourceId: string };
 
 const ZOOM_STEP = 1.0015;
@@ -35,6 +36,7 @@ export function Canvas() {
   );
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [lassoPts, setLassoPts] = useState<{ x: number; y: number }[] | null>(null);
   const [linkCursor, setLinkCursor] = useState<{ x: number; y: number } | null>(null);
   const [linkTarget, setLinkTarget] = useState<string | null>(null);
   const gesture = useRef<Gesture>({ kind: 'none' });
@@ -170,6 +172,8 @@ export function Canvas() {
         store().runValidation();
       }
       if (e.key === 'v' || e.key === 'V') store().setMode('select');
+      if (e.key === 'q' || e.key === 'Q') store().setMode('lasso');
+      if (e.key === 'h' || e.key === 'H') store().setMode('pan');
       if (e.key === 'c' || e.key === 'C' || e.key === 'l' || e.key === 'L')
         store().setMode('connect');
       if (e.key === 'Escape') {
@@ -270,6 +274,11 @@ export function Canvas() {
         return;
       }
       if (store().mode === 'connect') return; // empty press in connect mode = noop
+      if (store().mode === 'lasso') {
+        gesture.current = { kind: 'lasso', additive: e.shiftKey };
+        setLassoPts([{ x: sx, y: sy }]);
+        return;
+      }
       if (!e.shiftKey) store().clearSelection();
       gesture.current = { kind: 'marquee', startX: sx, startY: sy, additive: e.shiftKey };
       setMarquee({ x: sx, y: sy, w: 0, h: 0 });
@@ -311,6 +320,10 @@ export function Canvas() {
         });
         return;
       }
+      if (g.kind === 'lasso') {
+        setLassoPts((pts) => (pts ? [...pts, { x: sx, y: sy }] : [{ x: sx, y: sy }]));
+        return;
+      }
       // Idle: track hovered device so the connect handle can appear.
       const hit = store().hitTest(canvasPt.x, canvasPt.y);
       const top = hit.find((id) => store().getDevice(id)) ?? null;
@@ -347,9 +360,15 @@ export function Canvas() {
           );
         }
         setMarquee(null);
+      } else if (g.kind === 'lasso') {
+        if (lassoPts && lassoPts.length >= 3) {
+          const poly = lassoPts.map((p) => screenToCanvas(viewport, p.x, p.y));
+          store().lassoSelect(poly, g.additive);
+        }
+        setLassoPts(null);
       }
     },
-    [store, marquee, viewport, linkTarget],
+    [store, marquee, viewport, linkTarget, lassoPts],
   );
 
   const onDrop = useCallback(
@@ -419,7 +438,7 @@ export function Canvas() {
       ? styles.panning
       : spaceHeld || mode === 'pan'
         ? styles.panMode
-        : mode === 'connect'
+        : mode === 'connect' || mode === 'lasso'
           ? styles.connectMode
           : ''
   }`;
@@ -525,6 +544,12 @@ export function Canvas() {
             y={marquee.y}
             width={marquee.w}
             height={marquee.h}
+          />
+        )}
+        {lassoPts && lassoPts.length > 1 && (
+          <polygon
+            className={styles.marquee}
+            points={lassoPts.map((p) => `${p.x},${p.y}`).join(' ')}
           />
         )}
       </svg>

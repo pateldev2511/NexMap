@@ -14,6 +14,7 @@ import type { Device, DeviceType, Link, NexMapDocument, ValidationIssue } from '
 import { createDevice, createEmptyDocument, createLink } from '@/model/schema';
 import { validate, resetIssueIds } from '@/model/validate';
 import { SpatialIndex, type Box } from '@/lib/spatial-index';
+import { pointInPolygon, type Point } from '@/lib/geometry';
 import { History } from './history';
 import {
   AddDeviceCommand,
@@ -27,7 +28,7 @@ import {
   type Command,
 } from './commands';
 
-export type CanvasMode = 'select' | 'pan' | 'connect';
+export type CanvasMode = 'select' | 'pan' | 'connect' | 'lasso';
 import {
   emptyModel,
   fromDocument,
@@ -114,6 +115,8 @@ export interface ProjectStore {
   deleteSelection(): void;
   select(ids: string[], additive?: boolean): void;
   boxSelect(box: Box, additive?: boolean): void;
+  /** Select devices whose center falls inside a freehand polygon (lasso). */
+  lassoSelect(points: Point[], additive?: boolean): void;
   selectAll(): void;
   clearSelection(): void;
   /** Duplicate selected devices (offset, new IDs) as one undoable entry. */
@@ -433,6 +436,14 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     boxSelect(box, additive = false) {
       const next = additive ? new Set(get().selection) : new Set<string>();
       for (const id of index.query(box)) next.add(id);
+      set({ selection: next });
+    },
+
+    lassoSelect(points, additive = false) {
+      const next = additive ? new Set(get().selection) : new Set<string>();
+      for (const d of model.devices.values()) {
+        if (pointInPolygon(d.x + d.width / 2, d.y + d.height / 2, points)) next.add(d.id);
+      }
       set({ selection: next });
     },
 
