@@ -9,6 +9,12 @@ import {
   LINK_FIELDS,
   type ImportKind,
 } from '@/io/import/csvImport';
+import {
+  parseGraphml,
+  parseDrawio,
+  parseTopologyJson,
+  type ImportResult,
+} from '@/io/import/graphImport';
 import styles from './ImportDialog.module.css';
 
 /**
@@ -25,6 +31,10 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
   const [done, setDone] = useState<{ count: number; warnings: string[]; skipped: number } | null>(
     null,
   );
+  // Parsed result for non-CSV formats (GraphML / draw.io / JSON).
+  const [graphResult, setGraphResult] = useState<{ name: string; result: ImportResult } | null>(
+    null,
+  );
   const inputRef = useRef<HTMLInputElement>(null);
 
   const fields = kind === 'devices' ? DEVICE_FIELDS : LINK_FIELDS;
@@ -32,15 +42,34 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
 
   async function onFile(file: File) {
     const raw = await file.text();
+    setDone(null);
+    setFileName(file.name);
+    const ext = file.name.toLowerCase().split('.').pop() ?? '';
+    const layer = store().defaultLayerId();
+
+    if (ext === 'graphml') {
+      setText(null);
+      setGraphResult({ name: file.name, result: parseGraphml(raw, layer) });
+      return;
+    }
+    if (ext === 'drawio' || ext === 'xml') {
+      setText(null);
+      setGraphResult({ name: file.name, result: parseDrawio(raw, layer) });
+      return;
+    }
+    if (ext === 'json') {
+      setText(null);
+      setGraphResult({ name: file.name, result: parseTopologyJson(raw, layer) });
+      return;
+    }
+    // CSV (default).
+    setGraphResult(null);
     const p = parseCsv(raw);
-    // Guess kind: source+target headers → links.
     const looksLikeLinks = autoMap(p.headers, LINK_FIELDS).source && autoMap(p.headers, LINK_FIELDS).target;
     const k: ImportKind = looksLikeLinks ? 'links' : 'devices';
     setKind(k);
     setText(raw);
-    setFileName(file.name);
     setMapping(autoMap(p.headers, k === 'devices' ? DEVICE_FIELDS : LINK_FIELDS));
-    setDone(null);
   }
 
   function reMap(k: ImportKind) {
@@ -57,34 +86,52 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [parsed, mapping, kind]);
 
-  function commit() {
-    if (!result) return;
-    store().importObjects(result.devices, result.links);
+  function commitResult(r: ImportResult) {
+    store().importObjects(r.devices, r.links);
     store().runValidation();
-    setDone({
-      count: result.devices.length + result.links.length,
-      warnings: result.warnings,
-      skipped: result.skipped,
-    });
+    setDone({ count: r.devices.length + r.links.length, warnings: r.warnings, skipped: r.skipped });
+  }
+
+  function commit() {
+    if (graphResult) return commitResult(graphResult.result);
+    if (result) commitResult(result);
   }
 
   return (
     <div className={styles.overlay} onClick={onClose}>
       <div className={styles.dialog} onClick={(e) => e.stopPropagation()}>
         <div className={styles.head}>
-          <h2>Import CSV</h2>
+          <h2>Import</h2>
           <button className={styles.close} onClick={onClose} aria-label="Close">
             ✕
           </button>
         </div>
 
         <div className={styles.body}>
-          {!text && (
+          {!text && !graphResult && !done && (
             <div className={styles.dropzone} onClick={() => inputRef.current?.click()}>
-              Choose a CSV file (devices or links).
+              Choose a file: CSV (devices/links), GraphML, draw.io XML, or topology JSON.
               <br />
-              Headers are auto-detected; you can adjust the mapping next.
+              CSV headers are auto-detected; other formats import devices + links directly.
             </div>
+          )}
+
+          {graphResult && !done && (
+            <>
+              <div className={styles.summary}>
+                <strong>{graphResult.name}</strong> — will import{' '}
+                <strong>{graphResult.result.devices.length}</strong> devices and{' '}
+                <strong>{graphResult.result.links.length}</strong> links
+                {graphResult.result.skipped > 0 && `, ${graphResult.result.skipped} skipped`}.
+              </div>
+              {graphResult.result.warnings.length > 0 && (
+                <div className={styles.warnings}>
+                  {graphResult.result.warnings.slice(0, 30).map((w, i) => (
+                    <div key={i}>⚠ {w}</div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
 
           {text && !done && parsed && (
@@ -179,7 +226,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
           <input
             ref={inputRef}
             type="file"
-            accept=".csv,text/csv"
+            accept=".csv,.graphml,.drawio,.xml,.json,text/csv,application/xml,application/json"
             style={{ display: 'none' }}
             onChange={async (e) => {
               const file = e.target.files?.[0];
@@ -198,7 +245,11 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
               </button>
               <button
                 className={`${styles.btn} ${styles.primary}`}
-                disabled={!result || result.devices.length + result.links.length === 0}
+                disabled={
+                  graphResult
+                    ? graphResult.result.devices.length + graphResult.result.links.length === 0
+                    : !result || result.devices.length + result.links.length === 0
+                }
                 onClick={commit}
               >
                 Import
