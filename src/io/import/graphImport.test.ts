@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseGraphml, parseDrawio, parseTopologyJson, parseNetboxJson, looksLikeNetbox } from './graphImport';
+import { parseGraphml, parseDrawio, parseTopologyJson, parseNetboxJson, parseNmapXml, looksLikeNetbox } from './graphImport';
 
 const L = 'layer';
 
@@ -98,5 +98,26 @@ describe('NetBox import', () => {
     expect(d.model).toBe('C9300');
     expect(d.location).toBe('HQ');
     expect(d.managementIp).toBe('10.0.0.2/24');
+  });
+});
+
+describe('parseNmapXml', () => {
+  it('imports up hosts with IP, hostname, and OS-inferred type', () => {
+    const xml = `<?xml version="1.0"?><nmaprun>
+      <host><status state="up"/><address addr="10.0.0.1" addrtype="ipv4"/>
+        <hostnames><hostname name="gw.local"/></hostnames>
+        <os><osmatch name="Cisco IOS router"/></os></host>
+      <host><status state="down"/><address addr="10.0.0.2" addrtype="ipv4"/></host>
+    </nmaprun>`;
+    const r = parseNmapXml(xml, 'L');
+    expect(r.devices).toHaveLength(1);
+    expect(r.devices[0]!.name).toBe('gw.local');
+    expect(r.devices[0]!.managementIp).toBe('10.0.0.1');
+    expect(r.devices[0]!.type).toBe('router'); // inferred from OS string
+    expect(r.skipped).toBe(1); // the down host
+  });
+
+  it('rejects non-nmap XML', () => {
+    expect(parseNmapXml('<foo/>', 'L').warnings.length).toBeGreaterThan(0);
   });
 });

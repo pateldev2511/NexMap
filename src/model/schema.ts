@@ -47,6 +47,16 @@ const TYPE_LABEL: Record<DeviceType, string> = {
   'patch-panel': 'Patch Panel',
   ups: 'UPS',
   camera: 'Camera',
+  vpc: 'VPC / VNet',
+  'cloud-subnet': 'Cloud Subnet',
+  'internet-gateway': 'Internet GW',
+  'nat-gateway': 'NAT GW',
+  'route-table': 'Route Table',
+  'security-group': 'Security Group',
+  'vpn-gateway': 'VPN GW',
+  k8s: 'Kubernetes',
+  'managed-db': 'Managed DB',
+  'object-storage': 'Object Storage',
   generic: 'Node',
 };
 

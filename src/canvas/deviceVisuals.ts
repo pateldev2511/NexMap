@@ -32,6 +32,16 @@ const VISUALS: Record<DeviceType, DeviceVisual> = {
   'patch-panel': { glyph: 'PP', accent: '#52525b' },
   ups: { glyph: 'UPS', accent: '#d97706' },
   camera: { glyph: '◉', accent: '#9333ea' },
+  vpc: { glyph: 'VPC', accent: '#0ea5e9' },
+  'cloud-subnet': { glyph: 'SUB', accent: '#38bdf8' },
+  'internet-gateway': { glyph: 'IGW', accent: '#0284c7' },
+  'nat-gateway': { glyph: 'NAT', accent: '#0369a1' },
+  'route-table': { glyph: 'RT', accent: '#6366f1' },
+  'security-group': { glyph: 'SG', accent: '#db2777' },
+  'vpn-gateway': { glyph: 'VPN', accent: '#7c3aed' },
+  k8s: { glyph: 'K8s', accent: '#326ce5' },
+  'managed-db': { glyph: 'DB', accent: '#0891b2' },
+  'object-storage': { glyph: 'OBJ', accent: '#0d9488' },
   generic: { glyph: '•', accent: '#6b7280' },
 };
 

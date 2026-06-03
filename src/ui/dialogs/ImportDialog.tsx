@@ -17,6 +17,7 @@ import {
   parseDrawio,
   parseTopologyJson,
   parseNetboxJson,
+  parseNmapXml,
   looksLikeNetbox,
   type ImportResult,
 } from '@/io/import/graphImport';
@@ -92,7 +93,9 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
     }
     if (ext === 'drawio' || ext === 'xml') {
       setText(null);
-      setGraphResult({ name: file.name, result: parseDrawio(raw, layer) });
+      // .xml may be Nmap (discovery) or draw.io (topology) — detect by content.
+      const result = /<nmaprun/.test(raw) ? parseNmapXml(raw, layer) : parseDrawio(raw, layer);
+      setGraphResult({ name: file.name, result });
       return;
     }
     if (ext === 'json') {
@@ -167,8 +170,8 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
         <div className={styles.body}>
           {!text && !graphResult && !done && (
             <div className={styles.dropzone} onClick={() => inputRef.current?.click()}>
-              Choose a file: CSV (devices/links), GraphML, draw.io XML, topology/NetBox
-              JSON, or an image/SVG to use as a background underlay.
+              Choose a file: CSV (devices/links/IP/VLANs), GraphML, draw.io XML, Nmap
+              XML, topology/NetBox JSON, or an image/SVG background underlay.
               <br />
               CSV headers are auto-detected; SVG underlays are sanitized on import.
             </div>

@@ -29,6 +29,17 @@ export type DeviceType =
   | 'patch-panel'
   | 'ups'
   | 'camera'
+  // Cloud objects (Phase 6).
+  | 'vpc'
+  | 'cloud-subnet'
+  | 'internet-gateway'
+  | 'nat-gateway'
+  | 'route-table'
+  | 'security-group'
+  | 'vpn-gateway'
+  | 'k8s'
+  | 'managed-db'
+  | 'object-storage'
   | 'generic';
 
 export type Severity = 'info' | 'warn' | 'error' | 'critical';

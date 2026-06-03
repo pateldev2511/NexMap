@@ -137,6 +137,46 @@ export function parseDrawio(text: string, layerId: string): ImportResult {
   return { devices, links, warnings, skipped };
 }
 
+/**
+ * Parse an Nmap XML scan (`nmap -oX`). Each <host> with a status="up" becomes a
+ * device: management IP from <address addr>, name from <hostname>, type inferred
+ * from the OS guess. No links (Nmap has no topology).
+ */
+export function parseNmapXml(text: string, layerId: string): ImportResult {
+  const warnings: string[] = [];
+  const doc = new DOMParser().parseFromString(text, 'application/xml');
+  if (doc.querySelector('parsererror') || !doc.querySelector('nmaprun')) {
+    return { devices: [], links: [], warnings: ['Not a valid Nmap XML scan.'], skipped: 0 };
+  }
+  const devices: Device[] = [];
+  let skipped = 0;
+  doc.querySelectorAll('host').forEach((host, i) => {
+    const state = host.querySelector('status')?.getAttribute('state');
+    if (state && state !== 'up') {
+      skipped++;
+      return;
+    }
+    const ip =
+      host.querySelector('address[addrtype="ipv4"]')?.getAttribute('addr') ??
+      host.querySelector('address[addrtype="ipv6"]')?.getAttribute('addr') ??
+      host.querySelector('address')?.getAttribute('addr') ??
+      undefined;
+    const hostname = host.querySelector('hostname')?.getAttribute('name');
+    const osName = host.querySelector('osmatch')?.getAttribute('name') ?? '';
+    const name = hostname || ip || `host-${i}`;
+    const pos = layout(devices.length);
+    devices.push(
+      createDevice(inferType(osName || name), pos.x, pos.y, layerId, {
+        name,
+        managementIp: ip,
+        notes: osName || undefined,
+      }),
+    );
+  });
+  if (devices.length === 0) warnings.push('No "up" hosts found in the scan.');
+  return { devices, links: [], warnings, skipped };
+}
+
 /** A NetBox JSON export has a `results` array of device objects. */
 export function looksLikeNetbox(text: string): boolean {
   try {

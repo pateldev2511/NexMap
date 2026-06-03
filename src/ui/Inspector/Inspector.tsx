@@ -13,7 +13,9 @@ import styles from './Inspector.module.css';
 const DEVICE_TYPES: DeviceType[] = [
   'router', 'switch', 'firewall', 'access-point', 'wireless-controller', 'server',
   'storage', 'load-balancer', 'end-user', 'printer', 'iot', 'isp', 'cloud', 'vm',
-  'container', 'rack', 'patch-panel', 'ups', 'camera', 'generic',
+  'container', 'rack', 'patch-panel', 'ups', 'camera', 'vpc', 'cloud-subnet',
+  'internet-gateway', 'nat-gateway', 'route-table', 'security-group', 'vpn-gateway',
+  'k8s', 'managed-db', 'object-storage', 'generic',
 ];
 
 function ipError(value: string | undefined): string | null {

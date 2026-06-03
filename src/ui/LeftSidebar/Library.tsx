@@ -25,6 +25,13 @@ const GROUPS: Group[] = [
   { name: 'Compute & Storage', types: ['vm', 'container', 'storage'] },
   { name: 'Endpoints', types: ['printer', 'iot', 'camera'] },
   { name: 'Physical', types: ['rack', 'patch-panel', 'ups'] },
+  {
+    name: 'Cloud',
+    types: [
+      'vpc', 'cloud-subnet', 'internet-gateway', 'nat-gateway', 'route-table',
+      'security-group', 'vpn-gateway', 'k8s', 'managed-db', 'object-storage',
+    ],
+  },
 ];
 
 function LibraryItem({ type }: { type: DeviceType }) {
