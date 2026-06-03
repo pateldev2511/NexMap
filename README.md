@@ -17,27 +17,46 @@ npm test           # unit + property tests (Vitest)
 npm run lint       # ESLint
 ```
 
-## What it does (MVP)
+## What it does
 
-- **Canvas** — drag devices from the library, connect them, pan/zoom, box-select,
-  multi-drag, snap-to-grid, fit-to-screen, level-of-detail at scale.
-- **Live validation** (the wedge) — duplicate IPs, invalid CIDR/IP, missing link
-  endpoints, duplicate names, flagged on the canvas and in the Validation panel as
-  you edit. Click an issue to jump to the object.
-- **Properties inspector** — grouped, undoable device/link fields with inline
-  validation.
-- **Local persistence** — debounced autosave to IndexedDB with crash recovery on
-  next launch; multi-tab single-writer via the Web Locks API.
-- **Files** — save/open `.nexmap` (JSON) via the File System Access API, with a
-  download/upload fallback. Newer-than-supported files are refused rather than
-  silently re-saved (no data loss).
-- **Import** — CSV device/link import with header auto-mapping, preview, warnings,
-  and transactional commit (a bad import never half-corrupts your project; Undo
-  reverts the whole thing).
-- **Export** — PNG, JPG, SVG, single-page PDF, and CSV (inventory/links), all built
-  from the model. Exported SVG/CSV are sanitized (no scripts, formula-injection
-  guarded).
-- **Undo/redo, templates, keyboard shortcuts** (press `?`), light/dark themes.
+**Canvas & editing.** Drag devices from the library, connect them, pan/zoom,
+box-select, lasso-select, multi-drag, snap-to-grid, level-of-detail at scale, copy/
+cut/paste, grouping, z-order, lock, keyboard nudge, context menus, text notes and
+zone/shape annotations, image/SVG background underlays. Floating tool palette
+(Select / Lasso / Pan / Connect / Text / Zone). Undo/redo throughout.
+
+**Connectors.** Editable connectors with waypoints + reroute handles, arrowheads,
+solid/dashed styles, orthogonal elbow routing, parallel-link fan-out, multi-labels
+(name / bandwidth / VLAN / native VLAN / LACP / circuit ID + endpoint interfaces),
+click-to-connect or drag-to-connect.
+
+**Live validation (the wedge).** Duplicate IPs, invalid CIDR/IP, missing endpoints,
+duplicate names, overlapping subnets, VLAN range/duplicate, IP-outside-subnet,
+missing gateway, rack RU collision/overflow, trunk/access mismatch, orphaned
+devices — flagged on the canvas + the Validation panel as you edit; click to jump.
+
+**Network semantics.** First-class VLANs, subnets, racks; device rack-placement;
+IP Plan / VLANs / Racks / Inventory / Links panels.
+
+**Views & layers.** Layer management (visibility/lock/reorder/active), multi-view
+saved perspectives, rack elevation view, presentation/read-only mode, page
+boundaries for print.
+
+**Local persistence.** Debounced IndexedDB autosave + crash recovery; multi-tab
+single-writer via Web Locks; `.nexmap` save/open via File System Access with
+download fallback; newer schema is refused rather than silently re-saved.
+
+**Import.** CSV (devices/links/IP-plan/VLANs), GraphML, draw.io, topology JSON,
+NetBox CSV/JSON, Nmap XML (OS-inferred types), image/SVG underlays — all
+transactional (a bad import never half-corrupts your project; Undo reverts it).
+
+**Export.** PNG / JPG / SVG / PDF + CSV, plus a ZIP package (`.nexmap` + images +
+PDF + CSVs + validation report). Live preview, crop-to-selection, DPI slider,
+transparency. Built from the model; SVG/CSV sanitized.
+
+**Offline & hardening.** Installable PWA with an offline service worker; settings
+(theme, connect behavior, reduced motion); storage diagnostics + clear-data;
+browser-capability warnings; keyboard shortcuts (press `?`); light/dark themes.
 
 ## Where your data lives
 
