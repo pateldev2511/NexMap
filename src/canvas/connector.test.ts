@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { connectorPoints, pathD, segmentMidpoints, labelAnchor, connectorLabel } from './connector';
+import {
+  connectorPoints,
+  parallelPoints,
+  pairKey,
+  pathD,
+  segmentMidpoints,
+  labelAnchor,
+  connectorLabel,
+} from './connector';
 import { createDevice, createLink } from '@/model/schema';
 
 const L = 'layer';
@@ -34,5 +42,30 @@ describe('connector geometry', () => {
     expect(connectorLabel(createLink(a.id, b.id, L, { name: 'uplink' }))).toBe('uplink');
     expect(connectorLabel(createLink(a.id, b.id, L, { bandwidth: '10G' }))).toBe('10G');
     expect(connectorLabel(createLink(a.id, b.id, L))).toBe('');
+  });
+});
+
+describe('parallel links', () => {
+  it('single link is unchanged; parallel links fan out perpendicular', () => {
+    const l = createLink(a.id, b.id, L);
+    // Solo → straight (2 points).
+    expect(parallelPoints(l, a, b, 0, 1)).toHaveLength(2);
+    // In a group of 3, middle (index 1) stays centered, others offset.
+    const mid = parallelPoints(l, a, b, 1, 3);
+    const off = parallelPoints(l, a, b, 0, 3);
+    expect(mid).toHaveLength(3);
+    // a→b is horizontal (y=20), so the offset midpoint shifts in y.
+    expect(mid[1]!.y).toBeCloseTo(20);
+    expect(off[1]!.y).not.toBeCloseTo(20);
+  });
+
+  it('explicit waypoints suppress parallel offset', () => {
+    const l = createLink(a.id, b.id, L, { waypoints: [{ x: 50, y: 50 }] });
+    expect(parallelPoints(l, a, b, 0, 3)).toHaveLength(3);
+    expect(parallelPoints(l, a, b, 0, 3)[1]).toEqual({ x: 50, y: 50 });
+  });
+
+  it('pairKey is order-independent', () => {
+    expect(pairKey(createLink(a.id, b.id, L))).toBe(pairKey(createLink(b.id, a.id, L)));
   });
 });

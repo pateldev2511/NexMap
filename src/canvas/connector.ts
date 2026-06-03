@@ -18,6 +18,48 @@ export function connectorPoints(link: Link, source: Device, target: Device): Pt[
   return [center(source), ...(link.waypoints ?? []), center(target)];
 }
 
+/** Unordered device-pair key for grouping parallel links. */
+export function pairKey(link: Link): string {
+  return [link.sourceId, link.targetId].sort().join('|');
+}
+
+/**
+ * Points for a link that may be one of several parallel links between the same
+ * pair. With no explicit waypoints and a group size > 1, insert a midpoint offset
+ * perpendicular to the line so parallel links fan out instead of overlapping.
+ */
+export function parallelPoints(
+  link: Link,
+  source: Device,
+  target: Device,
+  indexInGroup: number,
+  groupSize: number,
+  spacing = 18,
+): Pt[] {
+  if ((link.waypoints?.length ?? 0) > 0 || groupSize <= 1) {
+    return connectorPoints(link, source, target);
+  }
+  const a = center(source);
+  const b = center(target);
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  // Unit perpendicular.
+  const px = -dy / len;
+  const py = dx / len;
+  const offset = (indexInGroup - (groupSize - 1) / 2) * spacing;
+  const mid = { x: (a.x + b.x) / 2 + px * offset, y: (a.y + b.y) / 2 + py * offset };
+  return [a, mid, b];
+}
+
+/** A point a short distance from `from` toward `to` (for endpoint labels). */
+export function alongFrom(from: Pt, to: Pt, dist: number): Pt {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.hypot(dx, dy) || 1;
+  return { x: from.x + (dx / len) * dist, y: from.y + (dy / len) * dist };
+}
+
 /** SVG path data for a polyline through the points. */
 export function pathD(points: Pt[]): string {
   if (points.length === 0) return '';

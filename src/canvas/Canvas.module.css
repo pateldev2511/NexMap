@@ -178,6 +178,17 @@
   pointer-events: none;
 }
 
+.ifaceLabel {
+  fill: var(--chrome-fg-muted);
+  font-size: 8px;
+  font-family: var(--font-mono);
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--canvas-bg);
+  stroke-width: 2.5;
+  pointer-events: none;
+}
+
 .waypoint {
   fill: var(--accent);
   stroke: #fff;

@@ -4,7 +4,16 @@ import { useProjectStore } from '@/store/projectStore';
 import { DeviceNode } from './DeviceNode';
 import { ObjectNode } from './ObjectNode';
 import { CanvasToolbar } from './CanvasToolbar';
-import { connectorPoints, pathD, segmentMidpoints, labelAnchor, connectorLabel } from './connector';
+import {
+  connectorPoints,
+  parallelPoints,
+  pairKey,
+  alongFrom,
+  pathD,
+  segmentMidpoints,
+  labelAnchor,
+  connectorLabel,
+} from './connector';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import {
   fitToBox,
@@ -43,8 +52,15 @@ export function Canvas() {
   const [lassoPts, setLassoPts] = useState<{ x: number; y: number }[] | null>(null);
   const [linkCursor, setLinkCursor] = useState<{ x: number; y: number } | null>(null);
   const [linkTarget, setLinkTarget] = useState<string | null>(null);
+  const [pendingSource, setPendingSource] = useState<string | null>(null);
+  const pendingSourceRef = useRef<string | null>(null);
   const gesture = useRef<Gesture>({ kind: 'none' });
   const altHeld = useRef(false);
+
+  const setPending = useCallback((id: string | null) => {
+    pendingSourceRef.current = id;
+    setPendingSource(id);
+  }, []);
 
   const rev = useProjectStore((s) => s.rev);
   const selection = useProjectStore((s) => s.selection);
@@ -184,6 +200,7 @@ export function Canvas() {
         store().setMode('connect');
       if (e.key === 'Escape') {
         if (gesture.current.kind === 'link') cancelLink();
+        setPending(null);
         store().setMode('select');
         store().clearSelection();
       }
@@ -286,7 +303,19 @@ export function Canvas() {
       if (spaceHeld || store().mode === 'pan') return; // let the root handler pan
       // In connect mode, pressing a DEVICE starts a link drag (not objects).
       if (store().mode === 'connect') {
-        if (store().getDevice(id)) startLinkFrom(e, id);
+        if (!store().getDevice(id)) return;
+        // Click-to-connect: a second click on a different device completes the link.
+        const pending = pendingSourceRef.current;
+        if (pending && pending !== id) {
+          const lid = store().connect(pending, id);
+          if (lid) {
+            store().select([lid]);
+            store().runValidation();
+          }
+          setPending(null);
+          return;
+        }
+        startLinkFrom(e, id);
         return;
       }
       e.stopPropagation();
@@ -300,7 +329,7 @@ export function Canvas() {
       const { sx, sy } = localPoint(e);
       gesture.current = { kind: 'drag', startX: sx, startY: sy, moved: false };
     },
-    [spaceHeld, store, localPoint, startLinkFrom],
+    [spaceHeld, store, localPoint, startLinkFrom, setPending],
   );
 
   const onRootPointerDown = useCallback(
@@ -404,11 +433,16 @@ export function Canvas() {
         const target = linkTarget;
         cancelLink();
         if (target && target !== g.sourceId) {
+          // Drag-to-connect.
           const id = store().connect(g.sourceId, target);
           if (id) {
             store().select([id]);
             store().runValidation();
           }
+          setPending(null);
+        } else {
+          // No drag target → arm click-to-connect from this source.
+          setPending(g.sourceId);
         }
       } else if (g.kind === 'marquee' && marquee) {
         const tl = screenToCanvas(viewport, marquee.x, marquee.y);
@@ -440,7 +474,7 @@ export function Canvas() {
         setMarquee(null);
       }
     },
-    [store, marquee, viewport, linkTarget, lassoPts],
+    [store, marquee, viewport, linkTarget, lassoPts, setPending],
   );
 
   const onDrop = useCallback(
@@ -504,6 +538,12 @@ export function Canvas() {
   const shapes = allObjects.filter((o) => o.kind === 'shape'); // render under links
   const texts = allObjects.filter((o) => o.kind === 'text'); // render on top
   const links = size.w > 0 ? store().visibleLinks(box) : [];
+  // Group parallel links (same device pair) so they fan out instead of overlapping.
+  const linkGroups = new Map<string, string[]>();
+  for (const l of links) {
+    const k = pairKey(l);
+    (linkGroups.get(k) ?? linkGroups.set(k, []).get(k)!).push(l.id);
+  }
   const handleDevice = hoveredId ? store().getDevice(hoveredId) : undefined;
   const linkSource =
     gesture.current.kind === 'link' ? store().getDevice(gesture.current.sourceId) : undefined;
@@ -574,12 +614,17 @@ export function Canvas() {
             const a = store().getDevice(l.sourceId);
             const b = store().getDevice(l.targetId);
             if (!a || !b) return null;
-            const pts = connectorPoints(l, a, b);
+            const group = linkGroups.get(pairKey(l)) ?? [l.id];
+            const pts = parallelPoints(l, a, b, group.indexOf(l.id), group.length);
             const d = pathD(pts);
             const sel = selection.has(l.id);
             const label = connectorLabel(l);
             const lblAt = label ? labelAnchor(pts) : null;
             const arrow = l.arrow ?? 'end';
+            const first = pts[0]!;
+            const last = pts[pts.length - 1]!;
+            const srcLbl = l.sourceInterface ? alongFrom(first, pts[1]!, 24) : null;
+            const tgtLbl = l.targetInterface ? alongFrom(last, pts[pts.length - 2]!, 24) : null;
             return (
               <g key={l.id}>
                 <path
@@ -601,6 +646,16 @@ export function Canvas() {
                 {lblAt && (
                   <text className={styles.linkLabel} x={lblAt.x} y={lblAt.y - 4}>
                     {label}
+                  </text>
+                )}
+                {srcLbl && (
+                  <text className={styles.ifaceLabel} x={srcLbl.x} y={srcLbl.y}>
+                    {l.sourceInterface}
+                  </text>
+                )}
+                {tgtLbl && (
+                  <text className={styles.ifaceLabel} x={tgtLbl.x} y={tgtLbl.y}>
+                    {l.targetInterface}
                   </text>
                 )}
               </g>
@@ -666,7 +721,7 @@ export function Canvas() {
               device={dev}
               selected={selection.has(dev.id)}
               scale={viewport.scale}
-              validTarget={linkTarget === dev.id}
+              validTarget={linkTarget === dev.id || pendingSource === dev.id}
               hasIssue={errorIds.has(dev.id)}
               onPointerDown={onDevicePointerDown}
             />
