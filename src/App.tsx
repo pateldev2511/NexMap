@@ -9,6 +9,7 @@ import { ImportDialog } from './ui/dialogs/ImportDialog';
 import { ExportDialog } from './ui/dialogs/ExportDialog';
 import { ShortcutsDialog } from './ui/dialogs/ShortcutsDialog';
 import { ViewSwitcher } from './ui/ViewSwitcher';
+import { RackView } from './ui/RackView/RackView';
 import { ReadOnlyBanner, ErrorToast } from './ui/dialogs/ReadOnlyBanner';
 import { Canvas } from './canvas/Canvas';
 import { PerfHarness } from './perf/PerfHarness';
@@ -75,6 +76,7 @@ export function App() {
   const [showHelp, setShowHelp] = useState(false);
   const [presentation, setPresentation] = useState(false);
   const [showPages, setShowPages] = useState(false);
+  const [rackView, setRackView] = useState(false);
   const canUndo = useProjectStore((s) => s.canUndo);
   const canRedo = useProjectStore((s) => s.canRedo);
   const undo = useProjectStore((s) => s.undo);
@@ -144,6 +146,14 @@ export function App() {
         style={showPages ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : undefined}
       >
         Pages
+      </button>
+      <button
+        className={shell.topbarBtn}
+        onClick={() => setRackView((r) => !r)}
+        title="Rack elevation view"
+        style={rackView ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : undefined}
+      >
+        Rack view
       </button>
       <button className={shell.topbarBtn} onClick={() => setPresentation(true)} title="Presentation mode">
         Present
@@ -257,7 +267,7 @@ export function App() {
       canvas={
         <>
           {persistence.readOnly && <ReadOnlyBanner />}
-          <Canvas showPages={showPages} />
+          {rackView ? <RackView /> : <Canvas showPages={showPages} />}
           {showFirstRun && (
             <FirstRun onDone={() => setFirstRunDone(true)} onOpenText={persistence.openText} />
           )}
