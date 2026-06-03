@@ -42,7 +42,16 @@ type Gesture =
 
 const ZOOM_STEP = 1.0015;
 
-export function Canvas() {
+interface CanvasProps {
+  /** Presentation/read-only: pan+zoom only, no editing chrome. */
+  readOnly?: boolean;
+  /** Overlay printable page boundaries. */
+  showPages?: boolean;
+}
+
+const PAGE = { w: 1123, h: 794 }; // A4 landscape @96dpi, in canvas units
+
+export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState<Viewport>(initialViewport);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -109,7 +118,7 @@ export function Canvas() {
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      if (isTextTarget(e.target)) return;
+      if (isTextTarget(e.target) || readOnly) return; // no keyboard editing in presentation
       const mod = e.metaKey || e.ctrlKey;
 
       // Viewport + selection shortcuts (viewport lives here in the canvas).
@@ -220,7 +229,7 @@ export function Canvas() {
     };
     // Re-bind when size changes so Cmd+0/zoom use current dimensions.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store, size]);
+  }, [store, size, readOnly]);
 
   useEffect(() => {
     const el = rootRef.current;
@@ -303,7 +312,7 @@ export function Canvas() {
 
   const onDevicePointerDown = useCallback(
     (e: React.PointerEvent, id: string) => {
-      if (spaceHeld || store().mode === 'pan') return; // let the root handler pan
+      if (readOnly || spaceHeld || store().mode === 'pan') return; // let the root handler pan
       // In connect mode, pressing a DEVICE starts a link drag (not objects).
       if (store().mode === 'connect') {
         if (!store().getDevice(id)) return;
@@ -332,14 +341,14 @@ export function Canvas() {
       const { sx, sy } = localPoint(e);
       gesture.current = { kind: 'drag', startX: sx, startY: sy, moved: false };
     },
-    [spaceHeld, store, localPoint, startLinkFrom, setPending],
+    [spaceHeld, store, localPoint, startLinkFrom, setPending, readOnly],
   );
 
   const onRootPointerDown = useCallback(
     (e: React.PointerEvent) => {
       const { sx, sy } = localPoint(e);
       rootRef.current!.setPointerCapture(e.pointerId);
-      if (spaceHeld || e.button === 1 || store().mode === 'pan') {
+      if (readOnly || spaceHeld || e.button === 1 || store().mode === 'pan') {
         gesture.current = { kind: 'pan', lastX: e.clientX, lastY: e.clientY };
         return;
       }
@@ -365,7 +374,7 @@ export function Canvas() {
       gesture.current = { kind: 'marquee', startX: sx, startY: sy, additive: e.shiftKey };
       setMarquee({ x: sx, y: sy, w: 0, h: 0 });
     },
-    [spaceHeld, store, localPoint, viewport],
+    [spaceHeld, store, localPoint, viewport, readOnly],
   );
 
   const onPointerMove = useCallback(
@@ -486,6 +495,7 @@ export function Canvas() {
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
+      if (readOnly) return;
       const type = e.dataTransfer.getData('application/nexmap-device') as DeviceType;
       if (!type) return;
       const c = screenToCanvasFromEvent(e);
@@ -503,6 +513,7 @@ export function Canvas() {
   const onContextMenu = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
+      if (readOnly) return;
       const { sx, sy } = localPoint(e);
       const c = screenToCanvas(viewport, sx, sy);
       const hitId = store().hitTest(c.x, c.y).find((id) => store().getDevice(id));
@@ -532,7 +543,7 @@ export function Canvas() {
       void sel;
       setMenu({ x: e.clientX, y: e.clientY, items });
     },
-    [store, localPoint, viewport],
+    [store, localPoint, viewport, readOnly],
   );
 
   void rev;
@@ -610,6 +621,7 @@ export function Canvas() {
         <rect x={0} y={0} width="100%" height="100%" fill="url(#nexmap-grid)" />
 
         <g transform={`translate(${viewport.tx} ${viewport.ty}) scale(${viewport.scale})`}>
+          {showPages && <PageBoundaries content={store().contentBounds()} />}
           {images.map((o) => (
             <ObjectNode
               key={o.id}
@@ -688,7 +700,7 @@ export function Canvas() {
 
           {/* Reroute handles for the single selected connector. */}
           {(() => {
-            if (selection.size !== 1) return null;
+            if (readOnly || selection.size !== 1) return null;
             const id = [...selection][0]!;
             const link = store().getLink(id);
             if (!link) return null;
@@ -761,7 +773,7 @@ export function Canvas() {
           ))}
 
           {/* Connect handle on the hovered device (select mode, discoverable). */}
-          {mode === 'select' && handleDevice && gesture.current.kind === 'none' && (
+          {!readOnly && mode === 'select' && handleDevice && gesture.current.kind === 'none' && (
             <circle
               className={styles.connectHandle}
               cx={handleDevice.x + handleDevice.width}
@@ -789,21 +801,23 @@ export function Canvas() {
         )}
       </svg>
 
-      <CanvasToolbar
-        mode={mode}
-        onMode={(m) => store().setMode(m)}
-        canUndo={canUndo}
-        canRedo={canRedo}
-        onUndo={() => {
-          store().undo();
-          store().runValidation();
-        }}
-        onRedo={() => {
-          store().redo();
-          store().runValidation();
-        }}
-        onHelp={() => window.dispatchEvent(new CustomEvent('nexmap:help'))}
-      />
+      {!readOnly && (
+        <CanvasToolbar
+          mode={mode}
+          onMode={(m) => store().setMode(m)}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          onUndo={() => {
+            store().undo();
+            store().runValidation();
+          }}
+          onRedo={() => {
+            store().redo();
+            store().runValidation();
+          }}
+          onHelp={() => window.dispatchEvent(new CustomEvent('nexmap:help'))}
+        />
+      )}
 
       <div className={styles.zoomBar}>
         <button
@@ -833,6 +847,30 @@ export function Canvas() {
       )}
     </div>
   );
+}
+
+/** Printable A4-landscape page grid overlay covering the content (Phase 5). */
+function PageBoundaries({ content }: { content: { x: number; y: number; width: number; height: number } }) {
+  const ox = content.width > 0 ? content.x - 40 : 0;
+  const oy = content.height > 0 ? content.y - 40 : 0;
+  const cols = Math.max(1, Math.ceil((content.width + 80) / PAGE.w));
+  const rows = Math.max(1, Math.ceil((content.height + 80) / PAGE.h));
+  const cells: React.ReactNode[] = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x = ox + c * PAGE.w;
+      const y = oy + r * PAGE.h;
+      cells.push(
+        <g key={`${r}-${c}`}>
+          <rect x={x} y={y} width={PAGE.w} height={PAGE.h} className={styles.pageRect} />
+          <text x={x + 8} y={y + 20} className={styles.pageLabel}>
+            Page {r * cols + c + 1}
+          </text>
+        </g>,
+      );
+    }
+  }
+  return <g pointerEvents="none">{cells}</g>;
 }
 
 function isTextTarget(t: EventTarget | null): boolean {

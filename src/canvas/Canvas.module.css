@@ -119,6 +119,21 @@
   cursor: grab;
 }
 
+.pageRect {
+  fill: none;
+  stroke: var(--chrome-fg-muted);
+  stroke-width: 1;
+  stroke-dasharray: 8 6;
+  opacity: 0.4;
+}
+
+.pageLabel {
+  fill: var(--chrome-fg-muted);
+  font-size: 12px;
+  font-family: var(--font-ui);
+  opacity: 0.6;
+}
+
 .objNode {
   cursor: pointer;
 }

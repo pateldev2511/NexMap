@@ -72,6 +72,8 @@ export function App() {
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [presentation, setPresentation] = useState(false);
+  const [showPages, setShowPages] = useState(false);
   const canUndo = useProjectStore((s) => s.canUndo);
   const canRedo = useProjectStore((s) => s.canRedo);
   const undo = useProjectStore((s) => s.undo);
@@ -134,6 +136,17 @@ export function App() {
       <button className={shell.topbarBtn} onClick={() => setExporting(true)} title="Export (Ctrl+E)">
         Export
       </button>
+      <button
+        className={shell.topbarBtn}
+        onClick={() => setShowPages((p) => !p)}
+        title="Toggle printable page boundaries"
+        style={showPages ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : undefined}
+      >
+        Pages
+      </button>
+      <button className={shell.topbarBtn} onClick={() => setPresentation(true)} title="Presentation mode">
+        Present
+      </button>
       <button className={shell.topbarBtn} onClick={doUndo} disabled={!canUndo} title="Undo (Ctrl+Z)">
         ↶
       </button>
@@ -194,6 +207,16 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [persistence]);
 
+  // Esc exits presentation mode.
+  useEffect(() => {
+    if (!presentation) return;
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPresentation(false);
+    };
+    window.addEventListener('keydown', onEsc);
+    return () => window.removeEventListener('keydown', onEsc);
+  }, [presentation]);
+
   if (view === 'perf') {
     return (
       <AppShell
@@ -202,6 +225,21 @@ export function App() {
         canvas={<PerfHarness />}
         status={<span>M0 benchmark — drives the M2 renderer decision</span>}
       />
+    );
+  }
+
+  if (presentation) {
+    return (
+      <div style={{ position: 'fixed', inset: 0, background: 'var(--canvas-bg)' }}>
+        <Canvas readOnly showPages={showPages} />
+        <button
+          className={shell.topbarBtn}
+          onClick={() => setPresentation(false)}
+          style={{ position: 'fixed', top: 12, right: 12, zIndex: 50, background: 'var(--chrome-bg)' }}
+        >
+          ✕ Exit presentation (Esc)
+        </button>
+      </div>
     );
   }
 
@@ -217,7 +255,7 @@ export function App() {
       canvas={
         <>
           {persistence.readOnly && <ReadOnlyBanner />}
-          <Canvas />
+          <Canvas showPages={showPages} />
           {showFirstRun && (
             <FirstRun onDone={() => setFirstRunDone(true)} onOpenText={persistence.openText} />
           )}
