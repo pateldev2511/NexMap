@@ -12,6 +12,7 @@ import type {
   Link,
   NexMapDocument,
   ProjectMeta,
+  Rack,
   ShapeObject,
   Subnet,
   TextObject,
@@ -145,6 +146,10 @@ export function createVlan(vlanId: number, name: string, partial: Partial<Vlan> 
 
 export function createSubnet(cidr: string, partial: Partial<Subnet> = {}): Subnet {
   return { id: nanoid(), cidr, ...partial };
+}
+
+export function createRack(name: string, ruHeight = 42, partial: Partial<Rack> = {}): Rack {
+  return { id: nanoid(), name, ruHeight, ...partial };
 }
 
 export function isCanvasObject(v: unknown): v is CanvasObject {

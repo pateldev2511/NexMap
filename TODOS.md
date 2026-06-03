@@ -84,14 +84,17 @@ import, export, shortcuts.
 - Deferred to Phase 4 (needs the subnet/VLAN model): IP-plan + VLAN CSV import.
 - Deferred (low priority): layer/view export scope, multi-page PDF pagination.
 
-## Phase 4 — Network Semantics
-- First-class interfaces, VLANs, subnets, zones, sites, racks, cloud networks.
-- Validations: overlapping subnets, duplicate VLAN IDs, invalid VLAN ranges, IP
+## Phase 4 — Network Semantics  ✅ CORE COMPLETE
+- [x] First-class VLANs, subnets, racks (typed model, undoable CRUD, round-trip)
+- [x] Validations: overlapping subnets, duplicate VLAN IDs, invalid VLAN ranges, IP
   outside subnet, missing gateway, trunk/access mismatch, orphaned devices, rack RU
-  collisions, link bandwidth mismatch.
-- Bottom-panel tabs: IP Plan, VLANs, Interfaces, Racks, Sites, Import Results.
-- Edge cases: IPv4/IPv6 mixed, subnet boundaries, VLAN scope per site, device
-  renames, interface deletion, stale link refs, custom-metadata round-trip.
+  collisions + overflow
+- [x] Bottom-panel tabs: IP Plan, VLANs, Racks (editable); device Rack-placement +
+  link trunk/access in the inspector
+- [x] IP-plan + VLAN CSV import (header-detected)
+- Deferred (lower priority): first-class interfaces (link interface labels exist),
+  dedicated zones/sites entities (zone fields exist), cloud networks (→ Phase 6),
+  link bandwidth mismatch, rack elevation view (→ Phase 6).
 
 ## Phase 5 — Views, Layers & Presentation
 - Layer management: visible/hidden, locked/unlocked, reorder, rename, delete confirm,

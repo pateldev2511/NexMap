@@ -5,6 +5,9 @@ import {
   autoMap,
   buildDevices,
   buildLinks,
+  buildSubnets,
+  buildVlans,
+  detectCsvKind,
   DEVICE_FIELDS,
   LINK_FIELDS,
   type ImportKind,
@@ -100,11 +103,27 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
       setGraphResult({ name: file.name, result });
       return;
     }
-    // CSV (default).
+    // CSV — detect sub-kind by headers.
     setGraphResult(null);
     const p = parseCsv(raw);
-    const looksLikeLinks = autoMap(p.headers, LINK_FIELDS).source && autoMap(p.headers, LINK_FIELDS).target;
-    const k: ImportKind = looksLikeLinks ? 'links' : 'devices';
+    const csvKind = detectCsvKind(p.headers);
+    if (csvKind === 'subnets') {
+      const subnets = buildSubnets(p.rows, p.headers);
+      store().importSemantics(subnets, []);
+      store().runValidation();
+      setText(null);
+      setDone({ count: subnets.length, warnings: [], skipped: p.rows.length - subnets.length });
+      return;
+    }
+    if (csvKind === 'vlans') {
+      const vlans = buildVlans(p.rows, p.headers);
+      store().importSemantics([], vlans);
+      store().runValidation();
+      setText(null);
+      setDone({ count: vlans.length, warnings: [], skipped: p.rows.length - vlans.length });
+      return;
+    }
+    const k: ImportKind = csvKind === 'links' ? 'links' : 'devices';
     setKind(k);
     setText(raw);
     setMapping(autoMap(p.headers, k === 'devices' ? DEVICE_FIELDS : LINK_FIELDS));

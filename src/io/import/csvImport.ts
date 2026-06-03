@@ -7,8 +7,8 @@
  * (importObjects); this module only produces candidate objects + warnings so the
  * import preview can show them before the user commits.
  */
-import { createDevice, createLink } from '@/model/schema';
-import type { Device, DeviceType, Link } from '@/model/types';
+import { createDevice, createLink, createSubnet, createVlan } from '@/model/schema';
+import type { Device, DeviceType, Link, Subnet, Vlan } from '@/model/types';
 
 export type ImportKind = 'devices' | 'links';
 
@@ -64,6 +64,66 @@ const TYPE_ALIASES: Record<string, DeviceType> = {
 
 function normalize(h: string): string {
   return h.trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+const SUBNET_FIELDS: FieldDef[] = [
+  { key: 'cidr', aliases: ['cidr', 'subnet', 'prefix', 'network'] },
+  { key: 'name', aliases: ['name', 'description'] },
+  { key: 'gateway', aliases: ['gateway', 'gw'] },
+  { key: 'vlanId', aliases: ['vlan_id', 'vlan', 'vlanid'] },
+  { key: 'zone', aliases: ['zone', 'site'] },
+  { key: 'notes', aliases: ['notes', 'comment'] },
+];
+const VLAN_FIELDS: FieldDef[] = [
+  { key: 'vlanId', aliases: ['vlan_id', 'vlan', 'vlanid', 'id'] },
+  { key: 'name', aliases: ['name', 'vlan_name', 'description'] },
+  { key: 'zone', aliases: ['zone', 'site'] },
+  { key: 'notes', aliases: ['notes', 'comment'] },
+];
+
+/** Header detection so the dialog can route a CSV to the right importer. */
+export function detectCsvKind(headers: string[]): ImportKind | 'subnets' | 'vlans' {
+  const n = headers.map(normalize);
+  if (n.includes('cidr') || n.includes('subnet') || n.includes('prefix')) return 'subnets';
+  const linkMap = autoMap(headers, LINK_FIELDS);
+  if (linkMap.source && linkMap.target) return 'links';
+  if ((n.includes('vlan_id') || n.includes('vlan')) && !n.includes('management_ip') && !n.includes('ip'))
+    return 'vlans';
+  return 'devices';
+}
+
+export function buildSubnets(rows: Record<string, string>[], headers: string[]): Subnet[] {
+  const m = autoMap(headers, SUBNET_FIELDS);
+  const get = (r: Record<string, string>, k: string) => (m[k] ? r[m[k]!]?.trim() : undefined);
+  return rows
+    .map((r) => {
+      const cidr = get(r, 'cidr');
+      if (!cidr) return null;
+      const vlanRaw = get(r, 'vlanId');
+      return createSubnet(cidr, {
+        name: get(r, 'name'),
+        gateway: get(r, 'gateway'),
+        vlanId: vlanRaw ? Number(vlanRaw) : undefined,
+        zone: get(r, 'zone'),
+        notes: get(r, 'notes'),
+      });
+    })
+    .filter((s): s is Subnet => s !== null);
+}
+
+export function buildVlans(rows: Record<string, string>[], headers: string[]): Vlan[] {
+  const m = autoMap(headers, VLAN_FIELDS);
+  const get = (r: Record<string, string>, k: string) => (m[k] ? r[m[k]!]?.trim() : undefined);
+  return rows
+    .map((r, i) => {
+      const idRaw = get(r, 'vlanId');
+      if (!idRaw) return null;
+      return createVlan(Number(idRaw), get(r, 'name') || `VLAN ${idRaw || i}`, {
+        zone: get(r, 'zone'),
+        notes: get(r, 'notes'),
+      });
+    })
+    .filter((v): v is Vlan => v !== null);
 }
 
 /** Auto-map CSV headers to canonical fields. Returns field → headerName | null. */

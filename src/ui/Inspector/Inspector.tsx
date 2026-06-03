@@ -79,6 +79,8 @@ function DeviceInspector({ device }: { device: Device }) {
         </Field>
       </div>
 
+      <RackFields device={device} set={set} endEdit={endEdit} />
+
       <div className={styles.group}>
         <div className={styles.groupTitle}>Location & Notes</div>
         <Field label="Location">
@@ -89,6 +91,54 @@ function DeviceInspector({ device }: { device: Device }) {
         </Field>
       </div>
     </>
+  );
+}
+
+function RackFields({
+  device,
+  set,
+  endEdit,
+}: {
+  device: Device;
+  set: <K extends keyof Device>(key: K, value: Device[K]) => void;
+  endEdit: () => void;
+}) {
+  const racks = useProjectStore((s) => s.racksAll());
+  if (racks.length === 0) return null;
+  return (
+    <div className={styles.group}>
+      <div className={styles.groupTitle}>Rack placement</div>
+      <Field label="Rack">
+        <select value={device.rackId ?? ''} onChange={(e) => { set('rackId', e.target.value || undefined); endEdit(); }}>
+          <option value="">— none —</option>
+          {racks.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+      {device.rackId && (
+        <>
+          <Field label="Position (U)">
+            <input
+              type="number"
+              value={device.ru ?? 1}
+              onChange={(e) => set('ru', Number(e.target.value))}
+              onBlur={endEdit}
+            />
+          </Field>
+          <Field label="Height (U)">
+            <input
+              type="number"
+              value={device.ruSpan ?? 1}
+              onChange={(e) => set('ruSpan', Number(e.target.value))}
+              onBlur={endEdit}
+            />
+          </Field>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -169,6 +219,13 @@ function LinkInspector({ link }: { link: Link }) {
       </div>
       <div className={styles.group}>
         <div className={styles.groupTitle}>VLAN / Trunk</div>
+        <Field label="Mode">
+          <select value={link.mode ?? ''} onChange={(e) => { set('mode', (e.target.value || undefined) as Link['mode']); endEdit(); }}>
+            <option value="">—</option>
+            <option value="access">Access</option>
+            <option value="trunk">Trunk</option>
+          </select>
+        </Field>
         <Field label="VLANs carried">
           <input value={link.vlan ?? ''} placeholder="10,20,30" onChange={(e) => set('vlan', e.target.value)} onBlur={endEdit} />
         </Field>

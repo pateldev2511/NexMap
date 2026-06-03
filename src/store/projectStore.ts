@@ -16,6 +16,7 @@ import type {
   DeviceType,
   Link,
   NexMapDocument,
+  Rack,
   Subnet,
   ValidationIssue,
   Vlan,
@@ -25,6 +26,7 @@ import {
   createEmptyDocument,
   createLink,
   createImageObject,
+  createRack,
   createShapeObject,
   createSubnet,
   createTextObject,
@@ -38,9 +40,11 @@ import {
   AddDeviceCommand,
   AddLinkCommand,
   AddObjectCommand,
+  AddRackCommand,
   AddSubnetCommand,
   AddVlanCommand,
   DeleteCommand,
+  DeleteRackCommand,
   DeleteSubnetCommand,
   DeleteVlanCommand,
   MoveDeviceCommand,
@@ -49,6 +53,7 @@ import {
   UpdateDeviceCommand,
   UpdateLinkCommand,
   UpdateObjectCommand,
+  UpdateRackCommand,
   UpdateSubnetCommand,
   UpdateVlanCommand,
   transaction,
@@ -144,6 +149,8 @@ export interface ProjectStore {
   connect(sourceId: string, targetId: string): string | null;
   /** Apply imported devices+links as ONE atomic, undoable transaction (DA-T2). */
   importObjects(devices: Device[], links: Link[]): void;
+  /** Apply imported VLANs/subnets as one atomic, undoable transaction. */
+  importSemantics(subnets: Subnet[], vlans: Vlan[]): void;
   /** Layer id new imported/created objects attach to. */
   defaultLayerId(): string;
   updateDevice(id: string, before: Partial<Device>, after: Partial<Device>): void;
@@ -206,6 +213,10 @@ export interface ProjectStore {
   updateSubnet(id: string, before: Partial<Subnet>, after: Partial<Subnet>): void;
   deleteSubnet(id: string): void;
   subnetsAll(): Subnet[];
+  addRack(name: string): string;
+  updateRack(id: string, before: Partial<Rack>, after: Partial<Rack>): void;
+  deleteRack(id: string): void;
+  racksAll(): Rack[];
   hitTest(x: number, y: number): string[];
   queryBox(box: Box): string[];
   contentBounds(): Box;
@@ -359,6 +370,17 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       ];
       history.dispatch(transaction(`Import ${devices.length + links.length} objects`, cmds), model);
       for (const d of devices) index.insert(d.id, deviceBox(d));
+      history.commitCoalesceBoundary();
+      set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
+    },
+
+    importSemantics(subnets, vlans) {
+      if (subnets.length === 0 && vlans.length === 0) return;
+      const cmds: Command[] = [
+        ...subnets.map((s) => new AddSubnetCommand(s)),
+        ...vlans.map((v) => new AddVlanCommand(v)),
+      ];
+      history.dispatch(transaction(`Import ${cmds.length} entries`, cmds), model);
       history.commitCoalesceBoundary();
       set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
     },
@@ -638,6 +660,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         links: [...model.links.values()],
         vlans: [...model.vlans.values()],
         subnets: [...model.subnets.values()],
+        racks: [...model.racks.values()],
       });
       set({ issues });
     },
@@ -656,6 +679,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           links: [...model.links.values()],
           vlans: [...model.vlans.values()],
           subnets: [...model.subnets.values()],
+        racks: [...model.racks.values()],
         }),
         canUndo: false,
         canRedo: false,
@@ -742,6 +766,23 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     },
     subnetsAll() {
       return [...model.subnets.values()];
+    },
+
+    addRack(name) {
+      const r = createRack(name);
+      commit(new AddRackCommand(r));
+      history.commitCoalesceBoundary();
+      return r.id;
+    },
+    updateRack(id, before, after) {
+      commit(new UpdateRackCommand(id, before, after));
+    },
+    deleteRack(id) {
+      commit(new DeleteRackCommand(id));
+      history.commitCoalesceBoundary();
+    },
+    racksAll() {
+      return [...model.racks.values()];
     },
 
     hitTest(x, y) {

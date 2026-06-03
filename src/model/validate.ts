@@ -8,7 +8,7 @@
  * M5; here it's just a function so it's trivially testable and worker-portable.
  */
 import { cidrsOverlap, ipInCidr, isValidIpv4, isValidIpv6, parseCidr, stripPrefix } from '@/lib/ipcidr';
-import type { Device, Link, Subnet, ValidationIssue, Vlan } from './types';
+import type { Device, Link, Rack, Subnet, ValidationIssue, Vlan } from './types';
 
 let counter = 0;
 function issueId(): string {
@@ -26,6 +26,7 @@ export interface ValidationInput {
   links: Link[];
   vlans?: Vlan[];
   subnets?: Subnet[];
+  racks?: Rack[];
 }
 
 /** Rule: a device must have a non-empty name. */
@@ -252,8 +253,114 @@ function checkIpOutsideSubnet(devices: Device[], subnets: Subnet[]): ValidationI
   return issues;
 }
 
+/** Rule: rack RU placements must not collide or overflow. */
+function checkRacks(devices: Device[], racks: Rack[]): ValidationIssue[] {
+  if (racks.length === 0) return [];
+  const byRack = new Map<string, number>();
+  for (const r of racks) byRack.set(r.id, r.ruHeight);
+  const issues: ValidationIssue[] = [];
+  const placed = devices.filter((d) => d.rackId && d.ru != null);
+  // Overflow / invalid range.
+  for (const d of placed) {
+    const height = byRack.get(d.rackId!);
+    const span = d.ruSpan ?? 1;
+    if (height == null) continue;
+    if (d.ru! < 1 || d.ru! + span - 1 > height) {
+      issues.push({
+        id: issueId(),
+        severity: 'warn',
+        code: 'rack-ru-overflow',
+        message: `${d.name} occupies U${d.ru}–U${d.ru! + span - 1}, outside rack capacity (${height}U).`,
+        objectIds: [d.id],
+      });
+    }
+  }
+  // Collisions within the same rack.
+  const byRackId = new Map<string, Device[]>();
+  for (const d of placed) {
+    const list = byRackId.get(d.rackId!) ?? [];
+    list.push(d);
+    byRackId.set(d.rackId!, list);
+  }
+  for (const [, list] of byRackId) {
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const a = list[i]!;
+        const b = list[j]!;
+        const aTop = a.ru! + (a.ruSpan ?? 1) - 1;
+        const bTop = b.ru! + (b.ruSpan ?? 1) - 1;
+        if (a.ru! <= bTop && b.ru! <= aTop) {
+          issues.push({
+            id: issueId(),
+            severity: 'error',
+            code: 'rack-ru-collision',
+            message: `${a.name} and ${b.name} overlap in the rack (U${a.ru} vs U${b.ru}).`,
+            objectIds: [a.id, b.id],
+          });
+        }
+      }
+    }
+  }
+  return issues;
+}
+
+/** Rule: trunk links should carry VLANs; access links shouldn't carry several. */
+function checkTrunkAccess(links: Link[]): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  for (const l of links) {
+    if (l.mode === 'trunk' && !l.vlan?.trim()) {
+      issues.push({
+        id: issueId(),
+        severity: 'warn',
+        code: 'trunk-missing-vlan',
+        message: `Trunk link "${l.name ?? l.id}" carries no VLANs.`,
+        objectIds: [l.id],
+      });
+    }
+    if (l.mode === 'access' && (l.vlan?.split(',').filter((s) => s.trim()).length ?? 0) > 1) {
+      issues.push({
+        id: issueId(),
+        severity: 'warn',
+        code: 'access-multi-vlan',
+        message: `Access link "${l.name ?? l.id}" carries multiple VLANs.`,
+        objectIds: [l.id],
+      });
+    }
+  }
+  return issues;
+}
+
+/** Rule: a device with no links is likely orphaned. */
+function checkOrphanedDevices(devices: Device[], links: Link[]): ValidationIssue[] {
+  if (devices.length <= 1) return [];
+  const connected = new Set<string>();
+  for (const l of links) {
+    connected.add(l.sourceId);
+    connected.add(l.targetId);
+  }
+  const issues: ValidationIssue[] = [];
+  for (const d of devices) {
+    if (!connected.has(d.id)) {
+      issues.push({
+        id: issueId(),
+        severity: 'info',
+        code: 'orphaned-device',
+        message: `${d.name} has no connections.`,
+        objectIds: [d.id],
+      });
+    }
+  }
+  return issues;
+}
+
 /** Run all validations. Deterministic order: errors-worthy checks first. */
-export function validate({ devices, links, vlans = [], subnets = [] }: ValidationInput): ValidationIssue[] {
+export function validate({
+  devices,
+  links,
+  vlans = [],
+  subnets = [],
+  racks = [],
+}: ValidationInput): ValidationIssue[] {
   return [
     ...checkDuplicateIps(devices),
     ...checkInvalidIpCidr(devices),
@@ -262,8 +369,11 @@ export function validate({ devices, links, vlans = [], subnets = [] }: Validatio
     ...checkVlanRange(vlans),
     ...checkSubnets(subnets),
     ...checkIpOutsideSubnet(devices, subnets),
+    ...checkRacks(devices, racks),
+    ...checkTrunkAccess(links),
     ...checkDuplicateNames(devices),
     ...checkDeviceNames(devices),
+    ...checkOrphanedDevices(devices, links),
   ];
 }
 

@@ -63,6 +63,10 @@ export interface Device {
   managementIp?: string;
   notes?: string;
   fill?: string;
+  /** Rack placement (Phase 4): rack id, lowest occupied RU (1-based), height in U. */
+  rackId?: string;
+  ru?: number;
+  ruSpan?: number;
   /** Locked devices can't be moved or deleted until unlocked. */
   locked?: boolean;
   /** Stacking order; higher renders on top. Default 0. */
@@ -84,6 +88,8 @@ export interface Link {
   targetInterface?: string;
   linkType?: string;
   bandwidth?: string;
+  /** Trunk carries multiple VLANs; access carries one. */
+  mode?: 'access' | 'trunk';
   layerId: string;
   /** Intermediate reroute points (canvas coords); path runs source → waypoints → target. */
   waypoints?: { x: number; y: number }[];
@@ -168,6 +174,16 @@ export interface Subnet {
   extra?: ExtraFields;
 }
 
+export interface Rack {
+  id: string;
+  name: string;
+  /** Total rack units (e.g. 42). */
+  ruHeight: number;
+  site?: string;
+  notes?: string;
+  extra?: ExtraFields;
+}
+
 export interface ProjectMeta {
   id: string;
   name: string;
@@ -192,10 +208,10 @@ export interface NexMapDocument {
   objects: CanvasObject[];
   vlans: Vlan[];
   subnets: Subnet[];
+  racks: Rack[];
   // Forward-declared, unused yet — preserved verbatim on load→save.
   views: unknown[];
   interfaces: unknown[];
-  racks: unknown[];
   assets: unknown[];
   customFields: unknown[];
 }

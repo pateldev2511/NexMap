@@ -1,5 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { autoMap, parseDeviceType, buildDevices, buildLinks, DEVICE_FIELDS, LINK_FIELDS } from './csvImport';
+import {
+  autoMap,
+  parseDeviceType,
+  buildDevices,
+  buildLinks,
+  buildSubnets,
+  buildVlans,
+  detectCsvKind,
+  DEVICE_FIELDS,
+  LINK_FIELDS,
+} from './csvImport';
 import { parseCsv } from '@/lib/csv';
 import { createDevice } from '@/model/schema';
 
@@ -75,5 +85,31 @@ describe('buildLinks', () => {
     const csv = parseCsv('source,target\nr1,sw1');
     const res = buildLinks(csv.rows, autoMap(csv.headers, LINK_FIELDS), [a, b], LAYER);
     expect(res.links).toHaveLength(1);
+  });
+});
+
+describe('detectCsvKind + semantics import', () => {
+  it('detects subnet, vlan, link, device CSVs by headers', () => {
+    expect(detectCsvKind(['cidr', 'gateway', 'vlan_id'])).toBe('subnets');
+    expect(detectCsvKind(['vlan_id', 'name', 'zone'])).toBe('vlans');
+    expect(detectCsvKind(['source', 'target', 'bandwidth'])).toBe('links');
+    expect(detectCsvKind(['name', 'type', 'ip'])).toBe('devices');
+  });
+
+  it('buildSubnets maps cidr/gateway/vlan_id', () => {
+    const csv = parseCsv('cidr,gateway,vlan_id,name\n10.0.0.0/24,10.0.0.1,10,Servers');
+    const subs = buildSubnets(csv.rows, csv.headers);
+    expect(subs).toHaveLength(1);
+    expect(subs[0]!.cidr).toBe('10.0.0.0/24');
+    expect(subs[0]!.gateway).toBe('10.0.0.1');
+    expect(subs[0]!.vlanId).toBe(10);
+  });
+
+  it('buildVlans maps vlan_id/name', () => {
+    const csv = parseCsv('vlan_id,name,zone\n20,Voice,Floor1');
+    const vlans = buildVlans(csv.rows, csv.headers);
+    expect(vlans).toHaveLength(1);
+    expect(vlans[0]!.vlanId).toBe(20);
+    expect(vlans[0]!.name).toBe('Voice');
   });
 });

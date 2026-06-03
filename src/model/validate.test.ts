@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { validate, resetIssueIds } from './validate';
-import { createDevice, createLink, createVlan, createSubnet } from './schema';
+import { createDevice, createLink, createVlan, createSubnet, createRack } from './schema';
 import type { Device } from './types';
 
 const LAYER = 'layer-1';
@@ -102,6 +102,35 @@ describe('validate — MVP checks', () => {
     const a = dev('a', '192.168.99.5');
     const issues = validate({ devices: [a], links: [] });
     expect(issues.some((i) => i.code === 'ip-outside-subnet')).toBe(false);
+  });
+
+  it('flags rack RU collisions and overflow', () => {
+    const rack = createRack('R1', 42);
+    const a = createDevice('server', 0, 0, LAYER, { name: 'srv-a', rackId: rack.id, ru: 1, ruSpan: 2 });
+    const b = createDevice('server', 0, 0, LAYER, { name: 'srv-b', rackId: rack.id, ru: 2, ruSpan: 1 }); // overlaps U2
+    const c = createDevice('server', 0, 0, LAYER, { name: 'srv-c', rackId: rack.id, ru: 41, ruSpan: 4 }); // overflows 42U
+    const issues = validate({ devices: [a, b, c], links: [], racks: [rack] });
+    expect(issues.some((i) => i.code === 'rack-ru-collision')).toBe(true);
+    expect(issues.some((i) => i.code === 'rack-ru-overflow')).toBe(true);
+  });
+
+  it('flags trunk without VLANs and access with multiple VLANs', () => {
+    const a = dev('a');
+    const b = dev('b');
+    const trunk = createLink(a.id, b.id, LAYER, { mode: 'trunk' });
+    const access = createLink(a.id, b.id, LAYER, { mode: 'access', vlan: '10,20,30' });
+    const issues = validate({ devices: [a, b], links: [trunk, access] });
+    expect(issues.some((i) => i.code === 'trunk-missing-vlan')).toBe(true);
+    expect(issues.some((i) => i.code === 'access-multi-vlan')).toBe(true);
+  });
+
+  it('flags orphaned devices', () => {
+    const a = dev('a');
+    const b = dev('b');
+    const c = dev('c');
+    const issues = validate({ devices: [a, b, c], links: [createLink(a.id, b.id, LAYER)] });
+    const orphan = issues.find((i) => i.code === 'orphaned-device');
+    expect(orphan?.objectIds).toEqual([c.id]);
   });
 
   it('is deterministic across runs', () => {

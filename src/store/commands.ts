@@ -9,7 +9,7 @@
  * `transaction()` composes sub-commands into a single atomic history entry — the
  * basis for build-draft-then-commit import (DA-T2): the whole import is one undo.
  */
-import type { CanvasObject, Device, Link, Subnet, Vlan } from '@/model/types';
+import type { CanvasObject, Device, Link, Rack, Subnet, Vlan } from '@/model/types';
 import {
   addDevice,
   addLink,
@@ -337,6 +337,53 @@ export class DeleteSubnetCommand implements Command {
   }
   undo(s: ModelState) {
     if (this.removed) s.subnets.set(this.id, this.removed);
+  }
+}
+
+export class AddRackCommand implements Command {
+  readonly label = 'Add rack';
+  constructor(private readonly r: Rack) {}
+  apply(s: ModelState) {
+    s.racks.set(this.r.id, this.r);
+  }
+  undo(s: ModelState) {
+    s.racks.delete(this.r.id);
+  }
+}
+
+export class UpdateRackCommand implements Command {
+  readonly label = 'Edit rack';
+  constructor(
+    private readonly id: string,
+    private readonly before: Partial<Rack>,
+    private readonly after: Partial<Rack>,
+  ) {}
+  apply(s: ModelState) {
+    const r = s.racks.get(this.id);
+    if (r) s.racks.set(this.id, { ...r, ...this.after });
+  }
+  undo(s: ModelState) {
+    const r = s.racks.get(this.id);
+    if (r) s.racks.set(this.id, { ...r, ...this.before });
+  }
+  mergeWith(next: Command): Command | null {
+    if (next instanceof UpdateRackCommand && next.id === this.id && sameKeys(this.after, next.after)) {
+      return new UpdateRackCommand(this.id, this.before, next.after);
+    }
+    return null;
+  }
+}
+
+export class DeleteRackCommand implements Command {
+  readonly label = 'Delete rack';
+  private removed?: Rack;
+  constructor(private readonly id: string) {}
+  apply(s: ModelState) {
+    this.removed = s.racks.get(this.id);
+    s.racks.delete(this.id);
+  }
+  undo(s: ModelState) {
+    if (this.removed) s.racks.set(this.id, this.removed);
   }
 }
 

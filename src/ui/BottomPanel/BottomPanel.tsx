@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import { defaultDeviceName } from '@/model/schema';
 import { severityRank } from '@/model/validate';
-import type { Device, Link, Subnet, ValidationIssue, Vlan } from '@/model/types';
+import type { Device, Link, Rack, Subnet, ValidationIssue, Vlan } from '@/model/types';
 import { stripPrefix } from '@/lib/ipcidr';
 import styles from './BottomPanel.module.css';
 
@@ -11,7 +11,7 @@ import styles from './BottomPanel.module.css';
  * Links, Validation. Every row/issue jumps to its object on the canvas
  * (DA-DES-2.5) via focusObject. Collapsed by default so the canvas leads.
  */
-type Tab = 'inventory' | 'links' | 'ipplan' | 'vlans' | 'validation';
+type Tab = 'inventory' | 'links' | 'ipplan' | 'vlans' | 'racks' | 'validation';
 
 export function BottomPanel() {
   const [open, setOpen] = useState(false);
@@ -24,6 +24,7 @@ export function BottomPanel() {
   const links = store().linksAll();
   const subnets = store().subnetsAll();
   const vlans = store().vlansAll();
+  const racks = store().racksAll();
   const errorCount = issues.filter(
     (i) => i.severity === 'error' || i.severity === 'critical',
   ).length;
@@ -33,6 +34,7 @@ export function BottomPanel() {
     { key: 'links', label: 'Links', count: links.length },
     { key: 'ipplan', label: 'IP Plan', count: subnets.length },
     { key: 'vlans', label: 'VLANs', count: vlans.length },
+    { key: 'racks', label: 'Racks', count: racks.length },
     { key: 'validation', label: 'Validation', count: issues.length, err: errorCount > 0 },
   ];
 
@@ -71,6 +73,7 @@ export function BottomPanel() {
           {tab === 'links' && <LinksTable links={links} />}
           {tab === 'ipplan' && <SubnetTable subnets={subnets} vlans={vlans} />}
           {tab === 'vlans' && <VlanTable vlans={vlans} />}
+          {tab === 'racks' && <RackTable racks={racks} devices={devices} />}
           {tab === 'validation' && <ValidationList issues={issues} />}
         </div>
       )}
@@ -234,6 +237,55 @@ function VlanTable({ vlans }: { vlans: Vlan[] }) {
         </tbody>
       </table>
       <button className={styles.addRow} onClick={() => add(nextId, `VLAN ${nextId}`)}>+ Add VLAN</button>
+    </div>
+  );
+}
+
+function RackTable({ racks, devices }: { racks: Rack[]; devices: Device[] }) {
+  const update = useProjectStore((s) => s.updateRack);
+  const del = useProjectStore((s) => s.deleteRack);
+  const add = useProjectStore((s) => s.addRack);
+  const focus = useProjectStore((s) => s.focusObject);
+  const set = (r: Rack, key: keyof Rack, val: string | number) =>
+    update(r.id, { [key]: r[key] } as Partial<Rack>, { [key]: val } as Partial<Rack>);
+  return (
+    <div>
+      <table className={styles.table}>
+        <thead>
+          <tr>
+            <th>Rack</th><th>RU height</th><th>Site</th><th>Mounted</th><th>Notes</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {racks.map((r) => {
+            const mounted = devices.filter((d) => d.rackId === r.id);
+            return (
+              <tr key={r.id}>
+                <td><Cell value={r.name} onCommit={(v) => set(r, 'name', v)} /></td>
+                <td><Cell type="number" value={String(r.ruHeight)} onCommit={(v) => set(r, 'ruHeight', Number(v) || 1)} /></td>
+                <td><Cell value={r.site ?? ''} onCommit={(v) => set(r, 'site', v)} /></td>
+                <td>
+                  {mounted.length === 0 ? (
+                    <span style={{ color: 'var(--chrome-fg-muted)' }}>—</span>
+                  ) : (
+                    mounted.map((d, i) => (
+                      <span key={d.id}>
+                        <a style={{ color: 'var(--accent)', cursor: 'pointer' }} onClick={() => focus(d.id)}>
+                          {d.name}@U{d.ru ?? '?'}
+                        </a>
+                        {i < mounted.length - 1 ? ', ' : ''}
+                      </span>
+                    ))
+                  )}
+                </td>
+                <td><Cell value={r.notes ?? ''} onCommit={(v) => set(r, 'notes', v)} /></td>
+                <td><button className={styles.rowDelete} onClick={() => del(r.id)} aria-label="Delete rack">✕</button></td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <button className={styles.addRow} onClick={() => add(`Rack ${racks.length + 1}`)}>+ Add rack</button>
     </div>
   );
 }
