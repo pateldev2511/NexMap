@@ -5,6 +5,7 @@ import { Inspector } from './ui/Inspector/Inspector';
 import { BottomPanel } from './ui/BottomPanel/BottomPanel';
 import { FirstRun } from './ui/firstrun/FirstRun';
 import { RecoveryDialog } from './ui/dialogs/RecoveryDialog';
+import { ImportDialog } from './ui/dialogs/ImportDialog';
 import { ReadOnlyBanner, ErrorToast } from './ui/dialogs/ReadOnlyBanner';
 import { Canvas } from './canvas/Canvas';
 import { PerfHarness } from './perf/PerfHarness';
@@ -66,6 +67,7 @@ export function App() {
   const [theme, toggleTheme] = useTheme();
   const [view, setView] = useState<'editor' | 'perf'>('editor');
   const [firstRunDone, setFirstRunDone] = useState(false);
+  const [importing, setImporting] = useState(false);
   const canUndo = useProjectStore((s) => s.canUndo);
   const canRedo = useProjectStore((s) => s.canRedo);
   const undo = useProjectStore((s) => s.undo);
@@ -121,6 +123,9 @@ export function App() {
       </button>
       <button className={shell.topbarBtn} onClick={() => persistence.save()} title="Save (Ctrl+S)">
         Save
+      </button>
+      <button className={shell.topbarBtn} onClick={() => setImporting(true)} title="Import CSV">
+        Import
       </button>
       <button className={shell.topbarBtn} onClick={doUndo} disabled={!canUndo} title="Undo (Ctrl+Z)">
         ↶
@@ -201,6 +206,7 @@ export function App() {
             />
           )}
           {persistence.error && <ErrorToast message={persistence.error} />}
+          {importing && <ImportDialog onClose={() => setImporting(false)} />}
           <input
             ref={fileInputRef}
             type="file"

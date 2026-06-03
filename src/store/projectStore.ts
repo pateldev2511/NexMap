@@ -76,6 +76,10 @@ export interface ProjectStore {
   /** Commit the drag as a single undoable entry (no-op if nothing moved). */
   endDrag(): void;
   connect(sourceId: string, targetId: string): string | null;
+  /** Apply imported devices+links as ONE atomic, undoable transaction (DA-T2). */
+  importObjects(devices: Device[], links: Link[]): void;
+  /** Layer id new imported/created objects attach to. */
+  defaultLayerId(): string;
   updateDevice(id: string, before: Partial<Device>, after: Partial<Device>): void;
   updateLink(id: string, before: Partial<Link>, after: Partial<Link>): void;
   renameProject(before: string, after: string): void;
@@ -193,6 +197,22 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       commit(new AddLinkCommand(link));
       history.commitCoalesceBoundary();
       return link.id;
+    },
+
+    importObjects(devices, links) {
+      if (devices.length === 0 && links.length === 0) return;
+      const cmds: Command[] = [
+        ...devices.map((d) => new AddDeviceCommand(d)),
+        ...links.map((l) => new AddLinkCommand(l)),
+      ];
+      history.dispatch(transaction(`Import ${devices.length + links.length} objects`, cmds), model);
+      for (const d of devices) index.insert(d.id, deviceBox(d));
+      history.commitCoalesceBoundary();
+      set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
+    },
+
+    defaultLayerId() {
+      return firstLayerId();
     },
 
     updateDevice(id, before, after) {
