@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   connectorPoints,
   parallelPoints,
+  orthogonalPoints,
+  connectorLabelLines,
   pairKey,
   pathD,
   segmentMidpoints,
@@ -67,5 +69,27 @@ describe('parallel links', () => {
 
   it('pairKey is order-independent', () => {
     expect(pairKey(createLink(a.id, b.id, L))).toBe(pairKey(createLink(b.id, a.id, L)));
+  });
+});
+
+describe('orthogonal routing + multi-label', () => {
+  it('orthogonalPoints makes a Z-elbow via mid-x', () => {
+    const pts = orthogonalPoints({ x: 0, y: 0 }, { x: 100, y: 60 });
+    expect(pts).toEqual([
+      { x: 0, y: 0 },
+      { x: 50, y: 0 },
+      { x: 50, y: 60 },
+      { x: 100, y: 60 },
+    ]);
+  });
+
+  it('orthogonalPoints leaves already-straight runs alone', () => {
+    expect(orthogonalPoints({ x: 0, y: 0 }, { x: 100, y: 0 })).toHaveLength(2);
+  });
+
+  it('connectorLabelLines stacks configured labels', () => {
+    const link = createLink(a.id, b.id, L, { name: 'up', bandwidth: '10G', vlan: '10,20', lacp: 'Po1' });
+    expect(connectorLabelLines(link)).toEqual(['up', '10G', 'VLAN 10,20', 'LACP Po1']);
+    expect(connectorLabelLines(createLink(a.id, b.id, L))).toEqual([]);
   });
 });

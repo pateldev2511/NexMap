@@ -131,6 +131,12 @@ function LinkInspector({ link }: { link: Link }) {
             <option value="both">Both ends</option>
           </select>
         </Field>
+        <Field label="Routing">
+          <select value={link.routing ?? 'straight'} onChange={(e) => { set('routing', e.target.value as 'straight' | 'orthogonal'); endEdit(); }}>
+            <option value="straight">Straight</option>
+            <option value="orthogonal">Orthogonal (elbow)</option>
+          </select>
+        </Field>
         {(link.waypoints?.length ?? 0) > 0 && (
           <Field label="Waypoints">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -159,6 +165,21 @@ function LinkInspector({ link }: { link: Link }) {
         </Field>
         <Field label="Target interface">
           <input value={link.targetInterface ?? ''} placeholder="Gi0/2" onChange={(e) => set('targetInterface', e.target.value)} onBlur={endEdit} />
+        </Field>
+      </div>
+      <div className={styles.group}>
+        <div className={styles.groupTitle}>VLAN / Trunk</div>
+        <Field label="VLANs carried">
+          <input value={link.vlan ?? ''} placeholder="10,20,30" onChange={(e) => set('vlan', e.target.value)} onBlur={endEdit} />
+        </Field>
+        <Field label="Native VLAN">
+          <input value={link.nativeVlan ?? ''} placeholder="1" onChange={(e) => set('nativeVlan', e.target.value)} onBlur={endEdit} />
+        </Field>
+        <Field label="LACP / port-channel">
+          <input value={link.lacp ?? ''} placeholder="Po1" onChange={(e) => set('lacp', e.target.value)} onBlur={endEdit} />
+        </Field>
+        <Field label="Circuit ID">
+          <input value={link.circuitId ?? ''} onChange={(e) => set('circuitId', e.target.value)} onBlur={endEdit} />
         </Field>
       </div>
     </>

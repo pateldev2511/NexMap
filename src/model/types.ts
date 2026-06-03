@@ -91,6 +91,13 @@ export interface Link {
   arrow?: 'none' | 'end' | 'both';
   /** Line style. */
   style?: 'solid' | 'dashed';
+  /** Routing: straight polyline (default) or orthogonal elbow. */
+  routing?: 'straight' | 'orthogonal';
+  // Extra connector labels (rendered stacked at the midpoint).
+  vlan?: string;
+  nativeVlan?: string;
+  lacp?: string;
+  circuitId?: string;
   extra?: ExtraFields;
 }
 

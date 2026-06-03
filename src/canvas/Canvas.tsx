@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { DeviceType } from '@/model/types';
 import { useProjectStore } from '@/store/projectStore';
+import { getConnectMode } from '@/lib/prefs';
 import { DeviceNode } from './DeviceNode';
 import { ObjectNode } from './ObjectNode';
 import { CanvasToolbar } from './CanvasToolbar';
 import {
   connectorPoints,
   parallelPoints,
+  orthogonalPoints,
+  center,
   pairKey,
   alongFrom,
   pathD,
   segmentMidpoints,
   labelAnchor,
-  connectorLabel,
+  connectorLabelLines,
 } from './connector';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import {
@@ -432,17 +435,20 @@ export function Canvas() {
       } else if (g.kind === 'link') {
         const target = linkTarget;
         cancelLink();
-        if (target && target !== g.sourceId) {
-          // Drag-to-connect.
+        const cm = getConnectMode();
+        if (cm !== 'click' && target && target !== g.sourceId) {
+          // Drag-to-connect (allowed in 'both' and 'drag').
           const id = store().connect(g.sourceId, target);
           if (id) {
             store().select([id]);
             store().runValidation();
           }
           setPending(null);
-        } else {
-          // No drag target → arm click-to-connect from this source.
+        } else if (cm !== 'drag') {
+          // Arm click-to-connect (allowed in 'both' and 'click').
           setPending(g.sourceId);
+        } else {
+          setPending(null);
         }
       } else if (g.kind === 'marquee' && marquee) {
         const tl = screenToCanvas(viewport, marquee.x, marquee.y);
@@ -615,11 +621,15 @@ export function Canvas() {
             const b = store().getDevice(l.targetId);
             if (!a || !b) return null;
             const group = linkGroups.get(pairKey(l)) ?? [l.id];
-            const pts = parallelPoints(l, a, b, group.indexOf(l.id), group.length);
+            const noWp = (l.waypoints?.length ?? 0) === 0;
+            const pts =
+              l.routing === 'orthogonal' && noWp
+                ? orthogonalPoints(center(a), center(b))
+                : parallelPoints(l, a, b, group.indexOf(l.id), group.length);
             const d = pathD(pts);
             const sel = selection.has(l.id);
-            const label = connectorLabel(l);
-            const lblAt = label ? labelAnchor(pts) : null;
+            const labelLines = connectorLabelLines(l);
+            const lblAt = labelLines.length ? labelAnchor(pts) : null;
             const arrow = l.arrow ?? 'end';
             const first = pts[0]!;
             const last = pts[pts.length - 1]!;
@@ -644,8 +654,12 @@ export function Canvas() {
                   markerStart={arrow === 'both' ? 'url(#nexmap-arrow)' : undefined}
                 />
                 {lblAt && (
-                  <text className={styles.linkLabel} x={lblAt.x} y={lblAt.y - 4}>
-                    {label}
+                  <text className={styles.linkLabel} x={lblAt.x} y={lblAt.y - 4 - (labelLines.length - 1) * 11}>
+                    {labelLines.map((line, i) => (
+                      <tspan key={i} x={lblAt.x} dy={i === 0 ? 0 : 11}>
+                        {line}
+                      </tspan>
+                    ))}
                   </text>
                 )}
                 {srcLbl && (

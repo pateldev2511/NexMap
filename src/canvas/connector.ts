@@ -52,6 +52,29 @@ export function parallelPoints(
   return [a, mid, b];
 }
 
+/**
+ * Convert a 2-point straight run into an orthogonal Z-elbow (horizontal-first
+ * via the mid-x). Applied only to the source→target run when routing is
+ * orthogonal and there are no explicit waypoints.
+ */
+export function orthogonalPoints(a: Pt, b: Pt): Pt[] {
+  if (a.x === b.x || a.y === b.y) return [a, b]; // already straight
+  const midX = (a.x + b.x) / 2;
+  return [a, { x: midX, y: a.y }, { x: midX, y: b.y }, b];
+}
+
+/** The connector's stacked label lines (multi-label: name, bandwidth, VLANs, etc.). */
+export function connectorLabelLines(link: Link): string[] {
+  const lines: string[] = [];
+  if (link.name?.trim()) lines.push(link.name.trim());
+  if (link.bandwidth?.trim()) lines.push(link.bandwidth.trim());
+  if (link.vlan?.trim()) lines.push(`VLAN ${link.vlan.trim()}`);
+  if (link.nativeVlan?.trim()) lines.push(`native ${link.nativeVlan.trim()}`);
+  if (link.lacp?.trim()) lines.push(`LACP ${link.lacp.trim()}`);
+  if (link.circuitId?.trim()) lines.push(`circuit ${link.circuitId.trim()}`);
+  return lines;
+}
+
 /** A point a short distance from `from` toward `to` (for endpoint labels). */
 export function alongFrom(from: Pt, to: Pt, dist: number): Pt {
   const dx = to.x - from.x;

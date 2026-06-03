@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { getConnectMode, setConnectMode, type ConnectMode } from '@/lib/prefs';
 import styles from './ImportDialog.module.css';
 
 const GROUPS: { title: string; items: [string, string][] }[] = [
@@ -37,11 +39,12 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
 ];
 
 export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
+  const [connect, setConnect] = useState<ConnectMode>(() => getConnectMode());
   return (
     <div className={styles.overlay} onClick={onClose}>
       <div className={styles.dialog} onClick={(e) => e.stopPropagation()}>
         <div className={styles.head}>
-          <h2>Keyboard shortcuts</h2>
+          <h2>Keyboard shortcuts &amp; settings</h2>
           <button className={styles.close} onClick={onClose} aria-label="Close">
             ✕
           </button>
@@ -61,6 +64,22 @@ export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
                 ))}
               </div>
             ))}
+          </div>
+          <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--chrome-border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 12, color: 'var(--chrome-fg-muted)' }}>Connect behavior:</span>
+            <select
+              value={connect}
+              onChange={(e) => {
+                const m = e.target.value as ConnectMode;
+                setConnect(m);
+                setConnectMode(m);
+              }}
+              style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--chrome-border)', background: 'var(--canvas-bg)', color: 'var(--chrome-fg)' }}
+            >
+              <option value="both">Click or drag</option>
+              <option value="drag">Drag only</option>
+              <option value="click">Click only</option>
+            </select>
           </div>
         </div>
         <div className={styles.foot}>

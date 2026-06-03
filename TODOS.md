@@ -63,14 +63,15 @@ import, export, shortcuts.
 - Remaining Phase-1 nice-to-haves (deferred, low priority): shape resize handles,
       object grouping/z-order, full isometric styling, tablet gestures.
 
-## Phase 2 — Connector System
-- Editable connectors: waypoints, reroute handles, arrows, line styles,
-  bandwidth/status labels, parallel-link spacing.
-- Click-to-connect + drag-to-connect modes, with a preferred-behavior setting.
-- Multiple labels per connector (interface, VLAN, bandwidth, native VLAN, LACP,
-  circuit ID, notes).
-- Edge cases: duplicate/self/missing/hidden-endpoint links, very short links, many
-  parallel links, labels crossing devices, undoing reroutes.
+## Phase 2 — Connector System  ✅ COMPLETE
+- [x] Editable connectors: waypoints, reroute handles, arrows, line styles,
+  midpoint label, parallel-link spacing (fan-out)
+- [x] Click-to-connect + drag-to-connect, with a persisted preferred-behavior setting
+- [x] Multiple labels per connector (name, bandwidth, VLAN, native VLAN, LACP,
+  circuit ID + source/target interface labels at endpoints)
+- [x] Orthogonal (elbow) routing option
+- Deferred (low priority): obstacle-avoiding auto-routing, curved/freeform links,
+  per-segment orthogonal routing through waypoints.
 
 ## Phase 3 — Export & Import Upgrade
 - Export dialog: live preview, crop-to-selection/content, custom filename, DPI/scale
