@@ -14,3 +14,19 @@ export function getConnectMode(): ConnectMode {
 export function setConnectMode(mode: ConnectMode): void {
   localStorage.setItem(KEY, mode);
 }
+
+const RM_KEY = 'nexmap.reduceMotion';
+
+export function getReduceMotion(): boolean {
+  return localStorage.getItem(RM_KEY) === '1';
+}
+
+export function setReduceMotion(on: boolean): void {
+  localStorage.setItem(RM_KEY, on ? '1' : '0');
+  applyReduceMotion(on);
+}
+
+/** Apply the manual reduced-motion override (composes with prefers-reduced-motion). */
+export function applyReduceMotion(on: boolean): void {
+  document.documentElement.dataset.reduceMotion = on ? 'true' : 'false';
+}

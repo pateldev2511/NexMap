@@ -73,6 +73,11 @@ body {
   }
 }
 
+:root[data-reduce-motion='true'] * {
+  animation-duration: 0.001ms !important;
+  transition-duration: 0.001ms !important;
+}
+
 button {
   font: inherit;
   cursor: pointer;

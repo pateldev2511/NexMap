@@ -10,6 +10,8 @@ import { ExportDialog } from './ui/dialogs/ExportDialog';
 import { ShortcutsDialog } from './ui/dialogs/ShortcutsDialog';
 import { ViewSwitcher } from './ui/ViewSwitcher';
 import { RackView } from './ui/RackView/RackView';
+import { SettingsDialog } from './ui/dialogs/SettingsDialog';
+import { applyReduceMotion, getReduceMotion } from './lib/prefs';
 import { ReadOnlyBanner, ErrorToast } from './ui/dialogs/ReadOnlyBanner';
 import { Canvas } from './canvas/Canvas';
 import { PerfHarness } from './perf/PerfHarness';
@@ -77,6 +79,7 @@ export function App() {
   const [presentation, setPresentation] = useState(false);
   const [showPages, setShowPages] = useState(false);
   const [rackView, setRackView] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const canUndo = useProjectStore((s) => s.canUndo);
   const canRedo = useProjectStore((s) => s.canRedo);
   const undo = useProjectStore((s) => s.undo);
@@ -87,6 +90,11 @@ export function App() {
 
   const persistence = usePersistence();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Apply the saved reduced-motion preference on launch.
+  useEffect(() => {
+    applyReduceMotion(getReduceMotion());
+  }, []);
 
   // Live validation: re-run debounced on any model change (the wedge — DA-DES-2.5).
   useEffect(() => {
@@ -173,6 +181,9 @@ export function App() {
       </button>
       <button className={shell.topbarBtn} onClick={toggleTheme} aria-label="Toggle theme">
         {theme === 'light' ? '☽' : '☀'}
+      </button>
+      <button className={shell.topbarBtn} onClick={() => setShowSettings(true)} aria-label="Settings" title="Settings">
+        ⚙
       </button>
       <button className={shell.topbarBtn} onClick={() => setShowHelp(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">
         ?
@@ -287,6 +298,9 @@ export function App() {
           {importing && <ImportDialog onClose={() => setImporting(false)} />}
           {exporting && <ExportDialog onClose={() => setExporting(false)} />}
           {showHelp && <ShortcutsDialog onClose={() => setShowHelp(false)} />}
+          {showSettings && (
+            <SettingsDialog theme={theme} onToggleTheme={toggleTheme} onClose={() => setShowSettings(false)} />
+          )}
           <input
             ref={fileInputRef}
             type="file"

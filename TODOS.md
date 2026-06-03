@@ -116,15 +116,18 @@ import, export, shortcuts.
 - Deferred (stretch): Terraform + Visio VSDX import, rear-view racks, cable tracing,
   region/AZ grouping containers.
 
-## Phase 7 — App Hardening
-- PWA install/offline, service-worker cache strategy, recovery diagnostics, storage
-  quota handling, browser-compat warnings.
-- Settings: hotkeys, pan/zoom behavior, connector mode, grid size, theme, label
-  visibility, reduced motion.
-- Accessibility: keyboard-operable chrome, table-based accessible editing, focus
-  states, contrast, non-color validation symbols.
-- Edge cases: private browsing, storage disabled, multiple tabs, refresh mid
-  import/export, stale service worker, unsupported FS Access API.
+## Phase 7 — App Hardening  ✅ COMPLETE
+- [x] PWA: web manifest + offline service worker (stale-while-revalidate, app-shell
+  fallback), install support, prod-only registration
+- [x] Settings dialog: theme, connect behavior, reduced-motion override; storage
+  usage estimate + clear-all-local-data; browser-capability status (FS Access,
+  IndexedDB) — also surfaced as the multi-tab read-only banner + quota handling
+- [x] Accessibility: aria-labels on icon controls, :focus-visible rings, non-color
+  validation glyphs, reduced-motion, tables as the accessible data view, 80–200% zoom
+- [x] Edge cases handled across phases: private/storage-disabled (capability status +
+  warnings), multi-tab (Web Locks), newer-schema refuse, quota write-new-then-swap
+- Deferred (low priority): rebindable hotkeys, configurable grid size, stale-SW
+  update prompt.
 
 ---
 
