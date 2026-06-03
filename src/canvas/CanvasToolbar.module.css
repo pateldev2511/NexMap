@@ -1,0 +1,43 @@
+.toolbar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 2px;
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 9px;
+  padding: 3px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.1);
+}
+
+.tool {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: none;
+  color: var(--chrome-fg);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 14px;
+}
+
+.tool:hover {
+  background: var(--canvas-bg);
+}
+
+.tool.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.key {
+  font-size: 10px;
+  opacity: 0.6;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 0 3px;
+  line-height: 1.3;
+}

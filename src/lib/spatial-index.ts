@@ -124,6 +124,17 @@ export class SpatialIndex {
 
   /** IDs whose bounding box intersects the query box (e.g. viewport cull, box-select). */
   query(box: Box): string[] {
+    // Guard: if the box spans more grid cells than we have entries (pathological
+    // box — huge, NaN-derived, or a caller bug), scan entries directly. Query cost
+    // is then bounded by min(cells, entries) and can never freeze the tab.
+    const span = this.cellSpan(box);
+    if (!Number.isFinite(span) || span > this.entries.size) {
+      const found: string[] = [];
+      for (const entry of this.entries.values()) {
+        if (boxesIntersect(entry.box, box)) found.push(entry.id);
+      }
+      return found;
+    }
     const found = new Set<string>();
     for (const key of this.cellsFor(box)) {
       const set = this.cells.get(key);
@@ -134,6 +145,13 @@ export class SpatialIndex {
       }
     }
     return [...found];
+  }
+
+  /** Number of grid cells a box covers (without materializing them). */
+  private cellSpan(box: Box): number {
+    const cols = Math.floor((box.x + box.width) / this.cellSize) - Math.floor(box.x / this.cellSize) + 1;
+    const rows = Math.floor((box.y + box.height) / this.cellSize) - Math.floor(box.y / this.cellSize) + 1;
+    return cols * rows;
   }
 
   /** IDs whose box contains the point (hit-testing). Topmost-last by insertion. */

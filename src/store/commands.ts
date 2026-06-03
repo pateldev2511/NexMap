@@ -106,6 +106,53 @@ export class UpdateDeviceCommand implements Command {
   }
 }
 
+export class UpdateLinkCommand implements Command {
+  readonly label = 'Edit link';
+  constructor(
+    private readonly id: string,
+    private readonly before: Partial<Link>,
+    private readonly after: Partial<Link>,
+  ) {}
+  apply(s: ModelState) {
+    const l = s.links.get(this.id);
+    if (l) s.links.set(this.id, { ...l, ...this.after });
+  }
+  undo(s: ModelState) {
+    const l = s.links.get(this.id);
+    if (l) s.links.set(this.id, { ...l, ...this.before });
+  }
+  mergeWith(next: Command): Command | null {
+    if (
+      next instanceof UpdateLinkCommand &&
+      next.id === this.id &&
+      sameKeys(this.after, next.after)
+    ) {
+      return new UpdateLinkCommand(this.id, this.before, next.after);
+    }
+    return null;
+  }
+}
+
+export class RenameProjectCommand implements Command {
+  readonly label = 'Rename project';
+  constructor(
+    private readonly before: string,
+    private readonly after: string,
+  ) {}
+  apply(s: ModelState) {
+    s.project = { ...s.project, name: this.after };
+  }
+  undo(s: ModelState) {
+    s.project = { ...s.project, name: this.before };
+  }
+  mergeWith(next: Command): Command | null {
+    if (next instanceof RenameProjectCommand) {
+      return new RenameProjectCommand(this.before, next.after);
+    }
+    return null;
+  }
+}
+
 /**
  * Delete devices (and cascade their incident links) atomically. Captures the full
  * removed set at apply-time so undo restores devices AND links exactly (DA-E6).

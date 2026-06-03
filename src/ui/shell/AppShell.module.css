@@ -35,6 +35,41 @@
   font-size: 12px;
 }
 
+.titleEdit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.titleInput {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--chrome-fg);
+  font: inherit;
+  font-size: 13px;
+  padding: 2px 6px;
+  width: 220px;
+}
+
+.titleInput:hover {
+  border-color: var(--chrome-border);
+}
+
+.titleInput:focus {
+  border-color: var(--accent);
+  background: var(--canvas-bg);
+  outline: none;
+}
+
+.dirtyDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--sev-warn);
+  flex: none;
+}
+
 .topbarSpacer {
   flex: 1;
 }

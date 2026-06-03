@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { AppShell } from './ui/shell/AppShell';
 import { Library } from './ui/LeftSidebar/Library';
+import { Inspector } from './ui/Inspector/Inspector';
+import { FirstRun } from './ui/firstrun/FirstRun';
 import { Canvas } from './canvas/Canvas';
 import { PerfHarness } from './perf/PerfHarness';
 import { useProjectStore } from './store/projectStore';
@@ -21,7 +23,6 @@ function useTheme(): [Theme, () => void] {
   return [theme, () => setTheme((t) => (t === 'light' ? 'dark' : 'light'))];
 }
 
-/** Status-bar validation summary — a preview of the M5 wedge UI. */
 function ValidationSummary() {
   const issues = useProjectStore((s) => s.issues);
   if (issues.length === 0) return <span>No issues</span>;
@@ -38,16 +39,35 @@ function ValidationSummary() {
   );
 }
 
+function EditableTitle() {
+  const name = useProjectStore((s) => s.projectName);
+  const dirty = useProjectStore((s) => s.dirty);
+  const rename = useProjectStore((s) => s.renameProject);
+  const endEdit = useProjectStore((s) => s.endEdit);
+  return (
+    <div className={shell.titleEdit}>
+      <input
+        className={shell.titleInput}
+        value={name}
+        aria-label="Project name"
+        onChange={(e) => rename(name, e.target.value)}
+        onBlur={endEdit}
+      />
+      {dirty && <span className={shell.dirtyDot} title="Unsaved changes" />}
+    </div>
+  );
+}
+
 export function App() {
   const [theme, toggleTheme] = useTheme();
   const [view, setView] = useState<'editor' | 'perf'>('editor');
+  const [firstRunDone, setFirstRunDone] = useState(false);
   const canUndo = useProjectStore((s) => s.canUndo);
   const canRedo = useProjectStore((s) => s.canRedo);
   const undo = useProjectStore((s) => s.undo);
   const redo = useProjectStore((s) => s.redo);
   const runValidation = useProjectStore((s) => s.runValidation);
 
-  // Validation re-runs after undo/redo (live-validation preview ahead of M5).
   function doUndo() {
     undo();
     runValidation();
@@ -77,7 +97,6 @@ export function App() {
     </>
   );
 
-  // Global undo/redo keyboard shortcuts.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
@@ -106,11 +125,18 @@ export function App() {
   return (
     <AppShell
       actions={actions}
+      titleNode={<EditableTitle />}
       left={<Library />}
-      canvas={<Canvas />}
+      right={<Inspector />}
+      canvas={
+        <>
+          <Canvas />
+          {!firstRunDone && <FirstRun onDone={() => setFirstRunDone(true)} />}
+        </>
+      }
       status={
         <>
-          <span>Drag a device from the left to start</span>
+          <span>Drag a device, or hover one and drag the blue handle to connect</span>
           <span style={{ marginLeft: 'auto' }} />
           <ValidationSummary />
         </>

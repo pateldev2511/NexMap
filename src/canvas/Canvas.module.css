@@ -22,6 +22,31 @@
   cursor: grab;
 }
 
+.svg.connectMode {
+  cursor: crosshair;
+}
+
+.rubber {
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 5 3;
+  fill: none;
+  pointer-events: none;
+}
+
+.connectHandle {
+  fill: var(--accent);
+  stroke: #fff;
+  stroke-width: 1;
+  cursor: crosshair;
+}
+
+.node.validTarget .body {
+  stroke: var(--accent);
+  stroke-width: 3;
+  fill: color-mix(in srgb, var(--accent) 10%, var(--chrome-bg));
+}
+
 .node {
   cursor: pointer;
 }

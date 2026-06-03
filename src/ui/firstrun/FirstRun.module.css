@@ -1,0 +1,95 @@
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--canvas-bg) 86%, transparent);
+  backdrop-filter: blur(1px);
+  z-index: 5;
+}
+
+.card {
+  width: min(520px, 90%);
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.14);
+  padding: 22px;
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0 0 2px;
+}
+
+.title span {
+  color: var(--accent);
+}
+
+.tagline {
+  color: var(--chrome-fg-muted);
+  font-size: 12px;
+  margin: 0 0 16px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.template {
+  text-align: left;
+  background: var(--canvas-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 9px;
+  padding: 12px;
+  cursor: pointer;
+}
+
+.template:hover {
+  border-color: var(--accent);
+}
+
+.template strong {
+  display: block;
+  margin-bottom: 3px;
+}
+
+.template span {
+  color: var(--chrome-fg-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.openBtn {
+  border: 1px solid var(--chrome-border);
+  background: transparent;
+  color: var(--chrome-fg);
+  border-radius: 7px;
+  padding: 8px 12px;
+}
+
+.openBtn:hover {
+  border-color: var(--accent);
+}
+
+.localNote {
+  margin-left: auto;
+  color: var(--chrome-fg-muted);
+  font-size: 11px;
+}
+
+.error {
+  color: var(--sev-error);
+  font-size: 11px;
+  margin-top: 8px;
+}

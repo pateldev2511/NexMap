@@ -1,0 +1,222 @@
+import { useProjectStore } from '@/store/projectStore';
+import type { Device, DeviceType, Link } from '@/model/types';
+import { isValidIp, isValidCidr } from '@/lib/ipcidr';
+import { defaultDeviceName } from '@/model/schema';
+import styles from './Inspector.module.css';
+
+/**
+ * Properties inspector (design review DA-DES-4.1). Grouped fields, MVP subset
+ * (~8 device fields), undoable edits with inline validation. Single selection →
+ * full detail; multi → count + shared delete; empty → project properties.
+ */
+
+const DEVICE_TYPES: DeviceType[] = [
+  'router', 'switch', 'firewall', 'access-point', 'wireless-controller', 'server',
+  'storage', 'load-balancer', 'end-user', 'printer', 'iot', 'isp', 'cloud', 'vm',
+  'container', 'rack', 'patch-panel', 'ups', 'camera', 'generic',
+];
+
+function ipError(value: string | undefined): string | null {
+  const v = value?.trim();
+  if (!v) return null;
+  if (v.includes('/')) return isValidCidr(v) ? null : 'Not a valid CIDR.';
+  return isValidIp(v) ? null : 'Not a valid IP address.';
+}
+
+function DeviceInspector({ device }: { device: Device }) {
+  const updateDevice = useProjectStore((s) => s.updateDevice);
+  const endEdit = useProjectStore((s) => s.endEdit);
+
+  function set<K extends keyof Device>(key: K, value: Device[K]) {
+    updateDevice(device.id, { [key]: device[key] } as Partial<Device>, {
+      [key]: value,
+    } as Partial<Device>);
+  }
+
+  const mgmtErr = ipError(device.managementIp);
+
+  return (
+    <>
+      <div className={styles.group}>
+        <div className={styles.groupTitle}>Identity</div>
+        <Field label="Name">
+          <input
+            value={device.name}
+            onChange={(e) => set('name', e.target.value)}
+            onBlur={endEdit}
+          />
+        </Field>
+        <Field label="Type">
+          <select value={device.type} onChange={(e) => { set('type', e.target.value as DeviceType); endEdit(); }}>
+            {DEVICE_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {defaultDeviceName(t)}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Vendor">
+          <input value={device.vendor ?? ''} onChange={(e) => set('vendor', e.target.value)} onBlur={endEdit} />
+        </Field>
+        <Field label="Model">
+          <input value={device.model ?? ''} onChange={(e) => set('model', e.target.value)} onBlur={endEdit} />
+        </Field>
+        <Field label="Role">
+          <input value={device.role ?? ''} onChange={(e) => set('role', e.target.value)} onBlur={endEdit} />
+        </Field>
+      </div>
+
+      <div className={styles.group}>
+        <div className={styles.groupTitle}>Network</div>
+        <Field label="Management IP" error={mgmtErr}>
+          <input
+            className={mgmtErr ? styles.invalid : ''}
+            value={device.managementIp ?? ''}
+            placeholder="10.0.0.1 or 10.0.0.1/24"
+            onChange={(e) => set('managementIp', e.target.value)}
+            onBlur={endEdit}
+          />
+        </Field>
+      </div>
+
+      <div className={styles.group}>
+        <div className={styles.groupTitle}>Location & Notes</div>
+        <Field label="Location">
+          <input value={device.location ?? ''} onChange={(e) => set('location', e.target.value)} onBlur={endEdit} />
+        </Field>
+        <Field label="Notes">
+          <textarea value={device.notes ?? ''} onChange={(e) => set('notes', e.target.value)} onBlur={endEdit} />
+        </Field>
+      </div>
+    </>
+  );
+}
+
+function LinkInspector({ link }: { link: Link }) {
+  const updateLink = useProjectStore((s) => s.updateLink);
+  const endEdit = useProjectStore((s) => s.endEdit);
+  const source = useProjectStore((s) => s.getDevice(link.sourceId));
+  const target = useProjectStore((s) => s.getDevice(link.targetId));
+
+  function set<K extends keyof Link>(key: K, value: Link[K]) {
+    updateLink(link.id, { [key]: link[key] } as Partial<Link>, { [key]: value } as Partial<Link>);
+  }
+
+  return (
+    <>
+      <div className={styles.group}>
+        <div className={styles.groupTitle}>Link</div>
+        <Field label="Name">
+          <input value={link.name ?? ''} onChange={(e) => set('name', e.target.value)} onBlur={endEdit} />
+        </Field>
+        <Field label="Type">
+          <input value={link.linkType ?? ''} placeholder="ethernet, fiber…" onChange={(e) => set('linkType', e.target.value)} onBlur={endEdit} />
+        </Field>
+        <Field label="Bandwidth">
+          <input value={link.bandwidth ?? ''} placeholder="1G, 10G…" onChange={(e) => set('bandwidth', e.target.value)} onBlur={endEdit} />
+        </Field>
+      </div>
+      <div className={styles.group}>
+        <div className={styles.groupTitle}>Endpoints</div>
+        <Field label="Source">
+          <div className={styles.readonly}>{source?.name ?? '(missing)'}</div>
+        </Field>
+        <Field label="Source interface">
+          <input value={link.sourceInterface ?? ''} placeholder="Gi0/1" onChange={(e) => set('sourceInterface', e.target.value)} onBlur={endEdit} />
+        </Field>
+        <Field label="Target">
+          <div className={styles.readonly}>{target?.name ?? '(missing)'}</div>
+        </Field>
+        <Field label="Target interface">
+          <input value={link.targetInterface ?? ''} placeholder="Gi0/2" onChange={(e) => set('targetInterface', e.target.value)} onBlur={endEdit} />
+        </Field>
+      </div>
+    </>
+  );
+}
+
+function ProjectInspector() {
+  const projectName = useProjectStore((s) => s.projectName);
+  const rename = useProjectStore((s) => s.renameProject);
+  const endEdit = useProjectStore((s) => s.endEdit);
+  return (
+    <div className={styles.group}>
+      <div className={styles.groupTitle}>Project</div>
+      <Field label="Name">
+        <input value={projectName} onChange={(e) => rename(projectName, e.target.value)} onBlur={endEdit} />
+      </Field>
+      <div className={styles.empty} style={{ padding: '4px 0' }}>
+        Select a device or link to edit its properties.
+      </div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  error,
+  children,
+}: {
+  label: string;
+  error?: string | null;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={styles.field}>
+      <label>{label}</label>
+      {children}
+      {error && <div className={styles.fieldError}>{error}</div>}
+    </div>
+  );
+}
+
+export function Inspector() {
+  // rev drives refresh when the selected object's fields change.
+  useProjectStore((s) => s.rev);
+  const selection = useProjectStore((s) => s.selection);
+  const store = useProjectStore.getState;
+  const ids = [...selection];
+
+  let body: React.ReactNode;
+  let head = 'Project';
+  let sub = '';
+
+  if (ids.length === 0) {
+    body = <ProjectInspector />;
+  } else if (ids.length === 1) {
+    const id = ids[0]!;
+    const device = store().getDevice(id);
+    if (device) {
+      head = device.name || defaultDeviceName(device.type);
+      sub = defaultDeviceName(device.type);
+      body = <DeviceInspector device={device} />;
+    } else {
+      const link = store().getLink(id);
+      if (link) {
+        head = link.name || 'Link';
+        sub = 'Connection';
+        body = <LinkInspector link={link} />;
+      } else {
+        body = <ProjectInspector />;
+      }
+    }
+  } else {
+    head = `${ids.length} selected`;
+    body = (
+      <div className={styles.empty}>
+        {ids.length} objects selected. Press Delete to remove them, or drag to move
+        together. Per-field multi-edit comes later.
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.inspector}>
+      <div className={styles.header}>
+        {head}
+        {sub && <span className={styles.subhead}> · {sub}</span>}
+      </div>
+      <div className={styles.scroll}>{body}</div>
+    </div>
+  );
+}

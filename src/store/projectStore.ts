@@ -20,10 +20,14 @@ import {
   AddLinkCommand,
   DeleteCommand,
   MoveDeviceCommand,
+  RenameProjectCommand,
   UpdateDeviceCommand,
+  UpdateLinkCommand,
   transaction,
   type Command,
 } from './commands';
+
+export type CanvasMode = 'select' | 'connect';
 import {
   emptyModel,
   fromDocument,
@@ -57,6 +61,8 @@ export interface ProjectStore {
   canUndo: boolean;
   canRedo: boolean;
   dirty: boolean;
+  mode: CanvasMode;
+  projectName: string;
 
   // --- actions (the only writers) ---
   addDeviceAt(type: DeviceType, x: number, y: number): string;
@@ -68,6 +74,10 @@ export interface ProjectStore {
   endDrag(): void;
   connect(sourceId: string, targetId: string): string | null;
   updateDevice(id: string, before: Partial<Device>, after: Partial<Device>): void;
+  updateLink(id: string, before: Partial<Link>, after: Partial<Link>): void;
+  renameProject(before: string, after: string): void;
+  setMode(mode: CanvasMode): void;
+  endEdit(): void;
   deleteSelection(): void;
   select(ids: string[], additive?: boolean): void;
   boxSelect(box: Box, additive?: boolean): void;
@@ -83,6 +93,7 @@ export interface ProjectStore {
   visibleDevices(viewport: Box): Device[];
   visibleLinks(viewport: Box): Link[];
   getDevice(id: string): Device | undefined;
+  getLink(id: string): Link | undefined;
   hitTest(x: number, y: number): string[];
   queryBox(box: Box): string[];
   contentBounds(): Box;
@@ -111,6 +122,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     canUndo: false,
     canRedo: false,
     dirty: false,
+    mode: 'select',
+    projectName: model.project.name,
 
     addDeviceAt(type, x, y) {
       const device = createDevice(type, x, y, firstLayerId());
@@ -175,6 +188,25 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       commit(new UpdateDeviceCommand(id, before, after));
     },
 
+    updateLink(id, before, after) {
+      commit(new UpdateLinkCommand(id, before, after));
+    },
+
+    renameProject(before, after) {
+      commit(new RenameProjectCommand(before, after));
+      set({ projectName: after });
+    },
+
+    setMode(mode) {
+      set({ mode });
+    },
+
+    endEdit() {
+      // Close the current coalescing window so the next field edit is its own undo.
+      history.commitCoalesceBoundary();
+      set({ canUndo: history.canUndo, canRedo: history.canRedo });
+    },
+
     deleteSelection() {
       const ids = [...get().selection];
       if (ids.length === 0) return;
@@ -204,14 +236,26 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     undo() {
       if (history.undo(model)) {
         rebuildIndex();
-        set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
+        set({
+          rev: get().rev + 1,
+          canUndo: history.canUndo,
+          canRedo: history.canRedo,
+          dirty: true,
+          projectName: model.project.name,
+        });
       }
     },
 
     redo() {
       if (history.redo(model)) {
         rebuildIndex();
-        set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
+        set({
+          rev: get().rev + 1,
+          canUndo: history.canUndo,
+          canRedo: history.canRedo,
+          dirty: true,
+          projectName: model.project.name,
+        });
       }
     },
 
@@ -240,6 +284,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         canUndo: false,
         canRedo: false,
         dirty: false,
+        projectName: doc.project.name,
       });
     },
 
@@ -275,6 +320,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     getDevice(id) {
       return model.devices.get(id);
+    },
+
+    getLink(id) {
+      return model.links.get(id);
     },
 
     hitTest(x, y) {

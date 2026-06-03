@@ -1,0 +1,85 @@
+.inspector {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-size: 12px;
+}
+
+.header {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--chrome-border);
+  font-weight: 600;
+}
+
+.subhead {
+  color: var(--chrome-fg-muted);
+  font-weight: 400;
+  font-size: 11px;
+}
+
+.scroll {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.group {
+  border-bottom: 1px solid var(--chrome-border);
+  padding: 8px 12px 12px;
+}
+
+.groupTitle {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--chrome-fg-muted);
+  margin: 4px 0 8px;
+}
+
+.field {
+  margin-bottom: 8px;
+}
+
+.field label {
+  display: block;
+  color: var(--chrome-fg-muted);
+  margin-bottom: 3px;
+  font-size: 11px;
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  padding: 5px 7px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 5px;
+  background: var(--canvas-bg);
+  color: var(--chrome-fg);
+  font: inherit;
+}
+
+.field textarea {
+  resize: vertical;
+  min-height: 48px;
+}
+
+.field input.invalid {
+  border-color: var(--sev-error);
+}
+
+.fieldError {
+  color: var(--sev-error);
+  font-size: 10px;
+  margin-top: 3px;
+}
+
+.readonly {
+  color: var(--chrome-fg);
+  padding: 4px 0;
+}
+
+.empty {
+  color: var(--chrome-fg-muted);
+  padding: 16px 12px;
+  line-height: 1.5;
+}

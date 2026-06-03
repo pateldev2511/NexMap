@@ -8,6 +8,8 @@ interface DeviceNodeProps {
   selected: boolean;
   /** Current zoom — drives level-of-detail (DA-DES-3.4). */
   scale: number;
+  /** Highlighted as a valid drop target while connecting. */
+  validTarget?: boolean;
   onPointerDown: (e: React.PointerEvent, id: string) => void;
 }
 
@@ -16,7 +18,13 @@ interface DeviceNodeProps {
  * doesn't re-render every node. LOD hides the name label when zoomed out, which
  * is both a legibility and a paint-cost win at scale.
  */
-function DeviceNodeImpl({ device, selected, scale, onPointerDown }: DeviceNodeProps) {
+function DeviceNodeImpl({
+  device,
+  selected,
+  scale,
+  validTarget,
+  onPointerDown,
+}: DeviceNodeProps) {
   const visual = deviceVisual(device.type);
   const showLabel = scale >= LOD_LABEL_HIDE;
   const detailed = scale >= LOD_GLYPH_ONLY;
@@ -24,7 +32,9 @@ function DeviceNodeImpl({ device, selected, scale, onPointerDown }: DeviceNodePr
 
   return (
     <g
-      className={`${styles.node} ${selected ? styles.selected : ''}`}
+      className={`${styles.node} ${selected ? styles.selected : ''} ${
+        validTarget ? styles.validTarget : ''
+      }`}
       transform={`translate(${device.x} ${device.y})`}
       onPointerDown={(e) => onPointerDown(e, device.id)}
       data-id={device.id}

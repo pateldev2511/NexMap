@@ -13,6 +13,8 @@ interface AppShellProps {
   /** Status bar content (zoom, autosave, validation summary). */
   status?: ReactNode;
   projectName?: string;
+  /** Optional node rendered in place of the static project name (e.g. editable title). */
+  titleNode?: ReactNode;
 }
 
 /**
@@ -27,6 +29,7 @@ export function AppShell({
   actions,
   status,
   projectName = 'Untitled NexMap Project',
+  titleNode,
 }: AppShellProps) {
   return (
     <div className={styles.shell}>
@@ -34,7 +37,7 @@ export function AppShell({
         <div className={styles.brand}>
           Nex<span>Map</span>
         </div>
-        <div className={styles.projectName}>{projectName}</div>
+        {titleNode ?? <div className={styles.projectName}>{projectName}</div>}
         <div className={styles.topbarSpacer} />
         <div className={styles.topbarActions}>{actions}</div>
       </header>

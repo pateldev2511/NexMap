@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import type { DeviceType } from '@/model/types';
 import { useProjectStore } from '@/store/projectStore';
 import { DeviceNode } from './DeviceNode';
+import { CanvasToolbar } from './CanvasToolbar';
 import {
   fitToBox,
   initialViewport,
@@ -18,9 +19,10 @@ type Gesture =
   | { kind: 'none' }
   | { kind: 'pan'; lastX: number; lastY: number }
   | { kind: 'drag'; startX: number; startY: number; moved: boolean }
-  | { kind: 'marquee'; startX: number; startY: number; additive: boolean };
+  | { kind: 'marquee'; startX: number; startY: number; additive: boolean }
+  | { kind: 'link'; sourceId: string };
 
-const ZOOM_STEP = 1.0015; // per wheel-delta unit
+const ZOOM_STEP = 1.0015;
 
 export function Canvas() {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -30,15 +32,17 @@ export function Canvas() {
   const [marquee, setMarquee] = useState<null | { x: number; y: number; w: number; h: number }>(
     null,
   );
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [linkCursor, setLinkCursor] = useState<{ x: number; y: number } | null>(null);
+  const [linkTarget, setLinkTarget] = useState<string | null>(null);
   const gesture = useRef<Gesture>({ kind: 'none' });
   const altHeld = useRef(false);
 
-  // Subscribe to model changes via rev; read scene through the SceneSource API.
   const rev = useProjectStore((s) => s.rev);
   const selection = useProjectStore((s) => s.selection);
+  const mode = useProjectStore((s) => s.mode);
   const store = useProjectStore.getState;
 
-  // Track container size for culling + coordinate math.
   useLayoutEffect(() => {
     const el = rootRef.current;
     if (!el) return;
@@ -49,18 +53,26 @@ export function Canvas() {
     return () => ro.disconnect();
   }, []);
 
-  // Space-to-pan + Alt-to-suspend-snap + delete, at the window level.
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !isTextTarget(e.target)) {
+      if (isTextTarget(e.target)) return;
+      if (e.code === 'Space') {
         e.preventDefault();
         setSpaceHeld(true);
       }
       if (e.key === 'Alt') altHeld.current = true;
-      if ((e.key === 'Delete' || e.key === 'Backspace') && !isTextTarget(e.target)) {
+      if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
         store().deleteSelection();
         store().runValidation();
+      }
+      if (e.key === 'v' || e.key === 'V') store().setMode('select');
+      if (e.key === 'c' || e.key === 'C' || e.key === 'l' || e.key === 'L')
+        store().setMode('connect');
+      if (e.key === 'Escape') {
+        if (gesture.current.kind === 'link') cancelLink();
+        store().setMode('select');
+        store().clearSelection();
       }
     };
     const up = (e: KeyboardEvent) => {
@@ -73,10 +85,9 @@ export function Canvas() {
       window.removeEventListener('keydown', down);
       window.removeEventListener('keyup', up);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store]);
 
-  // Wheel: scroll = pan, Cmd/Ctrl+scroll = zoom (cursor-anchored). Non-passive so
-  // we can preventDefault the browser's pinch-zoom / page-zoom (DA-DES-5.1).
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
@@ -95,14 +106,43 @@ export function Canvas() {
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
-  const localPoint = useCallback((e: React.PointerEvent) => {
+  const localPoint = useCallback((e: { clientX: number; clientY: number }) => {
     const rect = rootRef.current!.getBoundingClientRect();
     return { sx: e.clientX - rect.left, sy: e.clientY - rect.top };
   }, []);
 
+  function cancelLink() {
+    gesture.current = { kind: 'none' };
+    setLinkCursor(null);
+    setLinkTarget(null);
+  }
+
+  const startLinkFrom = useCallback(
+    (e: React.PointerEvent, id: string) => {
+      e.stopPropagation();
+      rootRef.current!.setPointerCapture(e.pointerId);
+      gesture.current = { kind: 'link', sourceId: id };
+      const c = screenToCanvasFromEvent(e);
+      setLinkCursor(c);
+      setLinkTarget(null);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [viewport],
+  );
+
+  function screenToCanvasFromEvent(e: { clientX: number; clientY: number }) {
+    const { sx, sy } = localPoint(e);
+    return screenToCanvas(viewport, sx, sy);
+  }
+
   const onDevicePointerDown = useCallback(
     (e: React.PointerEvent, id: string) => {
-      if (spaceHeld) return; // let the root handler pan
+      if (spaceHeld) return;
+      // In connect mode, pressing a device starts a link drag.
+      if (store().mode === 'connect') {
+        startLinkFrom(e, id);
+        return;
+      }
       e.stopPropagation();
       (e.target as Element).setPointerCapture?.(e.pointerId);
       const s = store();
@@ -112,7 +152,7 @@ export function Canvas() {
       const { sx, sy } = localPoint(e);
       gesture.current = { kind: 'drag', startX: sx, startY: sy, moved: false };
     },
-    [spaceHeld, store, localPoint],
+    [spaceHeld, store, localPoint, startLinkFrom],
   );
 
   const onRootPointerDown = useCallback(
@@ -123,7 +163,7 @@ export function Canvas() {
         gesture.current = { kind: 'pan', lastX: e.clientX, lastY: e.clientY };
         return;
       }
-      // Empty-canvas press → marquee box-select.
+      if (store().mode === 'connect') return; // empty press in connect mode = noop
       if (!e.shiftKey) store().clearSelection();
       gesture.current = { kind: 'marquee', startX: sx, startY: sy, additive: e.shiftKey };
       setMarquee({ x: sx, y: sy, w: 0, h: 0 });
@@ -140,10 +180,18 @@ export function Canvas() {
         return;
       }
       const { sx, sy } = localPoint(e);
+      const canvasPt = screenToCanvas(viewport, sx, sy);
+
+      if (g.kind === 'link') {
+        setLinkCursor(canvasPt);
+        const hit = store().hitTest(canvasPt.x, canvasPt.y);
+        const target = hit.find((id) => id !== g.sourceId && store().getDevice(id));
+        setLinkTarget(target ?? null);
+        return;
+      }
       if (g.kind === 'drag') {
-        const v = viewport;
-        const dx = (sx - g.startX) / v.scale;
-        const dy = (sy - g.startY) / v.scale;
+        const dx = (sx - g.startX) / viewport.scale;
+        const dy = (sy - g.startY) / viewport.scale;
         store().dragTo(dx, dy, altHeld.current);
         if (!g.moved) gesture.current = { ...g, moved: true };
         return;
@@ -155,9 +203,14 @@ export function Canvas() {
           w: Math.abs(sx - g.startX),
           h: Math.abs(sy - g.startY),
         });
+        return;
       }
+      // Idle: track hovered device so the connect handle can appear.
+      const hit = store().hitTest(canvasPt.x, canvasPt.y);
+      const top = hit.find((id) => store().getDevice(id)) ?? null;
+      if (top !== hoveredId) setHoveredId(top);
     },
-    [store, localPoint, viewport],
+    [store, localPoint, viewport, hoveredId],
   );
 
   const onPointerUp = useCallback(
@@ -168,6 +221,16 @@ export function Canvas() {
       if (g.kind === 'drag') {
         store().endDrag();
         if (g.moved) store().runValidation();
+      } else if (g.kind === 'link') {
+        const target = linkTarget;
+        cancelLink();
+        if (target && target !== g.sourceId) {
+          const id = store().connect(g.sourceId, target);
+          if (id) {
+            store().select([id]);
+            store().runValidation();
+          }
+        }
       } else if (g.kind === 'marquee' && marquee) {
         const tl = screenToCanvas(viewport, marquee.x, marquee.y);
         const br = screenToCanvas(viewport, marquee.x + marquee.w, marquee.y + marquee.h);
@@ -180,29 +243,15 @@ export function Canvas() {
         setMarquee(null);
       }
     },
-    [store, marquee, viewport],
+    [store, marquee, viewport, linkTarget],
   );
-
-  // Read the visible scene (culled via the spatial index). `rev` forces refresh.
-  void rev;
-  const box = visibleBox(viewport, size.w, size.h);
-  const devices = size.w > 0 ? store().visibleDevices(box) : [];
-  const links = size.w > 0 ? store().visibleLinks(box) : [];
-
-  const svgClass = `${styles.svg} ${
-    gesture.current.kind === 'pan' ? styles.panning : spaceHeld ? styles.spaceReady : ''
-  }`;
-
-  const gridStep = 16 * viewport.scale;
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
       const type = e.dataTransfer.getData('application/nexmap-device') as DeviceType;
       if (!type) return;
-      const rect = rootRef.current!.getBoundingClientRect();
-      const c = screenToCanvas(viewport, e.clientX - rect.left, e.clientY - rect.top);
-      // Drop centers the device under the cursor, then snaps (DA-DES-3.5).
+      const c = screenToCanvasFromEvent(e);
       const x = snap(c.x - 28, altHeld.current);
       const y = snap(c.y - 20, altHeld.current);
       const s = store();
@@ -210,8 +259,28 @@ export function Canvas() {
       s.select([id]);
       s.runValidation();
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [store, viewport],
   );
+
+  void rev;
+  const box = visibleBox(viewport, size.w, size.h);
+  const devices = size.w > 0 ? store().visibleDevices(box) : [];
+  const links = size.w > 0 ? store().visibleLinks(box) : [];
+  const handleDevice = hoveredId ? store().getDevice(hoveredId) : undefined;
+  const linkSource =
+    gesture.current.kind === 'link' ? store().getDevice(gesture.current.sourceId) : undefined;
+
+  const svgClass = `${styles.svg} ${
+    gesture.current.kind === 'pan'
+      ? styles.panning
+      : spaceHeld
+        ? styles.spaceReady
+        : mode === 'connect'
+          ? styles.connectMode
+          : ''
+  }`;
+  const gridStep = 16 * viewport.scale;
 
   return (
     <div
@@ -228,6 +297,7 @@ export function Canvas() {
         onPointerDown={onRootPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerLeave={() => setHoveredId(null)}
       >
         <defs>
           <pattern
@@ -259,6 +329,7 @@ export function Canvas() {
                   className={styles.linkHit}
                   d={d}
                   onPointerDown={(e) => {
+                    if (store().mode === 'connect') return;
                     e.stopPropagation();
                     store().select([l.id], e.shiftKey);
                   }}
@@ -267,15 +338,39 @@ export function Canvas() {
               </g>
             );
           })}
+
+          {/* Rubber-band while connecting. */}
+          {linkSource && linkCursor && (
+            <line
+              className={styles.rubber}
+              x1={linkSource.x + linkSource.width / 2}
+              y1={linkSource.y + linkSource.height / 2}
+              x2={linkCursor.x}
+              y2={linkCursor.y}
+            />
+          )}
+
           {devices.map((dev) => (
             <DeviceNode
               key={dev.id}
               device={dev}
               selected={selection.has(dev.id)}
               scale={viewport.scale}
+              validTarget={linkTarget === dev.id}
               onPointerDown={onDevicePointerDown}
             />
           ))}
+
+          {/* Connect handle on the hovered device (select mode, discoverable). */}
+          {mode === 'select' && handleDevice && gesture.current.kind === 'none' && (
+            <circle
+              className={styles.connectHandle}
+              cx={handleDevice.x + handleDevice.width}
+              cy={handleDevice.y}
+              r={6 / viewport.scale}
+              onPointerDown={(e) => startLinkFrom(e, handleDevice.id)}
+            />
+          )}
         </g>
 
         {marquee && (
@@ -288,6 +383,8 @@ export function Canvas() {
           />
         )}
       </svg>
+
+      <CanvasToolbar mode={mode} onMode={(m) => store().setMode(m)} />
 
       <div className={styles.zoomBar}>
         <button

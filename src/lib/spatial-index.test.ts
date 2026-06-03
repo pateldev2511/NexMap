@@ -48,6 +48,15 @@ describe('SpatialIndex', () => {
     expect(idx.hit(310, 310)).toEqual(['a']);
   });
 
+  it('does not blow up on a pathologically huge query box', () => {
+    const idx = new SpatialIndex();
+    idx.insert('a', box(0, 0));
+    idx.insert('b', box(1000, 1000));
+    // A box spanning millions of cells must still resolve via the entry-scan guard.
+    const hits = idx.query({ x: -1e6, y: -1e6, width: 2e6, height: 2e6 }).sort();
+    expect(hits).toEqual(['a', 'b']);
+  });
+
   it('handles entries spanning multiple cells without double-counting', () => {
     const idx = new SpatialIndex(32);
     idx.insert('big', box(0, 0, 200, 200)); // spans many cells
