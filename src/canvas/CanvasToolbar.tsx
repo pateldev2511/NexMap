@@ -4,27 +4,45 @@ import styles from './CanvasToolbar.module.css';
 interface Props {
   mode: CanvasMode;
   onMode: (m: CanvasMode) => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
+  onHelp: () => void;
 }
 
-/** Floating canvas mode switcher (design review DA-DES-5.4). Esc returns to Select. */
-export function CanvasToolbar({ mode, onMode }: Props) {
+/**
+ * Floating canvas toolbar (Phase 1, FossFLOW-inspired). Tools on the left, history
+ * + help on the right. Esc returns to Select. Text/Zone/Shape/Lasso tools land in
+ * later Phase 1 batches as their interactions are built.
+ */
+export function CanvasToolbar({ mode, onMode, canUndo, canRedo, onUndo, onRedo, onHelp }: Props) {
+  const tool = (m: CanvasMode, glyph: string, key: string, title: string) => (
+    <button
+      className={`${styles.tool} ${mode === m ? styles.active : ''}`}
+      onClick={() => onMode(m)}
+      title={`${title} (${key})`}
+      aria-pressed={mode === m}
+    >
+      {glyph} <span className={styles.key}>{key}</span>
+    </button>
+  );
+
   return (
     <div className={styles.toolbar} role="toolbar" aria-label="Canvas tools">
-      <button
-        className={`${styles.tool} ${mode === 'select' ? styles.active : ''}`}
-        onClick={() => onMode('select')}
-        title="Select (V)"
-        aria-pressed={mode === 'select'}
-      >
-        ⬚ <span className={styles.key}>V</span>
+      {tool('select', '⬚', 'V', 'Select')}
+      {tool('pan', '✋', 'H', 'Pan')}
+      {tool('connect', '⤴', 'C', 'Connect')}
+      <span className={styles.divider} />
+      <button className={styles.icon} onClick={onUndo} disabled={!canUndo} title="Undo (⌘Z)" aria-label="Undo">
+        ↶
       </button>
-      <button
-        className={`${styles.tool} ${mode === 'connect' ? styles.active : ''}`}
-        onClick={() => onMode('connect')}
-        title="Connect (C)"
-        aria-pressed={mode === 'connect'}
-      >
-        ⤴ <span className={styles.key}>C</span>
+      <button className={styles.icon} onClick={onRedo} disabled={!canRedo} title="Redo (⌘⇧Z)" aria-label="Redo">
+        ↷
+      </button>
+      <span className={styles.divider} />
+      <button className={styles.icon} onClick={onHelp} title="Keyboard shortcuts (?)" aria-label="Help">
+        ?
       </button>
     </div>
   );

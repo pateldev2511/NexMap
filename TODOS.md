@@ -1,32 +1,135 @@
-# NexMap — Deferred Work (Post-MVP)
+# NexMap — Master Roadmap
 
-Logged during `/autoplan` review. These are out of MVP scope by decision, not omission.
+> Phased roadmap to make NexMap a polished, FossFLOW-**inspired** (not a clone)
+> local network designer, while keeping its identity: **no login, no accounts, no
+> server storage, no hidden cloud sync.** Each phase must keep existing behavior
+> green before the next is accepted. Replaces the old MVP-deferral list.
 
-## Post-MVP features
-- [ ] Rack elevation mode (front/rear, RU collision, patch panels, cable tracing)
-- [ ] Cloud objects + cloud-specific validations (VPC/VNet, gateways, route tables, SGs)
-- [ ] Advanced auto-layout / topology auto-arrange
-- [ ] Multi-view projects (overview, physical, logical, rack, site, security, cloud, IP plan)
-- [ ] Full `interfaces[]` layer (MVP links connect devices with optional iface label only)
-- [ ] Discovery imports — the real "document existing infra" wedge expansion:
-  - [ ] Nmap XML, LLDP/CDP exports (highest wow: scan → validated topology)
-  - [ ] NetBox CSV/JSON, GraphML, draw.io XML, Terraform, Visio VSDX
-- [ ] Wireless coverage planning / AP placement on floor plans
-- [ ] Project diffing / compare two `.nexmap` files
-- [ ] Presentation mode, read-only preview mode
-- [ ] Zip export package (project + images + PDFs + CSVs)
+**Non-negotiable constraint (all phases):** no login, no cloud, no hidden upload.
+Data stays local (IndexedDB + `.nexmap` files) unless the user explicitly exports.
 
-## Post-MVP technical (multi-week, explicitly deferred by Eng review)
-- [ ] Connector obstacle-avoidance routing (A*/visibility-graph) — MVP = straight + simple elbow
-- [ ] Multi-page PDF tiling + inventory/IP-plan/validation appendices — the real MSP handoff artifact, do it properly
-- [ ] Canvas-2D static render layer behind SceneSource (only if M0 perf harness fails the bar)
+---
 
-## Validation backlog (Post-MVP, beyond the 4 MVP checks)
-- [ ] Overlapping subnets, duplicate VLAN ID in scope, missing gateway, trunk missing VLANs,
-      access port multiple untagged, rack unit collision, orphaned devices, circular deps,
-      link bandwidth mismatch, zone missing classification
+## Phase 0 — Audit & Baseline ✅ (recorded 2026-06-02)
 
-## Premise validation (do before/alongside M2 — CEO review)
-- [ ] Validate premise: network engineers want no-login local (interviews / landing smoke test)
-- [ ] Validate premise: live validation is switch-worthy (the wedge bet)
-- [ ] Decide on opt-in, local-by-default feedback mechanism (privacy-preserving learning loop)
+**Current MVP status (M0–M8 shipped, on `main`):**
+- Stack: React 18 + TS + Vite + Zustand; model-driven exports; `.nexmap` JSON.
+- Canvas: SVG renderer via `SceneSource` + spatial index; pan/zoom (scroll=pan,
+  Cmd-scroll=zoom), select, Shift-add, marquee box-select, multi-drag (one undo),
+  snap-to-grid, LOD, fit-to-screen, delete.
+- Edit: inverse-based command/undo stack (single writer), coalesced drags/edits,
+  duplicate, select-all.
+- Inspector: grouped device/link fields, inline IP/CIDR validation, undoable.
+- Connect: hover-handle + Connect tool, rubber-band, valid-target highlight.
+- Validation (the wedge, live + debounced): duplicate IP, invalid CIDR/IP, missing
+  link endpoints, duplicate names; canvas badges + Validation panel + jump-to.
+- Bottom panel: Inventory / Links / Validation tabs (collapsed by default).
+- Persistence: IndexedDB autosave + crash recovery; `.nexmap` save/open (FS Access
+  + download fallback); Web Locks multi-tab single-writer; newer-schema refuses.
+- Import: CSV device/link with header auto-map, preview, warnings, transactional
+  commit (single-undo). Parser handles BOM/quotes/delimiters.
+- Export: PNG/JPG/SVG/single-page-PDF + CSV; from the model; SVG/CSV sanitized.
+- Polish: first-run + templates, keyboard shortcuts (`?` help), light/dark.
+
+**Working checks:** 82 unit/property/fault-injection tests green; `npm run build`
++ `npm run lint` clean. Browser smoke verified for canvas, validation, persistence,
+import, export, shortcuts.
+
+**FossFLOW feature-gap list (drives Phases 1–7):**
+- No floating icon toolbar; only Select/Connect. No Pan/Text/Zone/Shape/Lasso tools.
+- Devices are flat tiles; no isometric-inspired styling, no context menus.
+- No copy/paste, grouping, z-order, lock/unlock, lasso, keyboard nudge.
+- Links are plain lines: no waypoints, arrows, line styles, multi-labels, parallel spacing.
+- Export dialog has no live preview / crop / DPI slider / ZIP package.
+- Import lacks JSON/SVG-underlay/draw.io/GraphML/NetBox.
+- Model lacks first-class interfaces/VLANs/subnets/zones/sites/racks/cloud.
+- No real layers, multi-view, presentation mode, rack/cloud/discovery, PWA/offline.
+
+---
+
+## Phase 1 — Canvas Polish  ◀ IN PROGRESS
+
+- [x] Edit ops: copy / cut / paste (offset, new IDs, transactional), lock/unlock,
+      keyboard nudge (arrows; Shift = grid step) — drag/delete respect locked
+- [ ] FossFLOW-inspired floating icon toolbar: Select, Pan, Add Device, Connect,
+      Text, Zone/Shape, Lasso, Freehand Lasso, Undo, Redo, Help
+- [ ] Context menus (canvas / device / link / group)
+- [ ] Grouping (group/ungroup), z-order (bring forward/back, to front/back)
+- [ ] Lasso + freehand-lasso selection
+- [ ] Richer device visuals: network-specific tiles, consistent icon language,
+      better selected/hover/error states, optional isometric-inspired styling
+- Edge cases: overlapping objects, tiny objects, locked selections, hidden layers,
+  multi-select drag, accidental delete, text overflow, mobile/tablet gestures.
+
+## Phase 2 — Connector System
+- Editable connectors: waypoints, reroute handles, arrows, line styles,
+  bandwidth/status labels, parallel-link spacing.
+- Click-to-connect + drag-to-connect modes, with a preferred-behavior setting.
+- Multiple labels per connector (interface, VLAN, bandwidth, native VLAN, LACP,
+  circuit ID, notes).
+- Edge cases: duplicate/self/missing/hidden-endpoint links, very short links, many
+  parallel links, labels crossing devices, undoing reroutes.
+
+## Phase 3 — Export & Import Upgrade
+- Export dialog: live preview, crop-to-selection/content, custom filename, DPI/scale
+  slider, transparent checkerboard preview, layer/view scope, progress/cancel.
+- Export package ZIP: `.nexmap` + images + PDF + inventory CSV + links CSV +
+  validation report.
+- Import: `.nexmap`, CSV (devices/links/IP/VLANs), JSON, SVG/image underlays,
+  draw.io, GraphML, NetBox CSV/JSON.
+- Edge cases: huge diagrams, canvas limits, PDF pagination, unsafe SVG, malformed
+  CSV, bad encodings, duplicate IDs/names, links-before-devices, partial rollback.
+
+## Phase 4 — Network Semantics
+- First-class interfaces, VLANs, subnets, zones, sites, racks, cloud networks.
+- Validations: overlapping subnets, duplicate VLAN IDs, invalid VLAN ranges, IP
+  outside subnet, missing gateway, trunk/access mismatch, orphaned devices, rack RU
+  collisions, link bandwidth mismatch.
+- Bottom-panel tabs: IP Plan, VLANs, Interfaces, Racks, Sites, Import Results.
+- Edge cases: IPv4/IPv6 mixed, subnet boundaries, VLAN scope per site, device
+  renames, interface deletion, stale link refs, custom-metadata round-trip.
+
+## Phase 5 — Views, Layers & Presentation
+- Layer management: visible/hidden, locked/unlocked, reorder, rename, delete confirm,
+  export selected layers.
+- Multi-view projects: overview, physical, logical, rack, site, security zones,
+  cloud, IP plan.
+- Presentation/read-only mode; page boundaries for print/PDF handoff.
+- Edge cases: object in multiple views, hidden validation issues, deleting a layer
+  with objects, exporting empty views, stale view refs.
+
+## Phase 6 — Rack, Cloud & Discovery
+- Rack elevation mode: RU placement, front/rear, patch panels, UPS, cable tracing,
+  collision validation.
+- Cloud objects: VPC/VNet, subnets, gateways, route tables, security groups, VPN,
+  direct connect, load balancers, regions/AZs.
+- Discovery imports (stretch): Nmap XML, LLDP/CDP, Terraform, Visio VSDX.
+- Edge cases: rack overflow, split devices, cloud region mismatch, unknown discovered
+  types, duplicate discovered assets.
+
+## Phase 7 — App Hardening
+- PWA install/offline, service-worker cache strategy, recovery diagnostics, storage
+  quota handling, browser-compat warnings.
+- Settings: hotkeys, pan/zoom behavior, connector mode, grid size, theme, label
+  visibility, reduced motion.
+- Accessibility: keyboard-operable chrome, table-based accessible editing, focus
+  states, contrast, non-color validation symbols.
+- Edge cases: private browsing, storage disabled, multiple tabs, refresh mid
+  import/export, stale service worker, unsupported FS Access API.
+
+---
+
+## Schema evolution (Phases 2–6)
+Extend `.nexmap` with versioned `interfaces`, `vlans`, `subnets`, `zones`, `sites`,
+`views`, `racks`, `assets`, plus connector `waypoints`/`labels`. Migrations stay
+strict: older files migrate forward; newer unsupported files open read-only or fail
+safely. Preserve unknown future fields through load/save unless unsafe.
+
+## Standing test plan
+Unit: migrations, validation rules, connector routing/labels, import mapping,
+CSV/SVG sanitization, export option generation. Store/history: undo across imports,
+reroutes, group edits, layer changes, multi-object transforms. Browser: first-run,
+toolbar modes, lasso, connector creation, export preview, import rollback, recovery,
+multi-tab read-only. Perf: 1k devices/5k links, large labels, parallel connectors,
+hidden layers, huge exports, validation debounce. Security: malicious SVG, CSV
+formula injection, prototype-pollution keys, external image refs, corrupt `.nexmap`.

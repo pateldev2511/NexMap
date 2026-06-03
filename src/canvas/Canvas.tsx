@@ -3,6 +3,7 @@ import type { DeviceType } from '@/model/types';
 import { useProjectStore } from '@/store/projectStore';
 import { DeviceNode } from './DeviceNode';
 import { CanvasToolbar } from './CanvasToolbar';
+import { ContextMenu, type MenuItem } from './ContextMenu';
 import {
   fitToBox,
   initialViewport,
@@ -32,6 +33,7 @@ export function Canvas() {
   const [marquee, setMarquee] = useState<null | { x: number; y: number; w: number; h: number }>(
     null,
   );
+  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [linkCursor, setLinkCursor] = useState<{ x: number; y: number } | null>(null);
   const [linkTarget, setLinkTarget] = useState<string | null>(null);
@@ -43,6 +45,8 @@ export function Canvas() {
   const mode = useProjectStore((s) => s.mode);
   const issues = useProjectStore((s) => s.issues);
   const focusTick = useProjectStore((s) => s.focusTick);
+  const canUndo = useProjectStore((s) => s.canUndo);
+  const canRedo = useProjectStore((s) => s.canRedo);
   const store = useProjectStore.getState;
 
   // Center on a device when jump-to-object fires (validation/inventory click).
@@ -110,7 +114,34 @@ export function Canvas() {
         store().runValidation();
         return;
       }
+      if (mod && (e.key === 'c' || e.key === 'C')) {
+        e.preventDefault();
+        store().copySelection();
+        return;
+      }
+      if (mod && (e.key === 'x' || e.key === 'X')) {
+        e.preventDefault();
+        store().cutSelection();
+        store().runValidation();
+        return;
+      }
+      if (mod && (e.key === 'v' || e.key === 'V')) {
+        e.preventDefault();
+        store().paste();
+        store().runValidation();
+        return;
+      }
       if (mod) return; // leave other mod combos to the app-level handler
+
+      // Arrow-key nudge: 1px, or one grid step with Shift (DA-DES — keyboard move).
+      if (e.key.startsWith('Arrow') && store().selection.size > 0) {
+        e.preventDefault();
+        const step = e.shiftKey ? 16 : 1;
+        const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+        const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+        store().nudgeSelection(dx, dy);
+        return;
+      }
 
       if (e.code === 'Space') {
         e.preventDefault();
@@ -194,7 +225,7 @@ export function Canvas() {
 
   const onDevicePointerDown = useCallback(
     (e: React.PointerEvent, id: string) => {
-      if (spaceHeld) return;
+      if (spaceHeld || store().mode === 'pan') return; // let the root handler pan
       // In connect mode, pressing a device starts a link drag.
       if (store().mode === 'connect') {
         startLinkFrom(e, id);
@@ -216,7 +247,7 @@ export function Canvas() {
     (e: React.PointerEvent) => {
       const { sx, sy } = localPoint(e);
       rootRef.current!.setPointerCapture(e.pointerId);
-      if (spaceHeld || e.button === 1) {
+      if (spaceHeld || e.button === 1 || store().mode === 'pan') {
         gesture.current = { kind: 'pan', lastX: e.clientX, lastY: e.clientY };
         return;
       }
@@ -320,6 +351,37 @@ export function Canvas() {
     [store, viewport],
   );
 
+  const onContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const { sx, sy } = localPoint(e);
+      const c = screenToCanvas(viewport, sx, sy);
+      const hitId = store().hitTest(c.x, c.y).find((id) => store().getDevice(id));
+      const s = store();
+      if (hitId && !s.selection.has(hitId)) s.select([hitId]);
+      const onDevice = !!hitId;
+      const locked = hitId ? !!s.getDevice(hitId)?.locked : false;
+      const sel = onDevice || s.selection.size > 0;
+
+      const items: MenuItem[] = onDevice
+        ? [
+            { label: 'Copy', shortcut: '⌘C', onClick: () => s.copySelection() },
+            { label: 'Cut', shortcut: '⌘X', onClick: () => { s.cutSelection(); s.runValidation(); } },
+            { label: 'Duplicate', shortcut: '⌘D', onClick: () => { s.duplicateSelection(); s.runValidation(); } },
+            { label: 'Paste', shortcut: '⌘V', onClick: () => { s.paste(); s.runValidation(); }, disabled: !s.hasClipboard() },
+            { label: locked ? 'Unlock' : 'Lock', onClick: () => s.toggleLockSelection(), separatorBefore: true },
+            { label: 'Delete', shortcut: '⌫', onClick: () => { s.deleteSelection(); s.runValidation(); } },
+          ]
+        : [
+            { label: 'Paste', shortcut: '⌘V', onClick: () => { s.paste(); s.runValidation(); }, disabled: !s.hasClipboard() },
+            { label: 'Select all', shortcut: '⌘A', onClick: () => s.selectAll(), separatorBefore: true },
+          ];
+      void sel;
+      setMenu({ x: e.clientX, y: e.clientY, items });
+    },
+    [store, localPoint, viewport],
+  );
+
   void rev;
   const box = visibleBox(viewport, size.w, size.h);
   const devices = size.w > 0 ? store().visibleDevices(box) : [];
@@ -331,8 +393,8 @@ export function Canvas() {
   const svgClass = `${styles.svg} ${
     gesture.current.kind === 'pan'
       ? styles.panning
-      : spaceHeld
-        ? styles.spaceReady
+      : spaceHeld || mode === 'pan'
+        ? styles.panMode
         : mode === 'connect'
           ? styles.connectMode
           : ''
@@ -355,6 +417,7 @@ export function Canvas() {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerLeave={() => setHoveredId(null)}
+        onContextMenu={onContextMenu}
       >
         <defs>
           <pattern
@@ -442,7 +505,21 @@ export function Canvas() {
         )}
       </svg>
 
-      <CanvasToolbar mode={mode} onMode={(m) => store().setMode(m)} />
+      <CanvasToolbar
+        mode={mode}
+        onMode={(m) => store().setMode(m)}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={() => {
+          store().undo();
+          store().runValidation();
+        }}
+        onRedo={() => {
+          store().redo();
+          store().runValidation();
+        }}
+        onHelp={() => window.dispatchEvent(new CustomEvent('nexmap:help'))}
+      />
 
       <div className={styles.zoomBar}>
         <button
@@ -466,6 +543,10 @@ export function Canvas() {
           ⤢
         </button>
       </div>
+
+      {menu && (
+        <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />
+      )}
     </div>
   );
 }

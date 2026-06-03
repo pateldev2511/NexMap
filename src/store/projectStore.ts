@@ -27,7 +27,7 @@ import {
   type Command,
 } from './commands';
 
-export type CanvasMode = 'select' | 'connect';
+export type CanvasMode = 'select' | 'pan' | 'connect';
 import {
   emptyModel,
   fromDocument,
@@ -43,6 +43,9 @@ const history = new History();
 const index = new SpatialIndex();
 /** Origin positions captured at drag start (transient, not in history). */
 let dragOrigins: Map<string, { x: number; y: number }> | null = null;
+/** Clipboard of copied device snapshots (Phase 1). Module-scoped, session-only. */
+let clipboard: Device[] = [];
+let pasteOffset = 0;
 
 function deviceBox(d: Device): Box {
   return { x: d.x, y: d.y, width: d.width, height: d.height };
@@ -94,6 +97,14 @@ export interface ProjectStore {
   clearSelection(): void;
   /** Duplicate selected devices (offset, new IDs) as one undoable entry. */
   duplicateSelection(): void;
+  copySelection(): void;
+  cutSelection(): void;
+  paste(): void;
+  hasClipboard(): boolean;
+  /** Toggle locked on selected devices (one undoable entry). */
+  toggleLockSelection(): void;
+  /** Move unlocked selected devices by a delta as one undoable entry. */
+  nudgeSelection(dx: number, dy: number): void;
   /** Select an object and ask the canvas to center on it (jump-to-object). */
   focusObject(id: string): void;
   undo(): void;
@@ -156,7 +167,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       const origins = new Map<string, { x: number; y: number }>();
       for (const id of get().selection) {
         const d = model.devices.get(id);
-        if (d) origins.set(id, { x: d.x, y: d.y });
+        if (d && !d.locked) origins.set(id, { x: d.x, y: d.y }); // locked devices don't move
       }
       dragOrigins = origins;
     },
@@ -218,6 +229,80 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       return firstLayerId();
     },
 
+    copySelection() {
+      const ids = [...get().selection].filter((id) => model.devices.has(id));
+      clipboard = ids.map((id) => ({ ...model.devices.get(id)! }));
+      pasteOffset = 0;
+    },
+
+    cutSelection() {
+      get().copySelection();
+      get().deleteSelection();
+    },
+
+    hasClipboard() {
+      return clipboard.length > 0;
+    },
+
+    paste() {
+      if (clipboard.length === 0) return;
+      pasteOffset += 24;
+      const clones = clipboard.map((d) =>
+        createDevice(d.type, d.x + pasteOffset, d.y + pasteOffset, firstLayerId(), {
+          name: d.name,
+          vendor: d.vendor,
+          model: d.model,
+          role: d.role,
+          location: d.location,
+          managementIp: undefined, // pasted copies start without an IP (avoid dup)
+          notes: d.notes,
+          fill: d.fill,
+        }),
+      );
+      history.dispatch(transaction('Paste', clones.map((c) => new AddDeviceCommand(c))), model);
+      for (const c of clones) index.insert(c.id, deviceBox(c));
+      history.commitCoalesceBoundary();
+      set({
+        rev: get().rev + 1,
+        selection: new Set(clones.map((c) => c.id)),
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+      });
+    },
+
+    toggleLockSelection() {
+      const ids = [...get().selection].filter((id) => model.devices.has(id));
+      if (ids.length === 0) return;
+      // If any is unlocked, lock all; else unlock all.
+      const anyUnlocked = ids.some((id) => !model.devices.get(id)!.locked);
+      const cmds = ids.map((id) => {
+        const cur = !!model.devices.get(id)!.locked;
+        return new UpdateDeviceCommand(id, { locked: cur }, { locked: anyUnlocked });
+      });
+      history.dispatch(transaction(anyUnlocked ? 'Lock' : 'Unlock', cmds), model);
+      history.commitCoalesceBoundary();
+      set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
+    },
+
+    nudgeSelection(dx, dy) {
+      const ids = [...get().selection].filter((id) => {
+        const d = model.devices.get(id);
+        return d && !d.locked;
+      });
+      if (ids.length === 0) return;
+      const cmds = ids.map((id) => {
+        const d = model.devices.get(id)!;
+        return new MoveDeviceCommand(id, { x: d.x, y: d.y }, { x: d.x + dx, y: d.y + dy });
+      });
+      history.dispatch(transaction('Nudge', cmds), model);
+      for (const id of ids) {
+        const d = model.devices.get(id)!;
+        index.update(id, deviceBox(d));
+      }
+      set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
+    },
+
     updateDevice(id, before, after) {
       commit(new UpdateDeviceCommand(id, before, after));
     },
@@ -248,7 +333,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     deleteSelection() {
       const ids = [...get().selection];
       if (ids.length === 0) return;
-      const deviceIds = ids.filter((id) => model.devices.has(id));
+      // Locked devices are protected from deletion.
+      const deviceIds = ids.filter((id) => model.devices.has(id) && !model.devices.get(id)!.locked);
       const linkIds = ids.filter((id) => model.links.has(id));
       commit(new DeleteCommand(deviceIds, linkIds), { reindex: true });
       history.commitCoalesceBoundary();

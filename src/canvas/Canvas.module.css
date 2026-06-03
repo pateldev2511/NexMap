@@ -99,6 +99,21 @@
   pointer-events: none;
 }
 
+.lockGlyph {
+  font-size: 9px;
+  text-anchor: end;
+  dominant-baseline: alphabetic;
+  pointer-events: none;
+}
+
+.node:hover .body {
+  stroke: var(--accent);
+}
+
+.svg.panMode {
+  cursor: grab;
+}
+
 .link {
   stroke: var(--chrome-fg-muted);
   stroke-width: 1.5;

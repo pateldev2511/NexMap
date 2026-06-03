@@ -15,6 +15,8 @@ interface DeviceNodeProps {
   onPointerDown: (e: React.PointerEvent, id: string) => void;
 }
 
+const LOCK_GLYPH = '\u{1F512}';
+
 /**
  * One device. Memoized so panning (which changes only the parent transform)
  * doesn't re-render every node. LOD hides the name label when zoomed out, which
@@ -52,6 +54,11 @@ function DeviceNodeImpl({
       {showLabel && (
         <text className={styles.label} x={width / 2} y={height + 4}>
           {device.name}
+        </text>
+      )}
+      {device.locked && detailed && (
+        <text className={styles.lockGlyph} x={width - 2} y={height - 2}>
+          {LOCK_GLYPH}
         </text>
       )}
       {/* Validation badge — color + glyph (non-color indicator, DA-DES-6.2). */}

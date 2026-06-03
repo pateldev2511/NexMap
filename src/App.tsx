@@ -182,11 +182,14 @@ export function App() {
         setShowHelp(true);
       }
     };
+    const onHelpEvent = () => setShowHelp(true);
     window.addEventListener('keydown', onKey);
     window.addEventListener('keydown', onHelp);
+    window.addEventListener('nexmap:help', onHelpEvent);
     return () => {
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('keydown', onHelp);
+      window.removeEventListener('nexmap:help', onHelpEvent);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [persistence]);

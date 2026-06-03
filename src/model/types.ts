@@ -63,6 +63,8 @@ export interface Device {
   managementIp?: string;
   notes?: string;
   fill?: string;
+  /** Locked devices can't be moved or deleted until unlocked. */
+  locked?: boolean;
   extra?: ExtraFields;
 }
 

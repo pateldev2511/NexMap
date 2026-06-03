@@ -1,0 +1,47 @@
+.menu {
+  position: fixed;
+  z-index: 30;
+  min-width: 180px;
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  padding: 4px;
+  font-size: 12px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--chrome-fg);
+  border-radius: 5px;
+  padding: 6px 10px;
+}
+
+.item:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.item:disabled {
+  color: var(--chrome-fg-muted);
+  opacity: 0.5;
+}
+
+.shortcut {
+  font-size: 10px;
+  opacity: 0.7;
+  font-family: var(--font-mono);
+}
+
+.sep {
+  height: 1px;
+  background: var(--chrome-border);
+  margin: 4px 2px;
+}
