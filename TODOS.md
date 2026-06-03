@@ -106,14 +106,15 @@ import, export, shortcuts.
 - Deferred (low priority): preset view types (overview/physical/logical/...) as
   auto-generated semantic filters; per-view export scope.
 
-## Phase 6 — Rack, Cloud & Discovery
-- Rack elevation mode: RU placement, front/rear, patch panels, UPS, cable tracing,
-  collision validation.
-- Cloud objects: VPC/VNet, subnets, gateways, route tables, security groups, VPN,
-  direct connect, load balancers, regions/AZs.
-- Discovery imports (stretch): Nmap XML, LLDP/CDP, Terraform, Visio VSDX.
-- Edge cases: rack overflow, split devices, cloud region mismatch, unknown discovered
-  types, duplicate discovered assets.
+## Phase 6 — Rack, Cloud & Discovery  ✅ CORE COMPLETE
+- [x] Rack elevation view: RU placement, drag-to-reposition, collision validation
+  (front view; rear view + cable tracing deferred)
+- [x] Cloud objects: VPC/VNet, cloud subnet, internet/NAT/VPN gateways, route table,
+  security group, K8s, managed DB, object storage (as device types + Cloud library)
+- [x] Discovery import: Nmap XML (OS-inferred types); LLDP/CDP via the neighbor/link
+  CSV path
+- Deferred (stretch): Terraform + Visio VSDX import, rear-view racks, cable tracing,
+  region/AZ grouping containers.
 
 ## Phase 7 — App Hardening
 - PWA install/offline, service-worker cache strategy, recovery diagnostics, storage
