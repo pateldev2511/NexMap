@@ -15,17 +15,32 @@
 .tool {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   background: transparent;
   border: none;
   color: var(--chrome-fg);
   border-radius: 6px;
-  padding: 5px 10px;
-  font-size: 14px;
+  min-height: 30px;
+  padding: 5px 9px;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.toolIcon {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
 }
 
 .tool:hover {
   background: var(--canvas-bg);
+}
+
+.tool:focus-visible,
+.icon:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .tool.active {
@@ -50,12 +65,21 @@
 }
 
 .icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
   background: transparent;
   border: none;
   color: var(--chrome-fg);
   border-radius: 6px;
-  padding: 5px 9px;
-  font-size: 14px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.icon svg {
+  width: 16px;
+  height: 16px;
 }
 
 .icon:hover:not(:disabled) {
@@ -64,4 +88,5 @@
 
 .icon:disabled {
   opacity: 0.35;
+  cursor: default;
 }

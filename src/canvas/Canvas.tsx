@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { DeviceType } from '@/model/types';
-import {
-  useProjectStore,
-  type AlignEdge,
-  type ProjectStore,
-} from '@/store/projectStore';
+import { NexIcon } from '@/ui/icons/NexIcon';
+import { useProjectStore, type AlignEdge, type ProjectStore } from '@/store/projectStore';
 import { CanvasSearch } from './CanvasSearch';
 import { getConnectMode } from '@/lib/prefs';
 import { DeviceNode } from './DeviceNode';
@@ -13,10 +10,11 @@ import { IsoTextNode } from './IsoTextNode';
 import { ObjectNode } from './ObjectNode';
 import { CanvasToolbar } from './CanvasToolbar';
 import {
-  connectorPoints,
-  parallelPoints,
-  orthogonalPoints,
+  connectorIconPoints,
+  parallelIconPoints,
+  orthogonalIconPoints,
   center,
+  iconEdgePoint,
   pairKey,
   alongFrom,
   pathD,
@@ -128,7 +126,12 @@ function flatBoxFromScreenRect(
   const ys = pts.map((p) => p.y);
   const minX = Math.min(...xs);
   const minY = Math.min(...ys);
-  return { x: minX, y: minY, width: Math.max(...xs) - minX, height: Math.max(...ys) - minY };
+  return {
+    x: minX,
+    y: minY,
+    width: Math.max(...xs) - minX,
+    height: Math.max(...ys) - minY,
+  };
 }
 
 /** Bounding box (in iso screen space) of a flat box's four projected corners. */
@@ -143,7 +146,12 @@ function projectFlatBox(b: Box): Box {
   const ys = corners.map((p) => p.y);
   const minX = Math.min(...xs);
   const minY = Math.min(...ys);
-  return { x: minX, y: minY, width: Math.max(...xs) - minX, height: Math.max(...ys) - minY };
+  return {
+    x: minX,
+    y: minY,
+    width: Math.max(...xs) - minX,
+    height: Math.max(...ys) - minY,
+  };
 }
 
 export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
@@ -217,7 +225,9 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       const cx = target.x + target.width / 2;
       const cy = target.y + target.height / 2;
       const p =
-        projection === 'iso' ? isoProjectPx(cx, cy, GRID_SIZE, ISO_TILE) : { x: cx, y: cy };
+        projection === 'iso'
+          ? isoProjectPx(cx, cy, GRID_SIZE, ISO_TILE)
+          : { x: cx, y: cy };
       return { scale, tx: size.w / 2 - p.x * scale, ty: size.h / 2 - p.y * scale };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -325,7 +335,10 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       if (e.key === '2' && store().selection.size > 0) {
         e.preventDefault();
         const b = selectionBounds(store());
-        if (b) setViewport(fitToBox(projection === 'iso' ? projectFlatBox(b) : b, size.w, size.h));
+        if (b)
+          setViewport(
+            fitToBox(projection === 'iso' ? projectFlatBox(b) : b, size.w, size.h),
+          );
         return;
       }
 
@@ -417,7 +430,9 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   // linear, so the same inverse applies to vectors (no translation).
   const toFlatVec = useCallback(
     (dx: number, dy: number): { x: number; y: number } =>
-      projection === 'iso' ? isoUnprojectPx(dx, dy, GRID_SIZE, ISO_TILE) : { x: dx, y: dy },
+      projection === 'iso'
+        ? isoUnprojectPx(dx, dy, GRID_SIZE, ISO_TILE)
+        : { x: dx, y: dy },
     [projection],
   );
 
@@ -656,7 +671,11 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           snap(v, altHeld.current),
         );
         store().resizeTo(box);
-        setReadout({ sx, sy, text: `${Math.round(box.width)} × ${Math.round(box.height)}` });
+        setReadout({
+          sx,
+          sy,
+          text: `${Math.round(box.width)} × ${Math.round(box.height)}`,
+        });
         return;
       }
       if (g.kind === 'drag') {
@@ -667,7 +686,10 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           g.moved = true;
           gesture.current = g;
         }
-        const d = toFlatVec((sx - g.startX) / viewport.scale, (sy - g.startY) / viewport.scale);
+        const d = toFlatVec(
+          (sx - g.startX) / viewport.scale,
+          (sy - g.startY) / viewport.scale,
+        );
         store().dragTo(d.x, d.y, altHeld.current, viewport.scale);
         const firstId = [...store().selection][0];
         const m = firstId
@@ -1048,7 +1070,9 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           }`}
         >
           {projection === 'iso' && size.w > 0 && (
-            <IsoGrid flat={flatBoxFromScreenRect({ x: 0, y: 0, w: size.w, h: size.h }, toFlat)} />
+            <IsoGrid
+              flat={flatBoxFromScreenRect({ x: 0, y: 0, w: size.w, h: size.h }, toFlat)}
+            />
           )}
           {showPages && <PageBoundaries content={store().contentBounds()} />}
           {images.map((o) => (
@@ -1076,8 +1100,8 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
             const noWp = (l.waypoints?.length ?? 0) === 0;
             const pts =
               l.routing === 'orthogonal' && noWp
-                ? orthogonalPoints(center(a), center(b))
-                : parallelPoints(l, a, b, group.indexOf(l.id), group.length);
+                ? orthogonalIconPoints(a, b)
+                : parallelIconPoints(l, a, b, group.indexOf(l.id), group.length);
             const d = pathD(pts);
             const sel = selection.has(l.id);
             const labelLines = connectorLabelLines(l);
@@ -1169,7 +1193,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
             const a = store().getDevice(link.sourceId);
             const b = store().getDevice(link.targetId);
             if (!a || !b) return null;
-            const pts = connectorPoints(link, a, b);
+            const pts = connectorIconPoints(link, a, b);
             const wps = link.waypoints ?? [];
             const r = 5 / viewport.scale;
             return (
@@ -1233,15 +1257,20 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           })()}
 
           {/* Rubber-band while connecting. */}
-          {linkSource && linkCursor && (
-            <line
-              className={styles.rubber}
-              x1={linkSource.x + linkSource.width / 2}
-              y1={linkSource.y + linkSource.height / 2}
-              x2={linkCursor.x}
-              y2={linkCursor.y}
-            />
-          )}
+          {linkSource &&
+            linkCursor &&
+            (() => {
+              const start = iconEdgePoint(linkSource, linkCursor);
+              return (
+                <line
+                  className={styles.rubber}
+                  x1={start.x}
+                  y1={start.y}
+                  x2={linkCursor.x}
+                  y2={linkCursor.y}
+                />
+              );
+            })()}
 
           {projection !== 'iso' &&
             devices.map((dev) => (
@@ -1296,21 +1325,28 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
             projection !== 'iso' &&
             mode === 'select' &&
             handleDevice &&
-            gesture.current.kind === 'none' && (
-              <circle
-                className={styles.connectHandle}
-                cx={handleDevice.x + handleDevice.width}
-                cy={handleDevice.y}
-                r={6 / viewport.scale}
-                onPointerDown={(e) => startLinkFrom(e, handleDevice.id)}
-              />
-            )}
+            gesture.current.kind === 'none' &&
+            (() => {
+              const c = center(handleDevice);
+              const handle = iconEdgePoint(handleDevice, { x: c.x + 100, y: c.y });
+              return (
+                <circle
+                  className={styles.connectHandle}
+                  cx={handle.x}
+                  cy={handle.y}
+                  r={6 / viewport.scale}
+                  onPointerDown={(e) => startLinkFrom(e, handleDevice.id)}
+                />
+              );
+            })()}
         </g>
 
         {/* Upright iso layer (Phase 9.3): device tiles + connect handle, NOT
             sheared by the iso matrix so glyphs/labels stay crisp. */}
         {projection === 'iso' && (
-          <g transform={`translate(${viewport.tx} ${viewport.ty}) scale(${viewport.scale})`}>
+          <g
+            transform={`translate(${viewport.tx} ${viewport.ty}) scale(${viewport.scale})`}
+          >
             {[...devices]
               .sort((a, b) => a.x + a.y - (b.x + b.y)) // painter's: far tiles first
               .map((dev) => (
@@ -1343,12 +1379,9 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
               handleDevice &&
               gesture.current.kind === 'none' &&
               (() => {
-                const corner = isoProjectPx(
-                  handleDevice.x + handleDevice.width,
-                  handleDevice.y,
-                  GRID_SIZE,
-                  ISO_TILE,
-                );
+                const c = center(handleDevice);
+                const edge = iconEdgePoint(handleDevice, { x: c.x + 100, y: c.y });
+                const corner = isoProjectPx(edge.x, edge.y, GRID_SIZE, ISO_TILE);
                 return (
                   <circle
                     className={styles.connectHandle}
@@ -1411,21 +1444,21 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           onClick={() => setViewport((v) => zoomAt(v, 1 / 1.2, size.w / 2, size.h / 2))}
           aria-label="Zoom out"
         >
-          −
+          <NexIcon name="zoom-out" />
         </button>
         <span className={styles.zoomPct}>{Math.round(viewport.scale * 100)}%</span>
         <button
           onClick={() => setViewport((v) => zoomAt(v, 1.2, size.w / 2, size.h / 2))}
           aria-label="Zoom in"
         >
-          +
+          <NexIcon name="zoom-in" />
         </button>
         <button
           onClick={() => fitFlatBox(store().contentBounds())}
           aria-label="Fit to screen"
           title="Fit to screen"
         >
-          ⤢
+          <NexIcon name="fit-screen" />
         </button>
         <button
           onClick={zoomToSelection}
@@ -1433,7 +1466,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           aria-label="Zoom to selection"
           title="Zoom to selection (2)"
         >
-          ⊡
+          <NexIcon name="zoom-selection" />
         </button>
       </div>
 
@@ -1530,35 +1563,35 @@ function AlignBar({ count }: { count: number }) {
   return (
     <div className={styles.alignBar} role="toolbar" aria-label="Align and distribute">
       <button title="Align left" aria-label="Align left" onClick={() => align('left')}>
-        ⇤
+        <NexIcon name="align-left" />
       </button>
       <button
         title="Align horizontal centers"
         aria-label="Align horizontal centers"
         onClick={() => align('hcenter')}
       >
-        ↔
+        <NexIcon name="align-hcenter" />
       </button>
       <button title="Align right" aria-label="Align right" onClick={() => align('right')}>
-        ⇥
+        <NexIcon name="align-right" />
       </button>
       <span className={styles.sep} />
       <button title="Align top" aria-label="Align top" onClick={() => align('top')}>
-        ⤒
+        <NexIcon name="align-top" />
       </button>
       <button
         title="Align vertical centers"
         aria-label="Align vertical centers"
         onClick={() => align('vcenter')}
       >
-        ↕
+        <NexIcon name="align-vcenter" />
       </button>
       <button
         title="Align bottom"
         aria-label="Align bottom"
         onClick={() => align('bottom')}
       >
-        ⤓
+        <NexIcon name="align-bottom" />
       </button>
       <span className={styles.sep} />
       <button
@@ -1567,7 +1600,7 @@ function AlignBar({ count }: { count: number }) {
         disabled={!canDist}
         onClick={() => dist('h')}
       >
-        ⇹
+        <NexIcon name="distribute-h" />
       </button>
       <button
         title="Distribute vertically"
@@ -1575,7 +1608,7 @@ function AlignBar({ count }: { count: number }) {
         disabled={!canDist}
         onClick={() => dist('v')}
       >
-        ⤧
+        <NexIcon name="distribute-v" />
       </button>
     </div>
   );

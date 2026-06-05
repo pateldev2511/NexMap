@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
 import type { DeviceType } from '@/model/types';
-import { deviceVisual, deviceIcon } from '@/canvas/deviceVisuals';
+import { IsoIcon } from '@/canvas/IsoIcon';
+import { deviceVisual } from '@/canvas/deviceVisuals';
 import { defaultDeviceName } from '@/model/schema';
+import { NexIcon } from '@/ui/icons/NexIcon';
 import styles from './Library.module.css';
 
 /**
@@ -63,18 +65,10 @@ function LibraryItem({ type }: { type: DeviceType }) {
       }}
       title={`Drag to add ${defaultDeviceName(type)}`}
     >
-      <span className={styles.swatch} style={{ background: visual.accent }}>
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          stroke="#fff"
-          strokeWidth={2}
-          fill="none"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          dangerouslySetInnerHTML={{ __html: deviceIcon(type) }}
-        />
+      <span className={styles.swatch}>
+        <svg width="34" height="26" viewBox="0 0 34 26" aria-hidden="true">
+          <IsoIcon type={type} accent={visual.accent} cx={17} cy={11} size={19} />
+        </svg>
       </span>
       <span className={styles.itemLabel}>{defaultDeviceName(type)}</span>
     </div>
@@ -125,7 +119,7 @@ export function Library() {
             <div key={g.name} className={styles.group}>
               <button className={styles.groupHeader} onClick={() => toggle(g.name)}>
                 <span>{g.name}</span>
-                <span>{isOpen ? '−' : '+'}</span>
+                <NexIcon name={isOpen ? 'chevron-down' : 'chevron-up'} />
               </button>
               {isOpen && (
                 <div className={styles.grid}>

@@ -119,6 +119,14 @@ parity and an error boundary.
       disconnected components into rows. Pure + deterministic (8 unit tests);
       `store.autoLayout()` commits as one undoable transaction and respects locks
       (3 store tests); toolbar `⊞` button + ⌘⇧L. Works in flat and iso.
+- [x] **Isometric 3D icon engine** ✅ — replaced the flat/fake-layered glyphs with
+      a true isometric solid engine (`deviceIso.ts`): volumetric primitives (iso
+      box, cylinder, sphere, shaded top/left/right faces) composed into recognizable
+      hardware — router = chassis + antennas, switch = rack box w/ ports, server =
+      tower w/ bays, firewall = brick wall, storage/DB = drum, AP = puck + Wi-Fi
+      arcs, cloud/globe/k8s specials, archetype + emblem for the long tail. Thin
+      detail strokes; per-device gradient palette retained. Rendered via `IsoIcon`
+      (canvas/library) + `deviceIsoGroup` (export), verified flat/iso/light/dark.
 - [ ] Text/Mermaid-to-diagram input (auto-layout is the placement engine for it).
 - [ ] Guided live-discovery import wizard.
 - [ ] Obstacle-avoiding connector routing.

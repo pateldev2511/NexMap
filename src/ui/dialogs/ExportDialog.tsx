@@ -3,6 +3,7 @@ import { useProjectStore } from '@/store/projectStore';
 import { runExport, type ExportFormat, type ExportOptions } from '@/io/export';
 import { buildSvg } from '@/io/export/buildSvg';
 import type { CanvasObject, Device, Link } from '@/model/types';
+import { NexIcon } from '@/ui/icons/NexIcon';
 import styles from './ImportDialog.module.css';
 
 /**
@@ -20,6 +21,7 @@ const FORMATS: { key: ExportFormat; label: string }[] = [
 ];
 
 type Scope = 'all' | 'selection';
+type ExportMessage = { tone: 'success' | 'warning' | 'error'; text: string };
 
 export function ExportDialog({ onClose }: { onClose: () => void }) {
   const store = useProjectStore.getState;
@@ -36,7 +38,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const [quality, setQuality] = useState(0.92);
   const [fileName, setFileName] = useState('');
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<ExportMessage | null>(null);
 
   const isRaster =
     format === 'png' || format === 'jpg' || format === 'pdf' || format === 'zip';
@@ -110,9 +112,13 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         },
         opts,
       );
-      setMsg(outcome.warning ? `⚠ ${outcome.warning}` : `✓ Exported ${outcome.fileName}`);
+      setMsg(
+        outcome.warning
+          ? { tone: 'warning', text: outcome.warning }
+          : { tone: 'success', text: `Exported ${outcome.fileName}` },
+      );
     } catch (e) {
-      setMsg(`Export failed: ${(e as Error).message}`);
+      setMsg({ tone: 'error', text: `Export failed: ${(e as Error).message}` });
     } finally {
       setBusy(false);
     }
@@ -135,7 +141,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         <div className={styles.head}>
           <h2>Export</h2>
           <button className={styles.close} onClick={onClose} aria-label="Close">
-            ✕
+            <NexIcon name="close" />
           </button>
         </div>
         <div className={styles.body}>
@@ -283,7 +289,24 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                 ? `Bundles .nexmap + PNG + SVG + PDF + CSVs + validation report (${countSummary}).`
                 : `Exports ${scope === 'selection' ? 'the selection' : 'the whole diagram'} (${countSummary}).`}
           </div>
-          {msg && <div className={styles.summary}>{msg}</div>}
+          {msg && (
+            <div
+              className={styles.summary}
+              style={{
+                color:
+                  msg.tone === 'success'
+                    ? 'var(--sev-info)'
+                    : msg.tone === 'warning'
+                      ? 'var(--sev-warn)'
+                      : 'var(--sev-error)',
+              }}
+            >
+              <div className={styles.messageLine}>
+                <NexIcon name={msg.tone === 'success' ? 'check' : 'warning'} />
+                <span>{msg.text}</span>
+              </div>
+            </div>
+          )}
         </div>
         <div className={styles.foot}>
           <button className={styles.btn} onClick={onClose}>

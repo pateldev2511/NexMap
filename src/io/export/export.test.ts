@@ -12,7 +12,7 @@ describe('buildSvg', () => {
     const link = createLink(a.id, b.id, L);
     const svg = buildSvg([a, b], [link], { background: '#fff', includeLabels: true });
     expect(svg.startsWith('<svg')).toBe(true);
-    expect(svg).toContain('<line');
+    expect(svg).toContain('<path');
     expect(svg).toContain(`data-id="${a.id}"`); // IDs preserved for round-trip
     expect(svg).toContain('R1');
     // Phase 9.7: devices render a pictographic icon group, not a letter glyph.
@@ -48,9 +48,9 @@ describe('buildSvg', () => {
       projection: 'iso',
     });
     expect(isoSvg.startsWith('<svg')).toBe(true);
-    // Floor layer is sheared by the iso matrix; tiles render as polygons.
+    // Floor layer is sheared by the iso matrix; devices render as isometric 3D solids.
     expect(isoSvg).toContain('matrix(');
-    expect(isoSvg).toContain('<polygon');
+    expect(isoSvg).toContain('<polygon'); // iso device faces
     expect(isoSvg).toContain('R1'); // labels still present
     // The iso projection changes geometry, so the output differs from flat.
     expect(isoSvg).not.toBe(flat);

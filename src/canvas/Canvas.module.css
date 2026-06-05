@@ -41,38 +41,94 @@
   cursor: crosshair;
 }
 
-.node.validTarget .body {
-  stroke: var(--accent);
-  stroke-width: 3;
-  fill: color-mix(in srgb, var(--accent) 10%, var(--chrome-bg));
-}
-
 .node {
   cursor: move;
 }
 
-.node .body {
-  fill: var(--chrome-bg);
-  stroke: var(--chrome-border);
-  stroke-width: 1.5;
-  filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.18));
+.hitArea,
+.isoHitArea {
+  fill: transparent;
+  pointer-events: all;
 }
 
-.node.selected .body {
+.deviceIconHalo {
+  fill: transparent;
   stroke: var(--accent);
-  stroke-width: 2.5;
+  stroke-width: 1.8;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.node.selected .deviceIconHalo,
+.isoNode.selected .deviceIconHalo {
+  fill: color-mix(in srgb, var(--accent) 10%, transparent);
+  opacity: 0.9;
+}
+
+.node.validTarget .deviceIconHalo,
+.isoNode.validTarget .deviceIconHalo {
+  fill: color-mix(in srgb, var(--accent) 18%, transparent);
+  stroke-width: 2.4;
+  opacity: 1;
+}
+
+.node:hover .deviceIconHalo,
+.isoNode:hover .deviceIconHalo {
+  opacity: 0.65;
 }
 
 .node.lassoMode {
   cursor: crosshair;
 }
 
-.node .accent {
-  /* fill set inline per device family */
+.deviceIcon3d {
+  pointer-events: none;
+}
+
+.deviceIconGround {
+  fill: #020617;
+  opacity: 0.16;
+}
+
+.deviceIconGlow,
+.deviceIconDepth,
+.deviceIconShade,
+.deviceIconBody,
+.deviceIconHighlight {
+  pointer-events: none;
+}
+
+.deviceIconGlow {
+  opacity: 0.86;
+}
+
+.deviceIconDepth {
+  opacity: 0.76;
+}
+
+.deviceIconShade {
+  opacity: 0.92;
+}
+
+.deviceIconBody {
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.24));
+}
+
+.deviceIconHighlight {
+  opacity: 0.82;
+}
+
+/* Isometric 3D device model (deviceIso engine). */
+.deviceIso {
+  pointer-events: none;
+}
+
+.deviceIsoShadow {
+  fill: #020617;
+  opacity: 0.13;
 }
 
 .node .glyph {
-  fill: #fff;
   font-size: 11px;
   font-weight: 700;
   text-anchor: middle;
@@ -95,24 +151,28 @@
   stroke-width: 1;
 }
 
-.issueBadge text {
+.issueBadge path {
+  stroke: #fff;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  fill: none;
+  pointer-events: none;
+}
+
+.issueDot {
   fill: #fff;
-  font-size: 10px;
-  font-weight: 700;
-  text-anchor: middle;
-  dominant-baseline: central;
+  stroke: none;
   pointer-events: none;
 }
 
-.lockGlyph {
-  font-size: 9px;
-  text-anchor: end;
-  dominant-baseline: alphabetic;
+.lockMark {
+  color: var(--chrome-fg-muted);
   pointer-events: none;
 }
 
-.node:hover .body {
-  stroke: var(--accent);
+.node.selected .lockMark,
+.isoNode.selected .lockMark {
+  color: var(--accent);
 }
 
 .svg.panMode {
@@ -237,19 +297,11 @@
   cursor: move;
 }
 
-.isoTop {
-  stroke: var(--chrome-border);
-  stroke-width: 1.5;
-  stroke-linejoin: round;
-}
-
-.isoNode.selected .isoTop {
+.isoTargetHalo {
   stroke: var(--accent);
   stroke-width: 2.5;
-}
-
-.isoNode:hover .isoTop {
-  stroke: var(--accent);
+  stroke-linejoin: round;
+  pointer-events: none;
 }
 
 .isoLabel {
@@ -338,14 +390,22 @@
 }
 
 .alignBar button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 26px;
   background: transparent;
   border: none;
   color: var(--chrome-fg);
   border-radius: 6px;
-  padding: 4px 7px;
-  font-size: 14px;
+  padding: 0;
   line-height: 1;
   cursor: pointer;
+}
+
+.alignBar button svg {
+  width: 15px;
+  height: 15px;
 }
 
 .alignBar button:hover:not(:disabled) {
@@ -379,12 +439,20 @@
 }
 
 .zoomBar button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 26px;
   background: transparent;
   border: none;
   color: var(--chrome-fg);
   border-radius: 6px;
-  padding: 4px 9px;
-  font-size: 13px;
+  padding: 0;
+}
+
+.zoomBar button svg {
+  width: 15px;
+  height: 15px;
 }
 
 .zoomBar button:hover {

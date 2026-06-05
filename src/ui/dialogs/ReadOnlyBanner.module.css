@@ -14,6 +14,12 @@
   z-index: 6;
 }
 
+.banner svg {
+  flex: 0 0 15px;
+  width: 15px;
+  height: 15px;
+}
+
 .toast {
   position: absolute;
   bottom: 12px;

@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import type { CanvasObject } from '@/model/types';
+import { NexIcon } from '@/ui/icons/NexIcon';
 import styles from './Canvas.module.css';
 
 interface ObjectNodeProps {
@@ -9,8 +10,6 @@ interface ObjectNodeProps {
   /** When set (iso mode), de-shears the shape label to stay upright. */
   labelUpright?: (ax: number, ay: number) => string;
 }
-
-const LOCK_GLYPH = '\u{1F512}';
 
 /** Renders a text note or a shape/zone. Selection/drag go through the shared handler. */
 function ObjectNodeImpl({
@@ -86,19 +85,21 @@ function ObjectNodeImpl({
             className={styles.shapeLabel}
             x={object.x + 8}
             y={object.y + 16}
-            transform={labelUpright ? labelUpright(object.x + 8, object.y + 16) : undefined}
+            transform={
+              labelUpright ? labelUpright(object.x + 8, object.y + 16) : undefined
+            }
           >
             {object.label}
           </text>
         )}
         {object.locked && (
-          <text
-            className={styles.lockGlyph}
-            x={object.x + object.width - 2}
-            y={object.y + object.height - 2}
-          >
-            {LOCK_GLYPH}
-          </text>
+          <NexIcon
+            name="lock"
+            className={styles.lockMark}
+            size={12}
+            x={object.x + object.width - 15}
+            y={object.y + object.height - 15}
+          />
         )}
       </g>
     );

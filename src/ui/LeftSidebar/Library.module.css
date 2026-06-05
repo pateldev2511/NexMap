@@ -34,7 +34,13 @@
   letter-spacing: 0.04em;
   padding: 8px 12px;
   display: flex;
+  align-items: center;
   justify-content: space-between;
+}
+
+.groupHeader svg {
+  width: 14px;
+  height: 14px;
 }
 
 .grid {
@@ -62,12 +68,8 @@
 }
 
 .swatch {
-  width: 26px;
-  height: 18px;
-  border-radius: 3px;
-  color: #fff;
-  font-size: 9px;
-  font-weight: 700;
+  width: 34px;
+  height: 26px;
   display: grid;
   place-items: center;
 }

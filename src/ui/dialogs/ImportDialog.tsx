@@ -23,6 +23,7 @@ import {
   type ImportResult,
 } from '@/io/import/graphImport';
 import type { Subnet, Vlan } from '@/model/types';
+import { NexIcon } from '@/ui/icons/NexIcon';
 import styles from './ImportDialog.module.css';
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif']);
@@ -47,15 +48,22 @@ type MediaResult = {
   error?: string;
 };
 
+function WarningLine({ text }: { text: string }) {
+  return (
+    <div className={styles.messageLine}>
+      <NexIcon name="warning" />
+      <span>{text}</span>
+    </div>
+  );
+}
+
 function svgSize(svg: string): { width: number; height: number } {
   const width = Number(/(?:^|[\s<])width=["']?(\d+(?:\.\d+)?)/i.exec(svg)?.[1]);
   const height = Number(/(?:^|[\s<])height=["']?(\d+(?:\.\d+)?)/i.exec(svg)?.[1]);
   if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
     return { width, height };
   }
-  const viewBox = /\bviewBox=["']?([\d.-]+)\s+([\d.-]+)\s+([\d.]+)\s+([\d.]+)/i.exec(
-    svg,
-  );
+  const viewBox = /\bviewBox=["']?([\d.-]+)\s+([\d.-]+)\s+([\d.]+)\s+([\d.]+)/i.exec(svg);
   const vbWidth = Number(viewBox?.[3]);
   const vbHeight = Number(viewBox?.[4]);
   if (
@@ -310,7 +318,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
         <div className={styles.head}>
           <h2>Import</h2>
           <button className={styles.close} onClick={onClose} aria-label="Close">
-            ✕
+            <NexIcon name="close" />
           </button>
         </div>
 
@@ -342,7 +350,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
               {mediaResult.warnings.length > 0 && (
                 <div className={styles.warnings}>
                   {mediaResult.warnings.map((w, i) => (
-                    <div key={i}>⚠ {w}</div>
+                    <WarningLine key={i} text={w} />
                   ))}
                 </div>
               )}
@@ -400,7 +408,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
               {graphResult.result.warnings.length > 0 && (
                 <div className={styles.warnings}>
                   {graphResult.result.warnings.slice(0, 30).map((w, i) => (
-                    <div key={i}>⚠ {w}</div>
+                    <WarningLine key={i} text={w} />
                   ))}
                 </div>
               )}
@@ -477,7 +485,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
               {result && result.warnings.length > 0 && (
                 <div className={styles.warnings}>
                   {result.warnings.slice(0, 30).map((w, i) => (
-                    <div key={i}>⚠ {w}</div>
+                    <WarningLine key={i} text={w} />
                   ))}
                   {result.warnings.length > 30 && (
                     <div>…and {result.warnings.length - 30} more.</div>
@@ -489,14 +497,19 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
 
           {done && (
             <div className={styles.summary}>
-              ✓ Imported <strong>{done.count}</strong> {done.noun}
-              {done.count === 1 ? '' : 's'}
-              {done.skipped > 0 && `, skipped ${done.skipped} row(s)`}. Undo (Ctrl+Z)
-              reverts the whole import.
+              <div className={styles.messageLine}>
+                <NexIcon name="check" />
+                <span>
+                  Imported <strong>{done.count}</strong> {done.noun}
+                  {done.count === 1 ? '' : 's'}
+                  {done.skipped > 0 && `, skipped ${done.skipped} row(s)`}. Undo (Ctrl+Z)
+                  reverts the whole import.
+                </span>
+              </div>
               {done.warnings.length > 0 && (
                 <div className={styles.warnings} style={{ marginTop: 8 }}>
                   {done.warnings.slice(0, 30).map((w, i) => (
-                    <div key={i}>⚠ {w}</div>
+                    <WarningLine key={i} text={w} />
                   ))}
                 </div>
               )}

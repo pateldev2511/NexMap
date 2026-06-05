@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { NexIcon } from '@/ui/icons/NexIcon';
 import { ErrorBoundary } from './ErrorBoundary';
 import styles from './AppShell.module.css';
 
@@ -72,7 +73,8 @@ export function AppShell({
             aria-pressed={leftOpen}
             title={leftOpen ? 'Hide library panel' : 'Show library panel'}
           >
-            Library
+            <NexIcon name="library" />
+            <span>Library</span>
           </button>
           <button
             className={styles.topbarBtn}
@@ -80,7 +82,8 @@ export function AppShell({
             aria-pressed={rightOpen}
             title={rightOpen ? 'Hide inspector panel' : 'Show inspector panel'}
           >
-            Inspector
+            <NexIcon name="inspector" />
+            <span>Inspector</span>
           </button>
         </div>
         <div className={styles.topbarSpacer} />
