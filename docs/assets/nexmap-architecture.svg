@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="620" viewBox="0 0 1180 620" role="img" aria-labelledby="title desc">
+  <title id="title">NexMap architecture diagram</title>
+  <desc id="desc">NexMap architecture showing local-first browser UI, store, model, validation, import/export, persistence, and local files.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 10 5 0 10z" fill="#64748b"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-20%" width="120%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="9" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+    <style>
+      .bg{fill:#f8fafc}
+      .card{fill:#fff;stroke:#dbe3ee;stroke-width:1.5;filter:url(#shadow)}
+      .core{fill:#eff6ff;stroke:#2563eb}
+      .data{fill:#f0fdf4;stroke:#16a34a}
+      .io{fill:#fff7ed;stroke:#ea580c}
+      .warn{fill:#fefce8;stroke:#ca8a04}
+      .title{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:24px;font-weight:800;fill:#0f172a}
+      .label{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:700;fill:#1e293b}
+      .text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;fill:#64748b}
+      .line{stroke:#64748b;stroke-width:2.2;fill:none;marker-end:url(#arrow)}
+      .mutedLine{stroke:#94a3b8;stroke-width:1.6;stroke-dasharray:6 6;fill:none;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect class="bg" width="1180" height="620" rx="24"/>
+  <text class="title" x="48" y="58">NexMap local-first architecture</text>
+  <text class="text" x="48" y="84">No login, no server storage, no hidden sync. The browser owns the whole editing loop.</text>
+
+  <g transform="translate(48 126)">
+    <rect class="card" width="250" height="128" rx="16"/>
+    <text class="label" x="22" y="34">React UI</text>
+    <text class="text" x="22" y="62">Canvas, library, inspector,</text>
+    <text class="text" x="22" y="82">bottom panels, dialogs,</text>
+    <text class="text" x="22" y="102">keyboard shortcuts.</text>
+  </g>
+
+  <g transform="translate(362 126)">
+    <rect class="card core" width="270" height="128" rx="16"/>
+    <text class="label" x="22" y="34">Zustand store</text>
+    <text class="text" x="22" y="62">Single writer, commands,</text>
+    <text class="text" x="22" y="82">undo/redo history, selection,</text>
+    <text class="text" x="22" y="102">layers and views.</text>
+  </g>
+
+  <g transform="translate(700 126)">
+    <rect class="card data" width="250" height="128" rx="16"/>
+    <text class="label" x="22" y="34">Model + validation</text>
+    <text class="text" x="22" y="62">Typed devices, links, VLANs,</text>
+    <text class="text" x="22" y="82">subnets, racks, objects,</text>
+    <text class="text" x="22" y="102">schema migrations.</text>
+  </g>
+
+  <g transform="translate(48 324)">
+    <rect class="card io" width="250" height="132" rx="16"/>
+    <text class="label" x="22" y="34">Import</text>
+    <text class="text" x="22" y="62">CSV, GraphML, draw.io XML,</text>
+    <text class="text" x="22" y="82">NetBox, Nmap, images/SVG.</text>
+    <text class="text" x="22" y="104">Preview, confirm, undo.</text>
+  </g>
+
+  <g transform="translate(362 324)">
+    <rect class="card warn" width="270" height="132" rx="16"/>
+    <text class="label" x="22" y="34">Canvas renderer</text>
+    <text class="text" x="22" y="62">Flat or isometric projection,</text>
+    <text class="text" x="22" y="82">SVG scene graph, culling,</text>
+    <text class="text" x="22" y="104">selection and hit testing.</text>
+  </g>
+
+  <g transform="translate(700 324)">
+    <rect class="card io" width="250" height="132" rx="16"/>
+    <text class="label" x="22" y="34">Export</text>
+    <text class="text" x="22" y="62">PNG, JPG, SVG, PDF, CSV,</text>
+    <text class="text" x="22" y="82">ZIP package and validation</text>
+    <text class="text" x="22" y="104">report from the model.</text>
+  </g>
+
+  <g transform="translate(976 224)">
+    <rect class="card" width="156" height="132" rx="16"/>
+    <text class="label" x="20" y="34">Local data</text>
+    <text class="text" x="20" y="62">IndexedDB</text>
+    <text class="text" x="20" y="82">localStorage</text>
+    <text class="text" x="20" y="102">.nexmap files</text>
+  </g>
+
+  <path class="line" d="M298 190H356"/>
+  <path class="line" d="M632 190H694"/>
+  <path class="line" d="M497 254V318"/>
+  <path class="line" d="M298 390H356"/>
+  <path class="line" d="M632 390H694"/>
+  <path class="line" d="M950 190C986 190 1000 210 1000 224"/>
+  <path class="line" d="M950 390C986 390 1000 370 1000 356"/>
+  <path class="mutedLine" d="M173 324V258C173 230 205 206 356 204"/>
+  <path class="mutedLine" d="M825 324V258C825 228 776 210 632 204"/>
+
+  <g transform="translate(48 522)">
+    <rect width="1084" height="54" rx="14" fill="#eaf2ff" stroke="#bfdbfe"/>
+    <text class="label" x="22" y="34">Current status:</text>
+    <text class="text" x="142" y="34">Open-source work in progress. Feature-rich, but APIs, UI polish, tests, and docs are still evolving before a stable release.</text>
+  </g>
+</svg>
