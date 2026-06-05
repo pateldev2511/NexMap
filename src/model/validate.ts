@@ -7,7 +7,14 @@
  * Pure: takes devices + links, returns issues. The store runs this debounced in
  * M5; here it's just a function so it's trivially testable and worker-portable.
  */
-import { cidrsOverlap, ipInCidr, isValidIpv4, isValidIpv6, parseCidr, stripPrefix } from '@/lib/ipcidr';
+import {
+  cidrsOverlap,
+  ipInCidr,
+  isValidIpv4,
+  isValidIpv6,
+  parseCidr,
+  stripPrefix,
+} from '@/lib/ipcidr';
 import type { Device, Link, Rack, Subnet, ValidationIssue, Vlan } from './types';
 
 let counter = 0;
@@ -317,7 +324,10 @@ function checkTrunkAccess(links: Link[]): ValidationIssue[] {
         objectIds: [l.id],
       });
     }
-    if (l.mode === 'access' && (l.vlan?.split(',').filter((s) => s.trim()).length ?? 0) > 1) {
+    if (
+      l.mode === 'access' &&
+      (l.vlan?.split(',').filter((s) => s.trim()).length ?? 0) > 1
+    ) {
       issues.push({
         id: issueId(),
         severity: 'warn',

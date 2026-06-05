@@ -70,6 +70,8 @@ describe('viewport transforms', () => {
   });
 
   it('fitToBox handles empty content', () => {
-    expect(fitToBox({ x: 0, y: 0, width: 0, height: 0 }, 800, 600)).toEqual(initialViewport);
+    expect(fitToBox({ x: 0, y: 0, width: 0, height: 0 }, 800, 600)).toEqual(
+      initialViewport,
+    );
   });
 });

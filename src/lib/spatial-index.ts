@@ -149,8 +149,14 @@ export class SpatialIndex {
 
   /** Number of grid cells a box covers (without materializing them). */
   private cellSpan(box: Box): number {
-    const cols = Math.floor((box.x + box.width) / this.cellSize) - Math.floor(box.x / this.cellSize) + 1;
-    const rows = Math.floor((box.y + box.height) / this.cellSize) - Math.floor(box.y / this.cellSize) + 1;
+    const cols =
+      Math.floor((box.x + box.width) / this.cellSize) -
+      Math.floor(box.x / this.cellSize) +
+      1;
+    const rows =
+      Math.floor((box.y + box.height) / this.cellSize) -
+      Math.floor(box.y / this.cellSize) +
+      1;
     return cols * rows;
   }
 

@@ -9,7 +9,15 @@
  * `transaction()` composes sub-commands into a single atomic history entry — the
  * basis for build-draft-then-commit import (DA-T2): the whole import is one undo.
  */
-import type { CanvasObject, Device, Link, Rack, Subnet, Vlan } from '@/model/types';
+import type {
+  CanvasObject,
+  Device,
+  Layer,
+  Link,
+  Rack,
+  Subnet,
+  Vlan,
+} from '@/model/types';
 import {
   addDevice,
   addLink,
@@ -237,10 +245,105 @@ export class UpdateObjectCommand implements Command {
     if (o) s.objects.set(this.id, { ...o, ...this.before } as CanvasObject);
   }
   mergeWith(next: Command): Command | null {
-    if (next instanceof UpdateObjectCommand && next.id === this.id && sameKeys(this.after, next.after)) {
+    if (
+      next instanceof UpdateObjectCommand &&
+      next.id === this.id &&
+      sameKeys(this.after, next.after)
+    ) {
       return new UpdateObjectCommand(this.id, this.before, next.after);
     }
     return null;
+  }
+}
+
+export class AddLayerCommand implements Command {
+  readonly label = 'Add layer';
+  constructor(private readonly layer: Layer) {}
+  apply(s: ModelState) {
+    s.layers.set(this.layer.id, this.layer);
+  }
+  undo(s: ModelState) {
+    s.layers.delete(this.layer.id);
+  }
+}
+
+export class UpdateLayerCommand implements Command {
+  readonly label = 'Edit layer';
+  constructor(
+    private readonly id: string,
+    private readonly before: Partial<Layer>,
+    private readonly after: Partial<Layer>,
+  ) {}
+  apply(s: ModelState) {
+    const layer = s.layers.get(this.id);
+    if (layer) s.layers.set(this.id, { ...layer, ...this.after });
+  }
+  undo(s: ModelState) {
+    const layer = s.layers.get(this.id);
+    if (layer) s.layers.set(this.id, { ...layer, ...this.before });
+  }
+  mergeWith(next: Command): Command | null {
+    if (
+      next instanceof UpdateLayerCommand &&
+      next.id === this.id &&
+      sameKeys(this.after, next.after)
+    ) {
+      return new UpdateLayerCommand(this.id, this.before, next.after);
+    }
+    return null;
+  }
+}
+
+export class DeleteLayerCommand implements Command {
+  readonly label = 'Delete layer';
+  private removed?: Layer;
+  private movedDevices: Array<{ id: string; layerId: string }> = [];
+  private movedLinks: Array<{ id: string; layerId: string }> = [];
+  private movedObjects: Array<{ id: string; layerId: string }> = [];
+
+  constructor(
+    private readonly id: string,
+    private readonly fallbackId: string,
+  ) {}
+
+  apply(s: ModelState) {
+    this.removed = s.layers.get(this.id);
+    this.movedDevices = [];
+    this.movedLinks = [];
+    this.movedObjects = [];
+    if (!this.removed) return;
+    for (const d of s.devices.values()) {
+      if (d.layerId !== this.id) continue;
+      this.movedDevices.push({ id: d.id, layerId: d.layerId });
+      s.devices.set(d.id, { ...d, layerId: this.fallbackId });
+    }
+    for (const l of s.links.values()) {
+      if (l.layerId !== this.id) continue;
+      this.movedLinks.push({ id: l.id, layerId: l.layerId });
+      s.links.set(l.id, { ...l, layerId: this.fallbackId });
+    }
+    for (const o of s.objects.values()) {
+      if (o.layerId !== this.id) continue;
+      this.movedObjects.push({ id: o.id, layerId: o.layerId });
+      s.objects.set(o.id, { ...o, layerId: this.fallbackId } as CanvasObject);
+    }
+    s.layers.delete(this.id);
+  }
+
+  undo(s: ModelState) {
+    if (this.removed) s.layers.set(this.removed.id, this.removed);
+    for (const moved of this.movedDevices) {
+      const d = s.devices.get(moved.id);
+      if (d) s.devices.set(d.id, { ...d, layerId: moved.layerId });
+    }
+    for (const moved of this.movedLinks) {
+      const l = s.links.get(moved.id);
+      if (l) s.links.set(l.id, { ...l, layerId: moved.layerId });
+    }
+    for (const moved of this.movedObjects) {
+      const o = s.objects.get(moved.id);
+      if (o) s.objects.set(o.id, { ...o, layerId: moved.layerId } as CanvasObject);
+    }
   }
 }
 
@@ -273,7 +376,11 @@ export class UpdateVlanCommand implements Command {
     if (v) s.vlans.set(this.id, { ...v, ...this.before });
   }
   mergeWith(next: Command): Command | null {
-    if (next instanceof UpdateVlanCommand && next.id === this.id && sameKeys(this.after, next.after)) {
+    if (
+      next instanceof UpdateVlanCommand &&
+      next.id === this.id &&
+      sameKeys(this.after, next.after)
+    ) {
       return new UpdateVlanCommand(this.id, this.before, next.after);
     }
     return null;
@@ -320,7 +427,11 @@ export class UpdateSubnetCommand implements Command {
     if (sub) s.subnets.set(this.id, { ...sub, ...this.before });
   }
   mergeWith(next: Command): Command | null {
-    if (next instanceof UpdateSubnetCommand && next.id === this.id && sameKeys(this.after, next.after)) {
+    if (
+      next instanceof UpdateSubnetCommand &&
+      next.id === this.id &&
+      sameKeys(this.after, next.after)
+    ) {
       return new UpdateSubnetCommand(this.id, this.before, next.after);
     }
     return null;
@@ -367,7 +478,11 @@ export class UpdateRackCommand implements Command {
     if (r) s.racks.set(this.id, { ...r, ...this.before });
   }
   mergeWith(next: Command): Command | null {
-    if (next instanceof UpdateRackCommand && next.id === this.id && sameKeys(this.after, next.after)) {
+    if (
+      next instanceof UpdateRackCommand &&
+      next.id === this.id &&
+      sameKeys(this.after, next.after)
+    ) {
       return new UpdateRackCommand(this.id, this.before, next.after);
     }
     return null;

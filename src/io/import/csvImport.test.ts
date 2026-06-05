@@ -46,7 +46,9 @@ describe('parseDeviceType', () => {
 
 describe('buildDevices', () => {
   it('builds devices and warns on unknown type + missing name', () => {
-    const csv = parseCsv('name,type,ip\nR1,router,10.0.0.1\nWidget,frobnicator,10.0.0.2\n,switch,10.0.0.3');
+    const csv = parseCsv(
+      'name,type,ip\nR1,router,10.0.0.1\nWidget,frobnicator,10.0.0.2\n,switch,10.0.0.3',
+    );
     const m = autoMap(csv.headers, DEVICE_FIELDS);
     const res = buildDevices(csv.rows, m, LAYER);
     expect(res.devices).toHaveLength(2);
@@ -58,7 +60,9 @@ describe('buildDevices', () => {
   });
 
   it('lays devices out without overlap', () => {
-    const csv = parseCsv('name\n' + Array.from({ length: 10 }, (_, i) => `D${i}`).join('\n'));
+    const csv = parseCsv(
+      'name\n' + Array.from({ length: 10 }, (_, i) => `D${i}`).join('\n'),
+    );
     const res = buildDevices(csv.rows, autoMap(csv.headers, DEVICE_FIELDS), LAYER);
     const coords = new Set(res.devices.map((d) => `${d.x},${d.y}`));
     expect(coords.size).toBe(res.devices.length);

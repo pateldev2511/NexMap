@@ -98,7 +98,11 @@ export function loadDocument(raw: string): LoadResult {
     v += 1;
   }
 
-  if (!isPlainObject(doc.project) || !Array.isArray(doc.devices) || !Array.isArray(doc.links)) {
+  if (
+    !isPlainObject(doc.project) ||
+    !Array.isArray(doc.devices) ||
+    !Array.isArray(doc.links)
+  ) {
     return {
       ok: false,
       reason: 'invalid',

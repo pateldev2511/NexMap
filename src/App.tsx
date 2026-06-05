@@ -132,62 +132,97 @@ export function App() {
 
   const actions = (
     <>
-      <button className={shell.topbarBtn} onClick={handleNew} title="New project (Ctrl+N)">
+      <button
+        className={shell.topbarBtn}
+        onClick={handleNew}
+        title="New project (Ctrl+N)"
+      >
         New
       </button>
-      <button className={shell.topbarBtn} onClick={handleOpen} title="Open .nexmap (Ctrl+O)">
+      <button
+        className={shell.topbarBtn}
+        onClick={handleOpen}
+        title="Open .nexmap (Ctrl+O)"
+      >
         Open
       </button>
-      <button className={shell.topbarBtn} onClick={() => persistence.save()} title="Save (Ctrl+S)">
+      <button
+        className={shell.topbarBtn}
+        onClick={() => persistence.save()}
+        title="Save (Ctrl+S)"
+      >
         Save
       </button>
-      <button className={shell.topbarBtn} onClick={() => setImporting(true)} title="Import CSV">
+      <button
+        className={shell.topbarBtn}
+        onClick={() => setImporting(true)}
+        title="Import CSV"
+      >
         Import
       </button>
-      <button className={shell.topbarBtn} onClick={() => setExporting(true)} title="Export (Ctrl+E)">
+      <button
+        className={shell.topbarBtn}
+        onClick={() => setExporting(true)}
+        title="Export (Ctrl+E)"
+      >
         Export
       </button>
-      <button
-        className={shell.topbarBtn}
-        onClick={() => setShowPages((p) => !p)}
-        title="Toggle printable page boundaries"
-        style={showPages ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : undefined}
-      >
-        Pages
-      </button>
-      <button
-        className={shell.topbarBtn}
-        onClick={() => setRackView((r) => !r)}
-        title="Rack elevation view"
-        style={rackView ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : undefined}
-      >
-        Rack view
-      </button>
-      <button className={shell.topbarBtn} onClick={() => setPresentation(true)} title="Presentation mode">
-        Present
-      </button>
       <ViewSwitcher />
-      <button className={shell.topbarBtn} onClick={doUndo} disabled={!canUndo} title="Undo (Ctrl+Z)">
+      <button
+        className={shell.topbarBtn}
+        onClick={doUndo}
+        disabled={!canUndo}
+        title="Undo (Ctrl+Z)"
+      >
         ↶
       </button>
-      <button className={shell.topbarBtn} onClick={doRedo} disabled={!canRedo} title="Redo">
-        ↷
-      </button>
       <button
         className={shell.topbarBtn}
-        onClick={() => setView((v) => (v === 'editor' ? 'perf' : 'editor'))}
+        onClick={doRedo}
+        disabled={!canRedo}
+        title="Redo"
       >
-        {view === 'editor' ? 'Perf' : 'Editor'}
+        ↷
       </button>
-      <button className={shell.topbarBtn} onClick={toggleTheme} aria-label="Toggle theme">
-        {theme === 'light' ? '☽' : '☀'}
-      </button>
-      <button className={shell.topbarBtn} onClick={() => setShowSettings(true)} aria-label="Settings" title="Settings">
-        ⚙
-      </button>
-      <button className={shell.topbarBtn} onClick={() => setShowHelp(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">
-        ?
-      </button>
+      <details className={shell.moreMenu}>
+        <summary className={shell.topbarBtn} title="More actions">
+          More
+        </summary>
+        <div className={shell.menuPanel}>
+          <button
+            className={shell.menuItem}
+            onClick={() => setShowPages((p) => !p)}
+            aria-pressed={showPages}
+          >
+            {showPages ? 'Hide pages' : 'Show pages'}
+          </button>
+          <button
+            className={shell.menuItem}
+            onClick={() => setRackView((r) => !r)}
+            aria-pressed={rackView}
+          >
+            {rackView ? 'Canvas view' : 'Rack view'}
+          </button>
+          <button className={shell.menuItem} onClick={() => setPresentation(true)}>
+            Presentation
+          </button>
+          <button
+            className={shell.menuItem}
+            onClick={() => setView((v) => (v === 'editor' ? 'perf' : 'editor'))}
+          >
+            {view === 'editor' ? 'Performance harness' : 'Editor'}
+          </button>
+          <button className={shell.menuItem} onClick={toggleTheme}>
+            {theme === 'light' ? 'Dark theme' : 'Light theme'}
+          </button>
+          <button className={shell.menuItem} onClick={() => setShowSettings(true)}>
+            Settings
+          </button>
+          <button className={shell.menuItem} onClick={() => setShowHelp(true)}>
+            Keyboard shortcuts
+          </button>
+        </div>
+      </details>
     </>
   );
 
@@ -258,7 +293,13 @@ export function App() {
         <button
           className={shell.topbarBtn}
           onClick={() => setPresentation(false)}
-          style={{ position: 'fixed', top: 12, right: 12, zIndex: 50, background: 'var(--chrome-bg)' }}
+          style={{
+            position: 'fixed',
+            top: 12,
+            right: 12,
+            zIndex: 50,
+            background: 'var(--chrome-bg)',
+          }}
         >
           ✕ Exit presentation (Esc)
         </button>
@@ -280,7 +321,10 @@ export function App() {
           {persistence.readOnly && <ReadOnlyBanner />}
           {rackView ? <RackView /> : <Canvas showPages={showPages} />}
           {showFirstRun && (
-            <FirstRun onDone={() => setFirstRunDone(true)} onOpenText={persistence.openText} />
+            <FirstRun
+              onDone={() => setFirstRunDone(true)}
+              onOpenText={persistence.openText}
+            />
           )}
           {showRecovery && persistence.recoverable && (
             <RecoveryDialog
@@ -299,7 +343,11 @@ export function App() {
           {exporting && <ExportDialog onClose={() => setExporting(false)} />}
           {showHelp && <ShortcutsDialog onClose={() => setShowHelp(false)} />}
           {showSettings && (
-            <SettingsDialog theme={theme} onToggleTheme={toggleTheme} onClose={() => setShowSettings(false)} />
+            <SettingsDialog
+              theme={theme}
+              onToggleTheme={toggleTheme}
+              onClose={() => setShowSettings(false)}
+            />
           )}
           <input
             ref={fileInputRef}

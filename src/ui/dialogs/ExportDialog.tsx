@@ -32,12 +32,14 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const [transparent, setTransparent] = useState(true);
   const [bgColor, setBgColor] = useState('#ffffff');
   const [includeLabels, setIncludeLabels] = useState(true);
+  const [iso, setIso] = useState(() => store().projection === 'iso');
   const [quality, setQuality] = useState(0.92);
   const [fileName, setFileName] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const isRaster = format === 'png' || format === 'jpg' || format === 'pdf' || format === 'zip';
+  const isRaster =
+    format === 'png' || format === 'jpg' || format === 'pdf' || format === 'zip';
   const isImage = format === 'png' || format === 'jpg' || format === 'svg';
   const supportsTransparent = format === 'png' || format === 'svg';
   const isCsv = format.startsWith('csv');
@@ -47,13 +49,29 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     const allD = store().devicesAll();
     const allL = store().linksAll();
     const allO = store().objectsAll();
-    if (scope === 'all') return { devices: allD, links: allL, objects: allO };
+    const doc = store().getDocument();
+    const semantics = { vlans: doc.vlans, subnets: doc.subnets, racks: doc.racks };
+    if (scope === 'all')
+      return { devices: allD, links: allL, objects: allO, ...semantics };
     const sel = new Set(selection);
-    const devices = allD.filter((d) => sel.has(d.id));
+    const selectedLinks = allL.filter((l) => sel.has(l.id));
+    const endpointIds = new Set<string>();
+    for (const link of selectedLinks) {
+      endpointIds.add(link.sourceId);
+      endpointIds.add(link.targetId);
+    }
+    const devices = allD.filter((d) => sel.has(d.id) || endpointIds.has(d.id));
     const objects = allO.filter((o) => sel.has(o.id));
     const devSet = new Set(devices.map((d) => d.id));
-    const links = allL.filter((l) => devSet.has(l.sourceId) && devSet.has(l.targetId));
-    return { devices, links, objects };
+    const links = allL.filter(
+      (l) =>
+        sel.has(l.id) ||
+        (devSet.has(l.sourceId) &&
+          devSet.has(l.targetId) &&
+          sel.has(l.sourceId) &&
+          sel.has(l.targetId)),
+    );
+    return { devices, links, objects, ...semantics };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, selection, store]);
 
@@ -63,8 +81,9 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         background: supportsTransparent && transparent ? null : bgColor,
         includeLabels,
         objects: scene.objects as CanvasObject[],
+        projection: iso ? 'iso' : 'flat',
       }),
-    [scene, transparent, bgColor, includeLabels, supportsTransparent],
+    [scene, transparent, bgColor, includeLabels, supportsTransparent, iso],
   );
   const previewUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(previewSvg);
 
@@ -81,9 +100,14 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         pageSize: 'a4',
         orientation: 'landscape',
         fileName,
+        projection: iso ? 'iso' : 'flat',
       };
       const outcome = await runExport(
-        { ...scene, projectName, docJson: JSON.stringify(store().getDocument(), null, 2) },
+        {
+          ...scene,
+          projectName,
+          docJson: JSON.stringify(store().getDocument(), null, 2),
+        },
         opts,
       );
       setMsg(outcome.warning ? `⚠ ${outcome.warning}` : `✓ Exported ${outcome.fileName}`);
@@ -94,8 +118,16 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     }
   }
 
-  const count = scene.devices.length;
+  const counts = {
+    devices: scene.devices.length,
+    links: scene.links.length,
+    objects: scene.objects.length,
+  };
+  const count = counts.devices + counts.links + counts.objects;
   const empty = count === 0 && !isCsv;
+  const countSummary = `${counts.devices} device${counts.devices === 1 ? '' : 's'}, ${counts.links} link${
+    counts.links === 1 ? '' : 's'
+  }, ${counts.objects} object${counts.objects === 1 ? '' : 's'}`;
 
   return (
     <div className={styles.overlay} onClick={onClose}>
@@ -138,7 +170,8 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
             >
               {empty ? (
                 <span style={{ color: 'var(--chrome-fg-muted)', fontSize: 12 }}>
-                  Nothing to preview {scope === 'selection' ? '(no selection)' : '(empty canvas)'}
+                  Nothing to preview{' '}
+                  {scope === 'selection' ? '(no selection)' : '(empty canvas)'}
                 </span>
               ) : (
                 <img
@@ -170,7 +203,9 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                     onChange={(e) => setScale(Number(e.target.value))}
                     style={{ flex: 1 }}
                   />
-                  <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{scale}×</span>
+                  <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>
+                    {scale}×
+                  </span>
                 </div>
               </>
             )}
@@ -180,12 +215,20 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   {supportsTransparent && (
                     <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                      <input type="checkbox" checked={transparent} onChange={(e) => setTransparent(e.target.checked)} />
+                      <input
+                        type="checkbox"
+                        checked={transparent}
+                        onChange={(e) => setTransparent(e.target.checked)}
+                      />
                       Transparent
                     </label>
                   )}
                   {(!supportsTransparent || !transparent) && (
-                    <input type="color" value={bgColor} onChange={(e) => setBgColor(e.target.value)} />
+                    <input
+                      type="color"
+                      value={bgColor}
+                      onChange={(e) => setBgColor(e.target.value)}
+                    />
                   )}
                 </div>
               </>
@@ -193,28 +236,52 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
             {format === 'jpg' && (
               <>
                 <label>Quality</label>
-                <input type="range" min={0.5} max={1} step={0.01} value={quality} onChange={(e) => setQuality(Number(e.target.value))} />
+                <input
+                  type="range"
+                  min={0.5}
+                  max={1}
+                  step={0.01}
+                  value={quality}
+                  onChange={(e) => setQuality(Number(e.target.value))}
+                />
               </>
             )}
             {!isCsv && (
               <>
                 <label>Labels</label>
                 <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                  <input type="checkbox" checked={includeLabels} onChange={(e) => setIncludeLabels(e.target.checked)} />
+                  <input
+                    type="checkbox"
+                    checked={includeLabels}
+                    onChange={(e) => setIncludeLabels(e.target.checked)}
+                  />
                   Include device names
+                </label>
+                <label>Projection</label>
+                <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={iso}
+                    onChange={(e) => setIso(e.target.checked)}
+                  />
+                  Isometric view
                 </label>
               </>
             )}
             <label>Filename</label>
-            <input value={fileName} placeholder={`${projectName} (auto)`} onChange={(e) => setFileName(e.target.value)} />
+            <input
+              value={fileName}
+              placeholder={`${projectName} (auto)`}
+              onChange={(e) => setFileName(e.target.value)}
+            />
           </div>
 
           <div className={styles.summary}>
             {isCsv
               ? `Exports the ${format === 'csv-inventory' ? 'device inventory' : 'link list'} as CSV.`
               : format === 'zip'
-                ? `Bundles .nexmap + PNG + SVG + PDF + CSVs + validation report (${count} devices).`
-                : `Exports ${scope === 'selection' ? 'the selection' : 'the whole diagram'} (${count} devices).`}
+                ? `Bundles .nexmap + PNG + SVG + PDF + CSVs + validation report (${countSummary}).`
+                : `Exports ${scope === 'selection' ? 'the selection' : 'the whole diagram'} (${countSummary}).`}
           </div>
           {msg && <div className={styles.summary}>{msg}</div>}
         </div>

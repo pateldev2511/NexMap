@@ -64,7 +64,11 @@ export function defaultDeviceName(type: DeviceType): string {
   return TYPE_LABEL[type];
 }
 
-export function createLayer(name: string, order: number, partial: Partial<Layer> = {}): Layer {
+export function createLayer(
+  name: string,
+  order: number,
+  partial: Partial<Layer> = {},
+): Layer {
   return { id: nanoid(), name, visible: true, locked: false, order, ...partial };
 }
 
@@ -148,10 +152,25 @@ export function createImageObject(
   href: string,
   partial: Partial<ImageObject> = {},
 ): ImageObject {
-  return { id: nanoid(), kind: 'image', x, y, width, height, layerId, href, z: -1000, ...partial };
+  return {
+    id: nanoid(),
+    kind: 'image',
+    x,
+    y,
+    width,
+    height,
+    layerId,
+    href,
+    z: -1000,
+    ...partial,
+  };
 }
 
-export function createVlan(vlanId: number, name: string, partial: Partial<Vlan> = {}): Vlan {
+export function createVlan(
+  vlanId: number,
+  name: string,
+  partial: Partial<Vlan> = {},
+): Vlan {
   return { id: nanoid(), vlanId, name, ...partial };
 }
 
@@ -159,7 +178,11 @@ export function createSubnet(cidr: string, partial: Partial<Subnet> = {}): Subne
   return { id: nanoid(), cidr, ...partial };
 }
 
-export function createRack(name: string, ruHeight = 42, partial: Partial<Rack> = {}): Rack {
+export function createRack(
+  name: string,
+  ruHeight = 42,
+  partial: Partial<Rack> = {},
+): Rack {
   return { id: nanoid(), name, ruHeight, ...partial };
 }
 
@@ -169,7 +192,11 @@ export function createView(name: string, partial: Partial<View> = {}): View {
 
 export function isCanvasObject(v: unknown): v is CanvasObject {
   const k = (v as CanvasObject | null)?.kind;
-  return typeof v === 'object' && v !== null && (k === 'text' || k === 'shape' || k === 'image');
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    (k === 'text' || k === 'shape' || k === 'image')
+  );
 }
 
 export function createProjectMeta(

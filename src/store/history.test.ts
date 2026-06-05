@@ -122,7 +122,12 @@ describe('History — property: undo-all === initial, redo-all === final', () =>
     for (let step = 0; step < 400; step++) {
       const roll = rnd();
       if (roll < 0.4 || deviceIds.length === 0) {
-        const d = createDevice('router', Math.floor(rnd() * 500), Math.floor(rnd() * 500), LAYER);
+        const d = createDevice(
+          'router',
+          Math.floor(rnd() * 500),
+          Math.floor(rnd() * 500),
+          LAYER,
+        );
         h.dispatch(new AddDeviceCommand(d), s);
         deviceIds.push(d.id);
         h.commitCoalesceBoundary();
@@ -140,7 +145,10 @@ describe('History — property: undo-all === initial, redo-all === final', () =>
         const id = deviceIds[Math.floor(rnd() * deviceIds.length)]!;
         const d = s.devices.get(id);
         if (d) {
-          h.dispatch(new UpdateDeviceCommand(id, { name: d.name }, { name: `n${step}` }), s);
+          h.dispatch(
+            new UpdateDeviceCommand(id, { name: d.name }, { name: `n${step}` }),
+            s,
+          );
           h.commitCoalesceBoundary();
         }
       } else if (deviceIds.length > 1) {

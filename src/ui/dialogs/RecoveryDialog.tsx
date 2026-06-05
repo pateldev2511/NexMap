@@ -26,14 +26,19 @@ export function RecoveryDialog({
         <div className={styles.template} style={{ cursor: 'default', marginBottom: 14 }}>
           <strong>{draft.name || 'Untitled project'}</strong>
           <span>
-            {draft.deviceCount} device{draft.deviceCount === 1 ? '' : 's'} · {draft.doc.links.length}{' '}
-            link{draft.doc.links.length === 1 ? '' : 's'} · saved {when}
+            {draft.deviceCount} device{draft.deviceCount === 1 ? '' : 's'} ·{' '}
+            {draft.doc.links.length} link{draft.doc.links.length === 1 ? '' : 's'} · saved{' '}
+            {when}
           </span>
         </div>
         <div className={styles.row} style={{ marginTop: 0 }}>
           <button
             className={styles.openBtn}
-            style={{ background: 'var(--accent)', color: 'var(--accent-fg)', borderColor: 'var(--accent)' }}
+            style={{
+              background: 'var(--accent)',
+              color: 'var(--accent-fg)',
+              borderColor: 'var(--accent)',
+            }}
             onClick={onRecover}
           >
             Recover

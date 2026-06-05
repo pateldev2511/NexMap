@@ -29,11 +29,19 @@ export function clampScale(scale: number): number {
   return Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale));
 }
 
-export function screenToCanvas(v: Viewport, sx: number, sy: number): { x: number; y: number } {
+export function screenToCanvas(
+  v: Viewport,
+  sx: number,
+  sy: number,
+): { x: number; y: number } {
   return { x: (sx - v.tx) / v.scale, y: (sy - v.ty) / v.scale };
 }
 
-export function canvasToScreen(v: Viewport, cx: number, cy: number): { x: number; y: number } {
+export function canvasToScreen(
+  v: Viewport,
+  cx: number,
+  cy: number,
+): { x: number; y: number } {
   return { x: cx * v.scale + v.tx, y: cy * v.scale + v.ty };
 }
 

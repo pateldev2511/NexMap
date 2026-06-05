@@ -20,7 +20,10 @@ function stripBom(text: string): string {
 
 /** Guess the delimiter from the first non-empty line (most-frequent wins). */
 export function detectDelimiter(text: string): string {
-  const firstLine = stripBom(text).split(/\r?\n/).find((l) => l.trim().length > 0) ?? '';
+  const firstLine =
+    stripBom(text)
+      .split(/\r?\n/)
+      .find((l) => l.trim().length > 0) ?? '';
   let best = ',';
   let bestCount = -1;
   for (const d of DELIMITERS) {

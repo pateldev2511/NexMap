@@ -77,7 +77,11 @@ export async function putDraft(draft: DraftRecord): Promise<SaveResult> {
   try {
     db = await openDb();
   } catch {
-    return { ok: false, reason: 'unavailable', message: 'Autosave unavailable (IndexedDB).' };
+    return {
+      ok: false,
+      reason: 'unavailable',
+      message: 'Autosave unavailable (IndexedDB).',
+    };
   }
   return new Promise((resolve) => {
     const tx = db.transaction(STORE, 'readwrite');

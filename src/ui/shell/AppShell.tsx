@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { ErrorBoundary } from './ErrorBoundary';
 import styles from './AppShell.module.css';
 
 interface AppShellProps {
@@ -34,13 +35,54 @@ export function AppShell({
   projectName = 'Untitled NexMap Project',
   titleNode,
 }: AppShellProps) {
+  const [leftOpen, setLeftOpen] = useState(true);
+  const [rightOpen, setRightOpen] = useState(true);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 900px)');
+    const sync = () => {
+      if (mq.matches) {
+        setLeftOpen(false);
+        setRightOpen(false);
+      } else {
+        setLeftOpen(true);
+        setRightOpen(true);
+      }
+    };
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+
   return (
-    <div className={styles.shell}>
+    <div
+      className={`${styles.shell} ${leftOpen ? '' : styles.leftClosed} ${
+        rightOpen ? '' : styles.rightClosed
+      }`}
+    >
       <header className={styles.topbar}>
         <div className={styles.brand}>
           Nex<span>Map</span>
         </div>
         {titleNode ?? <div className={styles.projectName}>{projectName}</div>}
+        <div className={styles.panelToggles}>
+          <button
+            className={styles.topbarBtn}
+            onClick={() => setLeftOpen((v) => !v)}
+            aria-pressed={leftOpen}
+            title={leftOpen ? 'Hide library panel' : 'Show library panel'}
+          >
+            Library
+          </button>
+          <button
+            className={styles.topbarBtn}
+            onClick={() => setRightOpen((v) => !v)}
+            aria-pressed={rightOpen}
+            title={rightOpen ? 'Hide inspector panel' : 'Show inspector panel'}
+          >
+            Inspector
+          </button>
+        </div>
         <div className={styles.topbarSpacer} />
         <div className={styles.topbarActions}>{actions}</div>
       </header>
@@ -50,7 +92,7 @@ export function AppShell({
       </aside>
 
       <main className={styles.canvas} aria-label="Design canvas">
-        {canvas}
+        <ErrorBoundary>{canvas}</ErrorBoundary>
       </main>
 
       <aside className={styles.right} aria-label="Properties inspector">

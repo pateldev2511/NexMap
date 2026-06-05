@@ -55,7 +55,9 @@ export function BottomPanel() {
           >
             {t.label}
             {t.count > 0 && (
-              <span className={`${styles.count} ${t.err ? styles.err : ''}`}>{t.count}</span>
+              <span className={`${styles.count} ${t.err ? styles.err : ''}`}>
+                {t.count}
+              </span>
             )}
           </button>
         ))}
@@ -88,8 +90,14 @@ function InventoryTable({ devices }: { devices: Device[] }) {
     <table className={styles.table}>
       <thead>
         <tr>
-          <th>Name</th><th>Type</th><th>Vendor</th><th>Model</th><th>Role</th>
-          <th>Location</th><th>IP</th><th>Notes</th>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Vendor</th>
+          <th>Model</th>
+          <th>Role</th>
+          <th>Location</th>
+          <th>IP</th>
+          <th>Notes</th>
         </tr>
       </thead>
       <tbody>
@@ -118,8 +126,14 @@ function LinksTable({ links }: { links: Link[] }) {
     <table className={styles.table}>
       <thead>
         <tr>
-          <th>Name</th><th>Source</th><th>Src iface</th><th>Target</th>
-          <th>Tgt iface</th><th>Type</th><th>Bandwidth</th><th>Status</th>
+          <th>Name</th>
+          <th>Source</th>
+          <th>Src iface</th>
+          <th>Target</th>
+          <th>Tgt iface</th>
+          <th>Type</th>
+          <th>Bandwidth</th>
+          <th>Status</th>
         </tr>
       </thead>
       <tbody>
@@ -136,7 +150,9 @@ function LinksTable({ links }: { links: Link[] }) {
               <td>{l.targetInterface ?? ''}</td>
               <td>{l.linkType ?? ''}</td>
               <td>{l.bandwidth ?? ''}</td>
-              <td style={{ color: broken ? 'var(--sev-error)' : 'var(--chrome-fg-muted)' }}>
+              <td
+                style={{ color: broken ? 'var(--sev-error)' : 'var(--chrome-fg-muted)' }}
+              >
                 {broken ? 'broken' : 'ok'}
               </td>
             </tr>
@@ -176,30 +192,74 @@ function SubnetTable({ subnets, vlans }: { subnets: Subnet[]; vlans: Vlan[] }) {
   const del = useProjectStore((s) => s.deleteSubnet);
   const add = useProjectStore((s) => s.addSubnet);
   const set = (sub: Subnet, key: keyof Subnet, val: string | number | undefined) =>
-    update(sub.id, { [key]: sub[key] } as Partial<Subnet>, { [key]: val } as Partial<Subnet>);
+    update(
+      sub.id,
+      { [key]: sub[key] } as Partial<Subnet>,
+      { [key]: val } as Partial<Subnet>,
+    );
   return (
     <div>
       <table className={styles.table}>
         <thead>
           <tr>
-            <th>CIDR</th><th>Name</th><th>Gateway</th><th>VLAN</th><th>Zone</th><th>Notes</th><th></th>
+            <th>CIDR</th>
+            <th>Name</th>
+            <th>Gateway</th>
+            <th>VLAN</th>
+            <th>Zone</th>
+            <th>Notes</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
           {subnets.map((sn) => (
             <tr key={sn.id}>
-              <td><Cell value={sn.cidr} onCommit={(v) => set(sn, 'cidr', v)} placeholder="10.0.0.0/24" /></td>
-              <td><Cell value={sn.name ?? ''} onCommit={(v) => set(sn, 'name', v)} /></td>
-              <td><Cell value={sn.gateway ?? ''} onCommit={(v) => set(sn, 'gateway', v)} placeholder="10.0.0.1" /></td>
-              <td><Cell value={sn.vlanId != null ? String(sn.vlanId) : ''} onCommit={(v) => set(sn, 'vlanId', v ? Number(v) : undefined)} placeholder="—" /></td>
-              <td><Cell value={sn.zone ?? ''} onCommit={(v) => set(sn, 'zone', v)} /></td>
-              <td><Cell value={sn.notes ?? ''} onCommit={(v) => set(sn, 'notes', v)} /></td>
-              <td><button className={styles.rowDelete} onClick={() => del(sn.id)} aria-label="Delete subnet">✕</button></td>
+              <td>
+                <Cell
+                  value={sn.cidr}
+                  onCommit={(v) => set(sn, 'cidr', v)}
+                  placeholder="10.0.0.0/24"
+                />
+              </td>
+              <td>
+                <Cell value={sn.name ?? ''} onCommit={(v) => set(sn, 'name', v)} />
+              </td>
+              <td>
+                <Cell
+                  value={sn.gateway ?? ''}
+                  onCommit={(v) => set(sn, 'gateway', v)}
+                  placeholder="10.0.0.1"
+                />
+              </td>
+              <td>
+                <Cell
+                  value={sn.vlanId != null ? String(sn.vlanId) : ''}
+                  onCommit={(v) => set(sn, 'vlanId', v ? Number(v) : undefined)}
+                  placeholder="—"
+                />
+              </td>
+              <td>
+                <Cell value={sn.zone ?? ''} onCommit={(v) => set(sn, 'zone', v)} />
+              </td>
+              <td>
+                <Cell value={sn.notes ?? ''} onCommit={(v) => set(sn, 'notes', v)} />
+              </td>
+              <td>
+                <button
+                  className={styles.rowDelete}
+                  onClick={() => del(sn.id)}
+                  aria-label="Delete subnet"
+                >
+                  ✕
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
-      <button className={styles.addRow} onClick={() => add('10.0.0.0/24')}>+ Add subnet</button>
+      <button className={styles.addRow} onClick={() => add('10.0.0.0/24')}>
+        + Add subnet
+      </button>
       {vlans.length > 0 && subnets.length === 0 && (
         <span style={{ fontSize: 11, color: 'var(--chrome-fg-muted)', marginLeft: 8 }}>
           Tip: link a subnet to a VLAN by its ID.
@@ -221,22 +281,48 @@ function VlanTable({ vlans }: { vlans: Vlan[] }) {
       <table className={styles.table}>
         <thead>
           <tr>
-            <th>VLAN ID</th><th>Name</th><th>Zone</th><th>Notes</th><th></th>
+            <th>VLAN ID</th>
+            <th>Name</th>
+            <th>Zone</th>
+            <th>Notes</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
           {vlans.map((v) => (
             <tr key={v.id}>
-              <td><Cell type="number" value={String(v.vlanId)} onCommit={(x) => set(v, 'vlanId', Number(x))} /></td>
-              <td><Cell value={v.name} onCommit={(x) => set(v, 'name', x)} /></td>
-              <td><Cell value={v.zone ?? ''} onCommit={(x) => set(v, 'zone', x)} /></td>
-              <td><Cell value={v.notes ?? ''} onCommit={(x) => set(v, 'notes', x)} /></td>
-              <td><button className={styles.rowDelete} onClick={() => del(v.id)} aria-label="Delete VLAN">✕</button></td>
+              <td>
+                <Cell
+                  type="number"
+                  value={String(v.vlanId)}
+                  onCommit={(x) => set(v, 'vlanId', Number(x))}
+                />
+              </td>
+              <td>
+                <Cell value={v.name} onCommit={(x) => set(v, 'name', x)} />
+              </td>
+              <td>
+                <Cell value={v.zone ?? ''} onCommit={(x) => set(v, 'zone', x)} />
+              </td>
+              <td>
+                <Cell value={v.notes ?? ''} onCommit={(x) => set(v, 'notes', x)} />
+              </td>
+              <td>
+                <button
+                  className={styles.rowDelete}
+                  onClick={() => del(v.id)}
+                  aria-label="Delete VLAN"
+                >
+                  ✕
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
-      <button className={styles.addRow} onClick={() => add(nextId, `VLAN ${nextId}`)}>+ Add VLAN</button>
+      <button className={styles.addRow} onClick={() => add(nextId, `VLAN ${nextId}`)}>
+        + Add VLAN
+      </button>
     </div>
   );
 }
@@ -253,7 +339,12 @@ function RackTable({ racks, devices }: { racks: Rack[]; devices: Device[] }) {
       <table className={styles.table}>
         <thead>
           <tr>
-            <th>Rack</th><th>RU height</th><th>Site</th><th>Mounted</th><th>Notes</th><th></th>
+            <th>Rack</th>
+            <th>RU height</th>
+            <th>Site</th>
+            <th>Mounted</th>
+            <th>Notes</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -261,16 +352,29 @@ function RackTable({ racks, devices }: { racks: Rack[]; devices: Device[] }) {
             const mounted = devices.filter((d) => d.rackId === r.id);
             return (
               <tr key={r.id}>
-                <td><Cell value={r.name} onCommit={(v) => set(r, 'name', v)} /></td>
-                <td><Cell type="number" value={String(r.ruHeight)} onCommit={(v) => set(r, 'ruHeight', Number(v) || 1)} /></td>
-                <td><Cell value={r.site ?? ''} onCommit={(v) => set(r, 'site', v)} /></td>
+                <td>
+                  <Cell value={r.name} onCommit={(v) => set(r, 'name', v)} />
+                </td>
+                <td>
+                  <Cell
+                    type="number"
+                    value={String(r.ruHeight)}
+                    onCommit={(v) => set(r, 'ruHeight', Number(v) || 1)}
+                  />
+                </td>
+                <td>
+                  <Cell value={r.site ?? ''} onCommit={(v) => set(r, 'site', v)} />
+                </td>
                 <td>
                   {mounted.length === 0 ? (
                     <span style={{ color: 'var(--chrome-fg-muted)' }}>—</span>
                   ) : (
                     mounted.map((d, i) => (
                       <span key={d.id}>
-                        <a style={{ color: 'var(--accent)', cursor: 'pointer' }} onClick={() => focus(d.id)}>
+                        <a
+                          style={{ color: 'var(--accent)', cursor: 'pointer' }}
+                          onClick={() => focus(d.id)}
+                        >
                           {d.name}@U{d.ru ?? '?'}
                         </a>
                         {i < mounted.length - 1 ? ', ' : ''}
@@ -278,14 +382,26 @@ function RackTable({ racks, devices }: { racks: Rack[]; devices: Device[] }) {
                     ))
                   )}
                 </td>
-                <td><Cell value={r.notes ?? ''} onCommit={(v) => set(r, 'notes', v)} /></td>
-                <td><button className={styles.rowDelete} onClick={() => del(r.id)} aria-label="Delete rack">✕</button></td>
+                <td>
+                  <Cell value={r.notes ?? ''} onCommit={(v) => set(r, 'notes', v)} />
+                </td>
+                <td>
+                  <button
+                    className={styles.rowDelete}
+                    onClick={() => del(r.id)}
+                    aria-label="Delete rack"
+                  >
+                    ✕
+                  </button>
+                </td>
               </tr>
             );
           })}
         </tbody>
       </table>
-      <button className={styles.addRow} onClick={() => add(`Rack ${racks.length + 1}`)}>+ Add rack</button>
+      <button className={styles.addRow} onClick={() => add(`Rack ${racks.length + 1}`)}>
+        + Add rack
+      </button>
     </div>
   );
 }
@@ -293,13 +409,23 @@ function RackTable({ racks, devices }: { racks: Rack[]; devices: Device[] }) {
 function ValidationList({ issues }: { issues: ValidationIssue[] }) {
   const focus = useProjectStore((s) => s.focusObject);
   if (issues.length === 0) {
-    return <div className={styles.cleanState}>✓ No validation issues — your design looks clean.</div>;
+    return (
+      <div className={styles.cleanState}>
+        ✓ No validation issues — your design looks clean.
+      </div>
+    );
   }
-  const sorted = [...issues].sort((a, b) => severityRank(b.severity) - severityRank(a.severity));
+  const sorted = [...issues].sort(
+    (a, b) => severityRank(b.severity) - severityRank(a.severity),
+  );
   return (
     <div>
       {sorted.map((i) => (
-        <div key={i.id} className={styles.issue} onClick={() => i.objectIds[0] && focus(i.objectIds[0])}>
+        <div
+          key={i.id}
+          className={styles.issue}
+          onClick={() => i.objectIds[0] && focus(i.objectIds[0])}
+        >
           <span
             className={`${styles.sev} ${
               i.severity === 'error' || i.severity === 'critical'

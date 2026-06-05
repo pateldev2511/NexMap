@@ -5,8 +5,8 @@
  *  - Every object has a stable string ID.
  *  - Links reference device IDs, never names — renaming never breaks a connection.
  *  - Unknown/future fields are preserved through load→save via `extra` (DA-D1).
- *  - MVP: links connect DEVICES with an optional free-text interface label.
- *    The first-class `interfaces[]` layer is Post-MVP (DA-CEO-F7).
+ *  - Links connect DEVICE IDs with optional free-text endpoint interface labels.
+ *    `interfaces[]` is reserved for a future first-class port/interface model.
  */
 
 export type DeviceType =
@@ -66,7 +66,7 @@ export interface Device {
   width: number;
   height: number;
   layerId: string;
-  // MVP property subset (DA-DES-4.1). The rest of the spec's ~20 fields are Post-MVP.
+  // Core device properties. Custom/integration-specific fields live in `extra`.
   vendor?: string;
   model?: string;
   role?: string;
@@ -94,7 +94,7 @@ export interface Link {
   /** Device IDs. */
   sourceId: string;
   targetId: string;
-  /** Free-text interface labels (MVP); first-class interfaces are Post-MVP. */
+  /** Free-text endpoint labels; first-class interfaces are reserved for a later schema. */
   sourceInterface?: string;
   targetInterface?: string;
   linkType?: string;
@@ -192,6 +192,8 @@ export interface View {
   /** Layer IDs hidden in this view. */
   hiddenLayers: string[];
   camera?: { tx: number; ty: number; scale: number };
+  /** Render projection for this view (Phase 9). Absent = flat (back-compat). */
+  projection?: 'flat' | 'iso';
 }
 
 export interface Rack {
@@ -215,8 +217,8 @@ export interface ProjectMeta {
 
 /**
  * The serialized `.nexmap` document. Arrays for portability/diffability.
- * Post-MVP collections are kept as `unknown[]` so the schema is forward-stable
- * and round-trips unknown content without dropping it.
+ * Reserved collections are kept as `unknown[]` so the schema is forward-stable
+ * and can round-trip future content without dropping it.
  */
 export interface NexMapDocument {
   schemaVersion: number;

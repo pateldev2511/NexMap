@@ -33,7 +33,11 @@ function serialize(doc: NexMapDocument): string {
 }
 
 function safeFileName(name: string): string {
-  const base = name.trim().replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80) || 'project';
+  const base =
+    name
+      .trim()
+      .replace(/[\\/:*?"<>|]+/g, '_')
+      .slice(0, 80) || 'project';
   return `${base}.nexmap`;
 }
 
@@ -66,7 +70,10 @@ export async function saveDocument(
   }
 
   if (fsWin.showSaveFilePicker) {
-    const picked = await fsWin.showSaveFilePicker({ ...PICKER_OPTS, suggestedName: fileName });
+    const picked = await fsWin.showSaveFilePicker({
+      ...PICKER_OPTS,
+      suggestedName: fileName,
+    });
     const writable = await picked.createWritable();
     await writable.write(data);
     await writable.close();

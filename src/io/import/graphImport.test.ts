@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { parseGraphml, parseDrawio, parseTopologyJson, parseNetboxJson, parseNmapXml, looksLikeNetbox } from './graphImport';
+import {
+  parseGraphml,
+  parseDrawio,
+  parseTopologyJson,
+  parseNetboxJson,
+  parseNmapXml,
+  looksLikeNetbox,
+  stripExternalSvgReferences,
+} from './graphImport';
 
 const L = 'layer';
 
@@ -28,6 +36,19 @@ describe('parseGraphml', () => {
   it('handles invalid XML', () => {
     const r = parseGraphml('<graphml><graph>', L);
     expect(r.warnings.length).toBeGreaterThan(0);
+  });
+
+  it('prefers label/name keys over unrelated data values', () => {
+    const xml = `<?xml version="1.0"?>
+      <graphml>
+        <key id="d0" for="node" attr.name="ip"/>
+        <key id="d1" for="node" attr.name="label"/>
+        <graph>
+          <node id="a"><data key="d0">10.0.0.1</data><data key="d1">Core Router</data></node>
+        </graph>
+      </graphml>`;
+    const r = parseGraphml(xml, L);
+    expect(r.devices[0]!.name).toBe('Core Router');
   });
 });
 
@@ -119,5 +140,20 @@ describe('parseNmapXml', () => {
 
   it('rejects non-nmap XML', () => {
     expect(parseNmapXml('<foo/>', 'L').warnings.length).toBeGreaterThan(0);
+  });
+});
+
+describe('stripExternalSvgReferences', () => {
+  it('removes remote references and event handlers while keeping local refs', () => {
+    const raw = `<svg xmlns="http://www.w3.org/2000/svg">
+      <defs><filter id="shadow"></filter></defs>
+      <image href="https://example.com/track.png" onclick="alert(1)"/>
+      <rect fill="url(#shadow)" filter="url(https://example.com/filter.svg#x)"/>
+    </svg>`;
+    const result = stripExternalSvgReferences(raw);
+    expect(result.stripped).toBeGreaterThanOrEqual(3);
+    expect(result.svg).not.toContain('https://example.com');
+    expect(result.svg).not.toContain('onclick');
+    expect(result.svg).toContain('url(#shadow)');
   });
 });

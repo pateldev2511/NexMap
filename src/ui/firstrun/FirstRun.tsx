@@ -54,7 +54,11 @@ export function FirstRun({
 
         <div className={styles.grid}>
           {TEMPLATES.map((t) => (
-            <button key={t.key} className={styles.template} onClick={() => pickTemplate(t.key)}>
+            <button
+              key={t.key}
+              className={styles.template}
+              onClick={() => pickTemplate(t.key)}
+            >
               <strong>{t.name}</strong>
               <span>{t.description}</span>
             </button>
@@ -65,9 +69,7 @@ export function FirstRun({
           <button className={styles.openBtn} onClick={() => fileRef.current?.click()}>
             Open .nexmap…
           </button>
-          <span className={styles.localNote}>
-            Your data stays on this device.
-          </span>
+          <span className={styles.localNote}>Your data stays on this device.</span>
           <input
             ref={fileRef}
             type="file"

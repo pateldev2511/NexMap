@@ -19,6 +19,7 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
       ['Ctrl/Cmd + Shift + Z', 'Redo'],
       ['Ctrl/Cmd + A', 'Select all'],
       ['Ctrl/Cmd + D', 'Duplicate selection'],
+      ['Double-click text', 'Edit text on canvas'],
       ['Delete / Backspace', 'Delete selection'],
     ],
   },
@@ -27,10 +28,14 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
     items: [
       ['V', 'Select tool'],
       ['C', 'Connect tool'],
+      ['Ctrl/Cmd + F', 'Find device'],
+      ['Ctrl/Cmd + Shift + L', 'Auto-layout (tidy)'],
       ['Scroll / two-finger', 'Pan'],
       ['Ctrl/Cmd + Scroll', 'Zoom'],
       ['Space + drag', 'Pan'],
+      ['Right / Middle-drag', 'Pan'],
       ['Ctrl/Cmd + 0', 'Fit to screen'],
+      ['2', 'Zoom to selection'],
       ['Ctrl/Cmd + +/-', 'Zoom in / out'],
       ['Alt (hold)', 'Suspend grid snap'],
       ['Esc', 'Deselect / cancel'],
@@ -53,20 +58,50 @@ export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
             {GROUPS.map((g) => (
               <div key={g.title}>
-                <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--chrome-fg-muted)', marginBottom: 6 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                    color: 'var(--chrome-fg-muted)',
+                    marginBottom: 6,
+                  }}
+                >
                   {g.title}
                 </div>
                 {g.items.map(([key, desc]) => (
-                  <div key={key} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '3px 0', fontSize: 12 }}>
+                  <div
+                    key={key}
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      padding: '3px 0',
+                      fontSize: 12,
+                    }}
+                  >
                     <span style={{ color: 'var(--chrome-fg-muted)' }}>{desc}</span>
-                    <kbd style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{key}</kbd>
+                    <kbd style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+                      {key}
+                    </kbd>
                   </div>
                 ))}
               </div>
             ))}
           </div>
-          <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--chrome-border)', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: 12, color: 'var(--chrome-fg-muted)' }}>Connect behavior:</span>
+          <div
+            style={{
+              marginTop: 18,
+              paddingTop: 14,
+              borderTop: '1px solid var(--chrome-border)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+            }}
+          >
+            <span style={{ fontSize: 12, color: 'var(--chrome-fg-muted)' }}>
+              Connect behavior:
+            </span>
             <select
               value={connect}
               onChange={(e) => {
@@ -74,7 +109,13 @@ export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
                 setConnect(m);
                 setConnectMode(m);
               }}
-              style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--chrome-border)', background: 'var(--canvas-bg)', color: 'var(--chrome-fg)' }}
+              style={{
+                padding: '4px 8px',
+                borderRadius: 6,
+                border: '1px solid var(--chrome-border)',
+                background: 'var(--canvas-bg)',
+                color: 'var(--chrome-fg)',
+              }}
             >
               <option value="both">Click or drag</option>
               <option value="drag">Drag only</option>

@@ -26,7 +26,15 @@ export const DEVICE_FIELDS: FieldDef[] = [
   { key: 'location', aliases: ['location', 'site', 'room', 'rack'] },
   {
     key: 'managementIp',
-    aliases: ['management_ip', 'mgmt_ip', 'ip', 'ip_address', 'address', 'primary_ip', 'primary_ip4'],
+    aliases: [
+      'management_ip',
+      'mgmt_ip',
+      'ip',
+      'ip_address',
+      'address',
+      'primary_ip',
+      'primary_ip4',
+    ],
   },
   { key: 'notes', aliases: ['notes', 'description', 'comment', 'comments'] },
 ];
@@ -34,26 +42,48 @@ export const DEVICE_FIELDS: FieldDef[] = [
 export const LINK_FIELDS: FieldDef[] = [
   { key: 'name', aliases: ['name', 'link', 'link_name'] },
   { key: 'source', aliases: ['source', 'from', 'a', 'src', 'device_a'] },
-  { key: 'sourceInterface', aliases: ['source_interface', 'src_interface', 'a_interface', 'src_iface'] },
+  {
+    key: 'sourceInterface',
+    aliases: ['source_interface', 'src_interface', 'a_interface', 'src_iface'],
+  },
   { key: 'target', aliases: ['target', 'to', 'b', 'dst', 'destination', 'device_b'] },
-  { key: 'targetInterface', aliases: ['target_interface', 'dst_interface', 'b_interface', 'dst_iface'] },
+  {
+    key: 'targetInterface',
+    aliases: ['target_interface', 'dst_interface', 'b_interface', 'dst_iface'],
+  },
   { key: 'linkType', aliases: ['type', 'link_type', 'media', 'cable'] },
   { key: 'bandwidth', aliases: ['bandwidth', 'speed', 'rate'] },
 ];
 
 const TYPE_ALIASES: Record<string, DeviceType> = {
-  router: 'router', rtr: 'router',
-  switch: 'switch', sw: 'switch', l2switch: 'switch', l3switch: 'switch',
-  firewall: 'firewall', fw: 'firewall',
-  ap: 'access-point', accesspoint: 'access-point', 'access-point': 'access-point', wap: 'access-point',
+  router: 'router',
+  rtr: 'router',
+  switch: 'switch',
+  sw: 'switch',
+  l2switch: 'switch',
+  l3switch: 'switch',
+  firewall: 'firewall',
+  fw: 'firewall',
+  ap: 'access-point',
+  accesspoint: 'access-point',
+  'access-point': 'access-point',
+  wap: 'access-point',
   wlc: 'wireless-controller',
-  server: 'server', srv: 'server',
-  storage: 'storage', nas: 'storage', san: 'storage',
-  loadbalancer: 'load-balancer', lb: 'load-balancer',
-  pc: 'end-user', workstation: 'end-user', laptop: 'end-user', enduser: 'end-user',
+  server: 'server',
+  srv: 'server',
+  storage: 'storage',
+  nas: 'storage',
+  san: 'storage',
+  loadbalancer: 'load-balancer',
+  lb: 'load-balancer',
+  pc: 'end-user',
+  workstation: 'end-user',
+  laptop: 'end-user',
+  enduser: 'end-user',
   printer: 'printer',
   iot: 'iot',
-  isp: 'isp', internet: 'isp',
+  isp: 'isp',
+  internet: 'isp',
   cloud: 'cloud',
   vm: 'vm',
   container: 'container',
@@ -63,7 +93,10 @@ const TYPE_ALIASES: Record<string, DeviceType> = {
 };
 
 function normalize(h: string): string {
-  return h.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  return h
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
 }
 
 const SUBNET_FIELDS: FieldDef[] = [
@@ -84,17 +117,26 @@ const VLAN_FIELDS: FieldDef[] = [
 /** Header detection so the dialog can route a CSV to the right importer. */
 export function detectCsvKind(headers: string[]): ImportKind | 'subnets' | 'vlans' {
   const n = headers.map(normalize);
-  if (n.includes('cidr') || n.includes('subnet') || n.includes('prefix')) return 'subnets';
+  if (n.includes('cidr') || n.includes('subnet') || n.includes('prefix'))
+    return 'subnets';
   const linkMap = autoMap(headers, LINK_FIELDS);
   if (linkMap.source && linkMap.target) return 'links';
-  if ((n.includes('vlan_id') || n.includes('vlan')) && !n.includes('management_ip') && !n.includes('ip'))
+  if (
+    (n.includes('vlan_id') || n.includes('vlan')) &&
+    !n.includes('management_ip') &&
+    !n.includes('ip')
+  )
     return 'vlans';
   return 'devices';
 }
 
-export function buildSubnets(rows: Record<string, string>[], headers: string[]): Subnet[] {
+export function buildSubnets(
+  rows: Record<string, string>[],
+  headers: string[],
+): Subnet[] {
   const m = autoMap(headers, SUBNET_FIELDS);
-  const get = (r: Record<string, string>, k: string) => (m[k] ? r[m[k]!]?.trim() : undefined);
+  const get = (r: Record<string, string>, k: string) =>
+    m[k] ? r[m[k]!]?.trim() : undefined;
   return rows
     .map((r) => {
       const cidr = get(r, 'cidr');
@@ -113,7 +155,8 @@ export function buildSubnets(rows: Record<string, string>[], headers: string[]):
 
 export function buildVlans(rows: Record<string, string>[], headers: string[]): Vlan[] {
   const m = autoMap(headers, VLAN_FIELDS);
-  const get = (r: Record<string, string>, k: string) => (m[k] ? r[m[k]!]?.trim() : undefined);
+  const get = (r: Record<string, string>, k: string) =>
+    m[k] ? r[m[k]!]?.trim() : undefined;
   return rows
     .map((r, i) => {
       const idRaw = get(r, 'vlanId');
@@ -127,7 +170,10 @@ export function buildVlans(rows: Record<string, string>[], headers: string[]): V
 }
 
 /** Auto-map CSV headers to canonical fields. Returns field → headerName | null. */
-export function autoMap(headers: string[], fields: FieldDef[]): Record<string, string | null> {
+export function autoMap(
+  headers: string[],
+  fields: FieldDef[],
+): Record<string, string | null> {
   const norm = headers.map((h) => ({ raw: h, n: normalize(h) }));
   const used = new Set<string>();
   const mapping: Record<string, string | null> = {};
@@ -139,7 +185,10 @@ export function autoMap(headers: string[], fields: FieldDef[]): Record<string, s
   return mapping;
 }
 
-export function parseDeviceType(value: string | undefined): { type: DeviceType; known: boolean } {
+export function parseDeviceType(value: string | undefined): {
+  type: DeviceType;
+  known: boolean;
+} {
   if (!value) return { type: 'generic', known: false };
   const t = TYPE_ALIASES[normalize(value)];
   return t ? { type: t, known: true } : { type: 'generic', known: false };
@@ -183,15 +232,21 @@ export function buildDevices(
     }
     const idx = devices.length;
     devices.push(
-      createDevice(type, origin.x + (idx % COLS) * STEP, origin.y + Math.floor(idx / COLS) * STEP, layerId, {
-        name,
-        vendor: get(row, 'vendor'),
-        model: get(row, 'model'),
-        role: get(row, 'role'),
-        location: get(row, 'location'),
-        managementIp: get(row, 'managementIp'),
-        notes: get(row, 'notes'),
-      }),
+      createDevice(
+        type,
+        origin.x + (idx % COLS) * STEP,
+        origin.y + Math.floor(idx / COLS) * STEP,
+        layerId,
+        {
+          name,
+          vendor: get(row, 'vendor'),
+          model: get(row, 'model'),
+          role: get(row, 'role'),
+          location: get(row, 'location'),
+          managementIp: get(row, 'managementIp'),
+          notes: get(row, 'notes'),
+        },
+      ),
     );
   });
 
@@ -228,7 +283,10 @@ export function buildLinks(
     const tgtId = tgtName ? byName.get(tgtName.toLowerCase()) : undefined;
     if (!srcId || !tgtId) {
       skipped++;
-      const missing = [!srcId ? srcName || '(blank source)' : null, !tgtId ? tgtName || '(blank target)' : null]
+      const missing = [
+        !srcId ? srcName || '(blank source)' : null,
+        !tgtId ? tgtName || '(blank target)' : null,
+      ]
         .filter(Boolean)
         .join(', ');
       warnings.push(`Row ${i + 1}: device not found: ${missing} — link skipped.`);

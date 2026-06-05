@@ -8,7 +8,13 @@ import {
   type FsFileHandle,
 } from './fsaccess';
 import { acquireWriter } from './locks';
-import { deleteDraft, getLatestDraft, makeDraft, putDraft, type DraftRecord } from './draft';
+import {
+  deleteDraft,
+  getLatestDraft,
+  makeDraft,
+  putDraft,
+  type DraftRecord,
+} from './draft';
 
 export type AutosaveStatus = 'idle' | 'saving' | 'saved' | 'error' | 'readonly';
 
@@ -86,7 +92,11 @@ export function usePersistence(): Persistence {
       setStatus('saving');
       timerRef.current = setTimeout(async () => {
         genRef.current += 1;
-        const draft = makeDraft(store().getDocument(), genRef.current, new Date().toISOString());
+        const draft = makeDraft(
+          store().getDocument(),
+          genRef.current,
+          new Date().toISOString(),
+        );
         const result = await putDraft(draft);
         if (result.ok) {
           setStatus('saved');
@@ -107,7 +117,10 @@ export function usePersistence(): Persistence {
   const writeFile = useCallback(
     async (forcePicker: boolean) => {
       try {
-        const result = await saveDocument(store().getDocument(), forcePicker ? null : handleRef.current);
+        const result = await saveDocument(
+          store().getDocument(),
+          forcePicker ? null : handleRef.current,
+        );
         handleRef.current = result.handle;
         setFileName(result.fileName);
         store().markSaved();
@@ -122,7 +135,10 @@ export function usePersistence(): Persistence {
     [store],
   );
 
-  const save = useCallback(() => writeFile(!canWriteBack || !handleRef.current), [writeFile]);
+  const save = useCallback(
+    () => writeFile(!canWriteBack || !handleRef.current),
+    [writeFile],
+  );
   const saveAs = useCallback(() => writeFile(true), [writeFile]);
 
   const openText = useCallback(

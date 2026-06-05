@@ -27,8 +27,8 @@
   --right-w: 300px;
   --statusbar-h: 26px;
 
-  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
-    sans-serif;
+  --font-ui:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
   color-scheme: light;

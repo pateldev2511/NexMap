@@ -11,11 +11,36 @@ import styles from './Inspector.module.css';
  */
 
 const DEVICE_TYPES: DeviceType[] = [
-  'router', 'switch', 'firewall', 'access-point', 'wireless-controller', 'server',
-  'storage', 'load-balancer', 'end-user', 'printer', 'iot', 'isp', 'cloud', 'vm',
-  'container', 'rack', 'patch-panel', 'ups', 'camera', 'vpc', 'cloud-subnet',
-  'internet-gateway', 'nat-gateway', 'route-table', 'security-group', 'vpn-gateway',
-  'k8s', 'managed-db', 'object-storage', 'generic',
+  'router',
+  'switch',
+  'firewall',
+  'access-point',
+  'wireless-controller',
+  'server',
+  'storage',
+  'load-balancer',
+  'end-user',
+  'printer',
+  'iot',
+  'isp',
+  'cloud',
+  'vm',
+  'container',
+  'rack',
+  'patch-panel',
+  'ups',
+  'camera',
+  'vpc',
+  'cloud-subnet',
+  'internet-gateway',
+  'nat-gateway',
+  'route-table',
+  'security-group',
+  'vpn-gateway',
+  'k8s',
+  'managed-db',
+  'object-storage',
+  'generic',
 ];
 
 function ipError(value: string | undefined): string | null {
@@ -30,9 +55,13 @@ function DeviceInspector({ device }: { device: Device }) {
   const endEdit = useProjectStore((s) => s.endEdit);
 
   function set<K extends keyof Device>(key: K, value: Device[K]) {
-    updateDevice(device.id, { [key]: device[key] } as Partial<Device>, {
-      [key]: value,
-    } as Partial<Device>);
+    updateDevice(
+      device.id,
+      { [key]: device[key] } as Partial<Device>,
+      {
+        [key]: value,
+      } as Partial<Device>,
+    );
   }
 
   const mgmtErr = ipError(device.managementIp);
@@ -49,7 +78,13 @@ function DeviceInspector({ device }: { device: Device }) {
           />
         </Field>
         <Field label="Type">
-          <select value={device.type} onChange={(e) => { set('type', e.target.value as DeviceType); endEdit(); }}>
+          <select
+            value={device.type}
+            onChange={(e) => {
+              set('type', e.target.value as DeviceType);
+              endEdit();
+            }}
+          >
             {DEVICE_TYPES.map((t) => (
               <option key={t} value={t}>
                 {defaultDeviceName(t)}
@@ -58,13 +93,25 @@ function DeviceInspector({ device }: { device: Device }) {
           </select>
         </Field>
         <Field label="Vendor">
-          <input value={device.vendor ?? ''} onChange={(e) => set('vendor', e.target.value)} onBlur={endEdit} />
+          <input
+            value={device.vendor ?? ''}
+            onChange={(e) => set('vendor', e.target.value)}
+            onBlur={endEdit}
+          />
         </Field>
         <Field label="Model">
-          <input value={device.model ?? ''} onChange={(e) => set('model', e.target.value)} onBlur={endEdit} />
+          <input
+            value={device.model ?? ''}
+            onChange={(e) => set('model', e.target.value)}
+            onBlur={endEdit}
+          />
         </Field>
         <Field label="Role">
-          <input value={device.role ?? ''} onChange={(e) => set('role', e.target.value)} onBlur={endEdit} />
+          <input
+            value={device.role ?? ''}
+            onChange={(e) => set('role', e.target.value)}
+            onBlur={endEdit}
+          />
         </Field>
       </div>
 
@@ -86,10 +133,18 @@ function DeviceInspector({ device }: { device: Device }) {
       <div className={styles.group}>
         <div className={styles.groupTitle}>Location & Notes</div>
         <Field label="Location">
-          <input value={device.location ?? ''} onChange={(e) => set('location', e.target.value)} onBlur={endEdit} />
+          <input
+            value={device.location ?? ''}
+            onChange={(e) => set('location', e.target.value)}
+            onBlur={endEdit}
+          />
         </Field>
         <Field label="Notes">
-          <textarea value={device.notes ?? ''} onChange={(e) => set('notes', e.target.value)} onBlur={endEdit} />
+          <textarea
+            value={device.notes ?? ''}
+            onChange={(e) => set('notes', e.target.value)}
+            onBlur={endEdit}
+          />
         </Field>
       </div>
     </>
@@ -111,7 +166,13 @@ function RackFields({
     <div className={styles.group}>
       <div className={styles.groupTitle}>Rack placement</div>
       <Field label="Rack">
-        <select value={device.rackId ?? ''} onChange={(e) => { set('rackId', e.target.value || undefined); endEdit(); }}>
+        <select
+          value={device.rackId ?? ''}
+          onChange={(e) => {
+            set('rackId', e.target.value || undefined);
+            endEdit();
+          }}
+        >
           <option value="">— none —</option>
           {racks.map((r) => (
             <option key={r.id} value={r.id}>
@@ -151,7 +212,11 @@ function LinkInspector({ link }: { link: Link }) {
   const target = useProjectStore((s) => s.getDevice(link.targetId));
 
   function set<K extends keyof Link>(key: K, value: Link[K]) {
-    updateLink(link.id, { [key]: link[key] } as Partial<Link>, { [key]: value } as Partial<Link>);
+    updateLink(
+      link.id,
+      { [key]: link[key] } as Partial<Link>,
+      { [key]: value } as Partial<Link>,
+    );
   }
 
   return (
@@ -159,32 +224,64 @@ function LinkInspector({ link }: { link: Link }) {
       <div className={styles.group}>
         <div className={styles.groupTitle}>Link</div>
         <Field label="Name">
-          <input value={link.name ?? ''} onChange={(e) => set('name', e.target.value)} onBlur={endEdit} />
+          <input
+            value={link.name ?? ''}
+            onChange={(e) => set('name', e.target.value)}
+            onBlur={endEdit}
+          />
         </Field>
         <Field label="Type">
-          <input value={link.linkType ?? ''} placeholder="ethernet, fiber…" onChange={(e) => set('linkType', e.target.value)} onBlur={endEdit} />
+          <input
+            value={link.linkType ?? ''}
+            placeholder="ethernet, fiber…"
+            onChange={(e) => set('linkType', e.target.value)}
+            onBlur={endEdit}
+          />
         </Field>
         <Field label="Bandwidth">
-          <input value={link.bandwidth ?? ''} placeholder="1G, 10G…" onChange={(e) => set('bandwidth', e.target.value)} onBlur={endEdit} />
+          <input
+            value={link.bandwidth ?? ''}
+            placeholder="1G, 10G…"
+            onChange={(e) => set('bandwidth', e.target.value)}
+            onBlur={endEdit}
+          />
         </Field>
       </div>
       <div className={styles.group}>
         <div className={styles.groupTitle}>Connector</div>
         <Field label="Line">
-          <select value={link.style ?? 'solid'} onChange={(e) => { set('style', e.target.value as 'solid' | 'dashed'); endEdit(); }}>
+          <select
+            value={link.style ?? 'solid'}
+            onChange={(e) => {
+              set('style', e.target.value as 'solid' | 'dashed');
+              endEdit();
+            }}
+          >
             <option value="solid">Solid</option>
             <option value="dashed">Dashed</option>
           </select>
         </Field>
         <Field label="Arrows">
-          <select value={link.arrow ?? 'end'} onChange={(e) => { set('arrow', e.target.value as 'none' | 'end' | 'both'); endEdit(); }}>
+          <select
+            value={link.arrow ?? 'end'}
+            onChange={(e) => {
+              set('arrow', e.target.value as 'none' | 'end' | 'both');
+              endEdit();
+            }}
+          >
             <option value="none">None</option>
             <option value="end">End</option>
             <option value="both">Both ends</option>
           </select>
         </Field>
         <Field label="Routing">
-          <select value={link.routing ?? 'straight'} onChange={(e) => { set('routing', e.target.value as 'straight' | 'orthogonal'); endEdit(); }}>
+          <select
+            value={link.routing ?? 'straight'}
+            onChange={(e) => {
+              set('routing', e.target.value as 'straight' | 'orthogonal');
+              endEdit();
+            }}
+          >
             <option value="straight">Straight</option>
             <option value="orthogonal">Orthogonal (elbow)</option>
           </select>
@@ -195,8 +292,18 @@ function LinkInspector({ link }: { link: Link }) {
               <span className={styles.readonly}>{link.waypoints!.length}</span>
               <button
                 className={styles.openBtn ?? ''}
-                style={{ border: '1px solid var(--chrome-border)', background: 'transparent', color: 'var(--chrome-fg)', borderRadius: 5, padding: '3px 8px', fontSize: 11 }}
-                onClick={() => { set('waypoints', []); endEdit(); }}
+                style={{
+                  border: '1px solid var(--chrome-border)',
+                  background: 'transparent',
+                  color: 'var(--chrome-fg)',
+                  borderRadius: 5,
+                  padding: '3px 8px',
+                  fontSize: 11,
+                }}
+                onClick={() => {
+                  set('waypoints', []);
+                  endEdit();
+                }}
               >
                 Clear
               </button>
@@ -210,35 +317,70 @@ function LinkInspector({ link }: { link: Link }) {
           <div className={styles.readonly}>{source?.name ?? '(missing)'}</div>
         </Field>
         <Field label="Source interface">
-          <input value={link.sourceInterface ?? ''} placeholder="Gi0/1" onChange={(e) => set('sourceInterface', e.target.value)} onBlur={endEdit} />
+          <input
+            value={link.sourceInterface ?? ''}
+            placeholder="Gi0/1"
+            onChange={(e) => set('sourceInterface', e.target.value)}
+            onBlur={endEdit}
+          />
         </Field>
         <Field label="Target">
           <div className={styles.readonly}>{target?.name ?? '(missing)'}</div>
         </Field>
         <Field label="Target interface">
-          <input value={link.targetInterface ?? ''} placeholder="Gi0/2" onChange={(e) => set('targetInterface', e.target.value)} onBlur={endEdit} />
+          <input
+            value={link.targetInterface ?? ''}
+            placeholder="Gi0/2"
+            onChange={(e) => set('targetInterface', e.target.value)}
+            onBlur={endEdit}
+          />
         </Field>
       </div>
       <div className={styles.group}>
         <div className={styles.groupTitle}>VLAN / Trunk</div>
         <Field label="Mode">
-          <select value={link.mode ?? ''} onChange={(e) => { set('mode', (e.target.value || undefined) as Link['mode']); endEdit(); }}>
+          <select
+            value={link.mode ?? ''}
+            onChange={(e) => {
+              set('mode', (e.target.value || undefined) as Link['mode']);
+              endEdit();
+            }}
+          >
             <option value="">—</option>
             <option value="access">Access</option>
             <option value="trunk">Trunk</option>
           </select>
         </Field>
         <Field label="VLANs carried">
-          <input value={link.vlan ?? ''} placeholder="10,20,30" onChange={(e) => set('vlan', e.target.value)} onBlur={endEdit} />
+          <input
+            value={link.vlan ?? ''}
+            placeholder="10,20,30"
+            onChange={(e) => set('vlan', e.target.value)}
+            onBlur={endEdit}
+          />
         </Field>
         <Field label="Native VLAN">
-          <input value={link.nativeVlan ?? ''} placeholder="1" onChange={(e) => set('nativeVlan', e.target.value)} onBlur={endEdit} />
+          <input
+            value={link.nativeVlan ?? ''}
+            placeholder="1"
+            onChange={(e) => set('nativeVlan', e.target.value)}
+            onBlur={endEdit}
+          />
         </Field>
         <Field label="LACP / port-channel">
-          <input value={link.lacp ?? ''} placeholder="Po1" onChange={(e) => set('lacp', e.target.value)} onBlur={endEdit} />
+          <input
+            value={link.lacp ?? ''}
+            placeholder="Po1"
+            onChange={(e) => set('lacp', e.target.value)}
+            onBlur={endEdit}
+          />
         </Field>
         <Field label="Circuit ID">
-          <input value={link.circuitId ?? ''} onChange={(e) => set('circuitId', e.target.value)} onBlur={endEdit} />
+          <input
+            value={link.circuitId ?? ''}
+            onChange={(e) => set('circuitId', e.target.value)}
+            onBlur={endEdit}
+          />
         </Field>
       </div>
     </>
@@ -253,17 +395,29 @@ function ObjectInspector({ object }: { object: CanvasObject }) {
     const before: Record<string, unknown> = {};
     const o = object as unknown as Record<string, unknown>;
     for (const k of Object.keys(after)) before[k] = o[k];
-    updateObject(object.id, before as Partial<CanvasObject>, after as Partial<CanvasObject>);
+    updateObject(
+      object.id,
+      before as Partial<CanvasObject>,
+      after as Partial<CanvasObject>,
+    );
   }
   return (
     <div className={styles.group}>
       <div className={styles.groupTitle}>
-        {object.kind === 'text' ? 'Text' : object.kind === 'image' ? 'Image / underlay' : 'Shape / Zone'}
+        {object.kind === 'text'
+          ? 'Text'
+          : object.kind === 'image'
+            ? 'Image / underlay'
+            : 'Shape / Zone'}
       </div>
       {object.kind === 'text' && (
         <>
           <Field label="Text">
-            <textarea value={object.text} onChange={(e) => set({ text: e.target.value })} onBlur={endEdit} />
+            <textarea
+              value={object.text}
+              onChange={(e) => set({ text: e.target.value })}
+              onBlur={endEdit}
+            />
           </Field>
           <Field label="Font size">
             <input
@@ -274,26 +428,57 @@ function ObjectInspector({ object }: { object: CanvasObject }) {
             />
           </Field>
           <Field label="Color">
-            <input type="color" value={object.color ?? '#1c2733'} onChange={(e) => { set({ color: e.target.value }); endEdit(); }} />
+            <input
+              type="color"
+              value={object.color ?? '#1c2733'}
+              onChange={(e) => {
+                set({ color: e.target.value });
+                endEdit();
+              }}
+            />
           </Field>
         </>
       )}
       {object.kind === 'shape' && (
         <>
           <Field label="Label">
-            <input value={object.label ?? ''} onChange={(e) => set({ label: e.target.value })} onBlur={endEdit} />
+            <input
+              value={object.label ?? ''}
+              onChange={(e) => set({ label: e.target.value })}
+              onBlur={endEdit}
+            />
           </Field>
           <Field label="Shape">
-            <select value={object.shape} onChange={(e) => { set({ shape: e.target.value }); endEdit(); }}>
+            <select
+              value={object.shape}
+              onChange={(e) => {
+                set({ shape: e.target.value });
+                endEdit();
+              }}
+            >
               <option value="rect">Rectangle</option>
               <option value="ellipse">Ellipse</option>
             </select>
           </Field>
           <Field label="Fill">
-            <input type="color" value={object.fill ?? '#2563eb'} onChange={(e) => { set({ fill: e.target.value }); endEdit(); }} />
+            <input
+              type="color"
+              value={object.fill ?? '#2563eb'}
+              onChange={(e) => {
+                set({ fill: e.target.value });
+                endEdit();
+              }}
+            />
           </Field>
           <Field label="Border">
-            <input type="color" value={object.stroke ?? '#2563eb'} onChange={(e) => { set({ stroke: e.target.value }); endEdit(); }} />
+            <input
+              type="color"
+              value={object.stroke ?? '#2563eb'}
+              onChange={(e) => {
+                set({ stroke: e.target.value });
+                endEdit();
+              }}
+            />
           </Field>
         </>
       )}
@@ -305,7 +490,10 @@ function ObjectInspector({ object }: { object: CanvasObject }) {
             max={1}
             step={0.05}
             value={object.opacity ?? 1}
-            onChange={(e) => { set({ opacity: Number(e.target.value) }); endEdit(); }}
+            onChange={(e) => {
+              set({ opacity: Number(e.target.value) });
+              endEdit();
+            }}
           />
         </Field>
       )}
@@ -321,7 +509,11 @@ function ProjectInspector() {
     <div className={styles.group}>
       <div className={styles.groupTitle}>Project</div>
       <Field label="Name">
-        <input value={projectName} onChange={(e) => rename(projectName, e.target.value)} onBlur={endEdit} />
+        <input
+          value={projectName}
+          onChange={(e) => rename(projectName, e.target.value)}
+          onBlur={endEdit}
+        />
       </Field>
       <div className={styles.empty} style={{ padding: '4px 0' }}>
         Select a device or link to edit its properties.
@@ -382,7 +574,12 @@ export function Inspector() {
             : object.kind === 'image'
               ? 'Image underlay'
               : object.label || 'Shape';
-        sub = object.kind === 'text' ? 'Note' : object.kind === 'image' ? 'Underlay' : 'Zone / shape';
+        sub =
+          object.kind === 'text'
+            ? 'Note'
+            : object.kind === 'image'
+              ? 'Underlay'
+              : 'Zone / shape';
         body = <ObjectInspector object={object} />;
       } else {
         body = <ProjectInspector />;

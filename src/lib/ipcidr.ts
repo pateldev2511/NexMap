@@ -89,7 +89,7 @@ export function ipInCidr(ip: string, cidr: string): boolean {
   const value = parseIpv4(ip);
   if (parsed === null || value === null) return false;
   const mask = parsed.prefix === 0 ? 0 : (0xffffffff << (32 - parsed.prefix)) >>> 0;
-  return ((value & mask) >>> 0) === parsed.network;
+  return (value & mask) >>> 0 === parsed.network;
 }
 
 /** True if two IPv4 CIDR ranges overlap (either contains the other's network). */
@@ -100,7 +100,7 @@ export function cidrsOverlap(a: string, b: string): boolean {
   const broader = pa.prefix <= pb.prefix ? pa : pb;
   const narrower = pa.prefix <= pb.prefix ? pb : pa;
   const mask = broader.prefix === 0 ? 0 : (0xffffffff << (32 - broader.prefix)) >>> 0;
-  return ((narrower.network & mask) >>> 0) === broader.network;
+  return (narrower.network & mask) >>> 0 === broader.network;
 }
 
 /**
