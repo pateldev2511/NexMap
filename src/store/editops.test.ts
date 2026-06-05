@@ -160,6 +160,47 @@ describe('canvas objects (text + shape)', () => {
     s().loadDoc(doc);
     expect(s().objectsAll()).toHaveLength(2);
   });
+
+  it('copies, pastes, duplicates, and select-all includes canvas objects', () => {
+    const d = s().addDeviceAt('router', 0, 0);
+    const t = s().addText(20, 20);
+    const sh = s().addShape(40, 40, 80, 40);
+    s().select([t, sh]);
+    s().copySelection();
+    s().paste();
+    expect(s().objectsAll()).toHaveLength(4);
+    expect([...s().selection].every((id) => !!s().getObject(id))).toBe(true);
+
+    s().select([d, t]);
+    s().duplicateSelection();
+    expect(s().devicesAll()).toHaveLength(2);
+    expect(s().objectsAll()).toHaveLength(5);
+
+    s().selectAll();
+    expect(s().selection.has(d)).toBe(true);
+    expect(s().selection.has(t)).toBe(true);
+    expect(s().selection.has(sh)).toBe(true);
+  });
+
+  it('z-order operations work on objects', () => {
+    const a = s().addShape(0, 0, 80, 40);
+    const b = s().addText(120, 0);
+    s().select([a]);
+    s().bringToFront();
+    expect(s().getObject(a)!.z ?? 0).toBeGreaterThan(s().getObject(b)!.z ?? 0);
+    s().undo();
+    expect(s().getObject(a)!.z ?? 0).toBe(0);
+  });
+
+  it('content bounds include object-only diagrams', () => {
+    const sh = s().addShape(320, 240, 100, 80);
+    const bounds = s().contentBounds();
+    expect(bounds.x).toBe(320);
+    expect(bounds.y).toBe(240);
+    expect(bounds.width).toBe(100);
+    expect(bounds.height).toBe(80);
+    expect(s().getObject(sh)).toBeDefined();
+  });
 });
 
 describe('layers', () => {
@@ -188,6 +229,7 @@ describe('layers', () => {
     s().select([d]);
     s().deleteSelection();
     expect(s().getDevice(d)).toBeDefined(); // protected
+    expect(s().canUndo).toBe(true);
   });
 
   it('deleting a layer reassigns its devices and keeps at least one layer', () => {
@@ -199,6 +241,30 @@ describe('layers', () => {
     // Can't delete the last remaining layer.
     s().deleteLayer(first);
     expect(s().layersAll().length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('layer edits are undoable', () => {
+    const first = s().layersAll()[0]!.id;
+    const l = s().addLayer();
+    s().renameLayer(l, 'Overlay');
+    s().endEdit();
+    expect(
+      s()
+        .layersAll()
+        .some((layer) => layer.name === 'Overlay'),
+    ).toBe(true);
+    s().undo();
+    expect(
+      s()
+        .layersAll()
+        .some((layer) => layer.name === 'Overlay'),
+    ).toBe(false);
+    s().undo();
+    expect(
+      s()
+        .layersAll()
+        .map((layer) => layer.id),
+    ).toEqual([first]);
   });
 });
 
@@ -215,10 +281,12 @@ describe('multi-view', () => {
     const baseOnly = s().addView('Base only');
 
     // Apply "All" → overlay visible again + its camera requested.
+    s().markSaved();
     s().applyView(all);
     expect(s().isLayerVisible(overlay)).toBe(true);
     expect(s().cameraRequest()).toEqual({ tx: 100, ty: 50, scale: 2 });
     expect(s().activeViewId).toBe(all);
+    expect(s().dirty).toBe(false);
 
     // Apply "Base only" → overlay hidden.
     s().applyView(baseOnly);

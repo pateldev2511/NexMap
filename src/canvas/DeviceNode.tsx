@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import type { Device } from '@/model/types';
 import { deviceVisual, LOD_GLYPH_ONLY, LOD_LABEL_HIDE } from './deviceVisuals';
+import { DeviceGlyph } from './DeviceGlyph';
 import styles from './Canvas.module.css';
 
 interface DeviceNodeProps {
@@ -45,12 +46,24 @@ function DeviceNodeImpl({
       data-id={device.id}
     >
       <rect className={styles.body} width={width} height={height} rx={6} />
-      {detailed && (
-        <rect className={styles.accent} x={4} y={4} width={18} height={height - 8} rx={3} fill={visual.accent} />
+      {detailed ? (
+        <>
+          <rect
+            className={styles.accent}
+            x={4}
+            y={4}
+            width={18}
+            height={height - 8}
+            rx={3}
+            fill={visual.accent}
+          />
+          <DeviceGlyph type={device.type} cx={13} cy={height / 2} size={15} />
+        </>
+      ) : (
+        <text className={styles.glyph} x={width / 2} y={height / 2}>
+          {visual.glyph}
+        </text>
       )}
-      <text className={styles.glyph} x={detailed ? 13 : width / 2} y={height / 2}>
-        {visual.glyph}
-      </text>
       {showLabel && (
         <text className={styles.label} x={width / 2} y={height + 4}>
           {device.name}

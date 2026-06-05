@@ -39,7 +39,10 @@ describe('parseCsv', () => {
   it('auto-detects semicolon and tab delimiters', () => {
     expect(detectDelimiter('a;b;c\n1;2;3')).toBe(';');
     expect(detectDelimiter('a\tb\tc')).toBe('\t');
-    expect(parseCsv('name;type\nR1;router').rows[0]).toEqual({ name: 'R1', type: 'router' });
+    expect(parseCsv('name;type\nR1;router').rows[0]).toEqual({
+      name: 'R1',
+      type: 'router',
+    });
   });
 
   it('ignores blank lines', () => {

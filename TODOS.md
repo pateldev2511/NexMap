@@ -10,6 +10,121 @@ Data stays local (IndexedDB + `.nexmap` files) unless the user explicitly export
 
 ---
 
+## Strategic direction — Path C (chosen 2026-06-03)
+
+After a competitive teardown against FossFLOW (Isoflow lineage), NexMap already
+beats it on validation, import/export breadth, layers, racks, and data safety.
+FossFLOW's only real edge is its **isometric aesthetic** and frictionless feel.
+
+**Path C = sequence the bet.** First close the daily-driver editor-polish gaps
+that make the flat editor feel unfinished (Phase 8). *Then* add an **isometric
+view mode** on top of the existing flat model as the v2 headline feature
+(Phase 9) — a re-projection toggle, not a rewrite, leveraging the `SceneSource`
+indirection so the model stays flat and editable.
+
+Identity is unchanged: the moat is **validate-as-you-draw**; isometric is polish
+on top, never a replacement for correctness.
+
+---
+
+## Phase 8 — Editor Polish (daily-driver friction)  🚧 IN PROGRESS (2026-06-03)
+
+Closes the power-user gaps surfaced by the expert review. Each item keeps existing
+behavior green and is undoable where it mutates the model.
+
+- [ ] **P0 Alignment guides + smart snap** — while dragging, snap selection
+      edges/centers to other objects' edges/centers; render guide lines. Pure
+      helper (`canvas/align.ts`), threshold in screen px, grid snap as fallback.
+- [ ] **P0 Inline text editing** — double-click a text object to edit on canvas
+      (overlay textarea), commit on blur/Enter as one undoable update.
+- [ ] **P0 Resize handles** — 8 handles on a single selected shape/text/image;
+      resize gesture committed as one undoable update; min-size clamp.
+- [ ] **P1 Align & distribute** — align left/center/right/top/middle/bottom and
+      distribute horizontally/vertically across a multi-selection (one undo each).
+- [ ] **P1 Canvas search (⌘F)** — find devices by name/IP/role, jump-to + select.
+- [ ] **P1 Zoom-to-selection** — frame the current selection (key + zoom-bar btn).
+- [ ] **P1 Drag/resize readout** — live x/y (and w/h on resize) near the cursor.
+- [x] **Click/drag refinement** ✅ — selection now resolves on RELEASE: a click
+      isolates one item out of a multi-selection, shift-click toggles off, and a
+      4px movement threshold means clicks never accidentally move/nudge a device.
+      Marquee/lasso are pure visual overlays (`pointer-events: none`) so they can't
+      swallow clicks; Esc clears an in-flight marquee/lasso.
+- [x] **draw.io-style pointer parity** ✅ — right-drag (and middle-drag) pans
+      anywhere; right-click without dragging still opens the context menu (trailing
+      contextmenu suppressed only after an actual pan); `move` cursor over cells.
+      Fixed a latent bug where gestures captured the wrong element (parent div),
+      which had silently broken drag-panning, marquee, lasso, resize, and link
+      rubber-banding — all now capture the SVG and track correctly; pointer-capture
+      calls are wrapped so a stray throw can't abort a gesture.
+- Deferred to a later polish pass: connector-label drag-reposition, save-in-place
+      UX clarity on Firefox/Safari, first-class `interfaces`/`assets`/`customFields`.
+
+## Phase 9 — Isometric View Mode (v2 headline)  🚧 IN PROGRESS
+
+Add an isometric projection of the existing flat model. The model stays flat and
+canonical; isometric is a **render/edit mode**, toggled per view.
+
+- [x] **9.1 Projection core** ✅ — pure iso transform (`canvas/iso.ts`): flat
+      (x,y)→screen diamond mapping + inverse for hit-testing; configurable tile
+      size (2:1 default); painter's-depth key; 12 round-trip unit tests.
+- [x] **9.2 Iso grid + camera** ✅ — toolbar flat/iso toggle; diamond lattice
+      grid; whole scene projected via one linear SVG matrix; iso-aware pointer
+      hit-testing, drag (linear inverse), marquee/lasso, fit-to-screen, jump-to,
+      and culling; view-level `projection: 'flat' | 'iso'` flag (optional, defaults
+      flat, captured/restored by saved views). Interim: rects/labels shear — 9.3
+      replaces device tiles with upright 3D rendering + crisp labels.
+- [x] **9.3 Iso device rendering** ✅ — devices render as UPRIGHT iso tiles
+      (`IsoDeviceNode`): projected footprint diamond + extruded depth skirt
+      (shaded accent faces) + upright glyph badge + crisp upright label, in a
+      non-sheared layer at projected coords; painter's z-order by (x+y); LOD;
+      iso connect-handle. Footprint == projected flat box so hit-testing stays
+      exact. (Text-annotation objects still shear → folded into 9.4/9.5 polish.)
+- [x] **9.4 Iso editing** ✅ — drag/snap, place-from-library, connect,
+      select/marquee/lasso, double-click-to-edit, and inline text editor all work
+      in iso via the linear inverse projection (built across 9.2–9.4). Text
+      annotations render UPRIGHT (`IsoTextNode`) instead of shearing; resize
+      handles suppressed for upright text; Esc clears in-flight marquee/lasso.
+      (Remaining shear: shape/zone *labels* — minor, deferred to 9.5.)
+- [x] **9.5 Iso connectors** ✅ — links route on the iso plane; connector
+      multi-labels (name/bandwidth/VLAN/native/LACP/circuit), endpoint interface
+      labels, and shape/zone labels all render UPRIGHT via an inverse-matrix
+      counter-transform (de-shear in place, no extra layer). Hardening: label
+      builders coerce non-string fields (numeric VLAN from imports no longer
+      throws), and an ErrorBoundary now wraps the canvas so a render error shows a
+      recoverable message instead of white-screening the app.
+- [x] **9.6 Iso export** ✅ — PNG/JPG/SVG/PDF render the iso projection (all
+      formats flow through `buildSvg`, which now has an iso branch: floor layer
+      sheared by the iso matrix, device tiles + labels upright at projected
+      coords, projected viewBox). Export dialog has an "Isometric view" toggle
+      defaulting to the current canvas projection; live preview reflects it. Unit-
+      tested (iso SVG emits the matrix group + tile polygons, differs from flat).
+- [x] **9.7 Icon system** ✅ — a single coherent, pictographic line-art icon set
+      (`DEVICE_ICONS`, 0–24 grid) covering all ~30 device types incl. cloud,
+      replacing the letter badges. Rendered consistently across flat tiles, iso
+      tiles, the library, and SVG/PNG/JPG/PDF export (shared `deviceIconGroup`
+      string + `DeviceGlyph` React component). Letter glyph kept only as the
+      tiny-zoom LOD fallback. Directly answers FossFLOW's #1 complaint (sparse /
+      clashing iso icons) — one consistent set, every type.
+
+**Phase 9 complete.** NexMap now has a full isometric view mode (toggle, grid,
+camera, device tiles, editing, connectors, labels, export, and a coherent icon
+set) layered on the flat, self-validating model — plus draw.io-style pointer
+parity and an error boundary.
+
+## Post-Phase-9 stretch
+
+- [x] **Auto-layout ("tidy")** ✅ — one-click layered layout (`lib/layout.ts`):
+      per connected component, root at the highest-degree node and layer by BFS
+      depth (core → distribution → access → endpoints), then shelf-pack
+      disconnected components into rows. Pure + deterministic (8 unit tests);
+      `store.autoLayout()` commits as one undoable transaction and respects locks
+      (3 store tests); toolbar `⊞` button + ⌘⇧L. Works in flat and iso.
+- [ ] Text/Mermaid-to-diagram input (auto-layout is the placement engine for it).
+- [ ] Guided live-discovery import wizard.
+- [ ] Obstacle-avoiding connector routing.
+
+---
+
 ## Phase 0 — Audit & Baseline ✅ (recorded 2026-06-02)
 
 **Current MVP status (M0–M8 shipped, on `main`):**
@@ -54,14 +169,14 @@ import, export, shortcuts.
 - [x] FossFLOW-inspired floating icon toolbar: Select, Lasso, Pan, Connect, Text,
       Zone/Shape, Undo, Redo, Help (Add-Device = library drag; Freehand-lasso folded
       into Lasso)
-- [x] Context menus (canvas / device — copy/cut/dup/paste/lock/delete/group/z-order)
+- [x] Context menus (canvas / entity — copy/cut/dup/paste/lock/delete/group/z-order)
 - [x] Grouping (group/ungroup, group-aware selection), z-order (front/back/forward/back)
 - [x] Lasso selection (freehand polygon)
 - [x] Text notes + Zone/Shape objects (new object types: create, render, select,
       move, lock, delete, inspector, export, round-trip)
 - [x] Richer device visuals: depth shadow, hover outline, locked/error badges
 - Remaining Phase-1 nice-to-haves (deferred, low priority): shape resize handles,
-      object grouping/z-order, full isometric styling, tablet gestures.
+      full isometric styling, tablet gestures.
 
 ## Phase 2 — Connector System  ✅ COMPLETE
 - [x] Editable connectors: waypoints, reroute handles, arrows, line styles,
@@ -81,7 +196,7 @@ import, export, shortcuts.
 - [x] Import: CSV (devices/links), JSON (topology), draw.io, GraphML, NetBox CSV/JSON,
   SVG/image background underlays (sanitized)
 - [x] Unsafe-SVG sanitization on import; transactional partial-rollback (single undo)
-- Deferred to Phase 4 (needs the subnet/VLAN model): IP-plan + VLAN CSV import.
+- [x] IP-plan + VLAN CSV import (header-detected; preview + single undo)
 - Deferred (low priority): layer/view export scope, multi-page PDF pagination.
 
 ## Phase 4 — Network Semantics  ✅ CORE COMPLETE
@@ -128,6 +243,23 @@ import, export, shortcuts.
   warnings), multi-tab (Web Locks), newer-schema refuse, quota write-new-then-swap
 - Deferred (low priority): rebindable hotkeys, configurable grid size, stale-SW
   update prompt.
+
+## Stabilization Pass — Issue Backlog ✅ COMPLETE (2026-06-03)
+
+- [x] Responsive shell: side-panel toggles, drawer behavior on narrow screens,
+  compact topbar overflow controls.
+- [x] Export correctness: object-only selections, selected links with endpoints,
+  accurate preview/summary counts.
+- [x] ZIP validation: report now includes VLAN/subnet/rack context and project name.
+- [x] Canvas objects first-class in copy/cut/paste/duplicate/select-all/group/z-order
+  and context menus.
+- [x] View/layer consistency: applying views is transient and non-dirty; layer
+  edits are undoable document changes.
+- [x] Fit-to-screen/page bounds include devices, canvas objects, and link waypoints.
+- [x] Import safety: images/SVG/IP-plan/VLAN imports preview before commit; large
+  file/image safeguards; stronger SVG external-reference stripping.
+- [x] Parser/doc polish: GraphML label selection improved; compressed draw.io gets
+  clear guidance; README/type comments aligned with current behavior.
 
 ---
 

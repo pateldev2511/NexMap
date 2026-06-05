@@ -4,8 +4,8 @@ import styles from './ReadOnlyBanner.module.css';
 export function ReadOnlyBanner() {
   return (
     <div className={styles.banner} role="status">
-      ⚠ This project is open in another tab. You're in read-only mode here — edits
-      won't be autosaved. Close the other tab to take over.
+      ⚠ This project is open in another tab. You're in read-only mode here — edits won't
+      be autosaved. Close the other tab to take over.
     </div>
   );
 }

@@ -48,7 +48,7 @@
 }
 
 .node {
-  cursor: pointer;
+  cursor: move;
 }
 
 .node .body {
@@ -135,7 +135,7 @@
 }
 
 .objNode {
-  cursor: pointer;
+  cursor: move;
 }
 
 .shapeBody {
@@ -228,6 +228,90 @@
   stroke: var(--accent);
   stroke-width: 1;
   stroke-dasharray: 4 3;
+  /* Purely a visual overlay — the gesture is tracked via root handlers, so it
+     must never intercept pointer events (which would swallow clicks). */
+  pointer-events: none;
+}
+
+.isoNode {
+  cursor: move;
+}
+
+.isoTop {
+  stroke: var(--chrome-border);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.isoNode.selected .isoTop {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.isoNode:hover .isoTop {
+  stroke: var(--accent);
+}
+
+.isoLabel {
+  fill: var(--chrome-fg);
+  font-size: 11px;
+  text-anchor: middle;
+  dominant-baseline: hanging;
+  font-family: var(--font-ui);
+  paint-order: stroke;
+  stroke: var(--canvas-bg);
+  stroke-width: 3;
+  pointer-events: none;
+}
+
+.isoGridLine {
+  stroke: var(--canvas-grid);
+  stroke-width: 1;
+  opacity: 0.6;
+  fill: none;
+}
+
+.alignGuide {
+  stroke: #f0398b;
+  fill: none;
+  pointer-events: none;
+  shape-rendering: crispEdges;
+}
+
+.resizeHandle {
+  fill: #fff;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.dragReadout {
+  position: absolute;
+  pointer-events: none;
+  background: var(--chrome-fg);
+  color: var(--chrome-bg);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  transform: translate(12px, 16px);
+  z-index: 5;
+}
+
+.textEditor {
+  position: absolute;
+  margin: 0;
+  padding: 0 4px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: var(--canvas-bg);
+  font-family: var(--font-ui);
+  line-height: 1.1;
+  resize: none;
+  outline: none;
+  overflow: hidden;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+  z-index: 6;
 }
 
 .dropHint {
@@ -235,6 +319,49 @@
   stroke: var(--accent);
   stroke-width: 2;
   stroke-dasharray: 6 4;
+}
+
+.alignBar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  padding: 3px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.12);
+  z-index: 4;
+}
+
+.alignBar button {
+  background: transparent;
+  border: none;
+  color: var(--chrome-fg);
+  border-radius: 6px;
+  padding: 4px 7px;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.alignBar button:hover:not(:disabled) {
+  background: var(--canvas-bg);
+}
+
+.alignBar button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.alignBar .sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 3px;
+  background: var(--chrome-border);
 }
 
 .zoomBar {
@@ -271,4 +398,3 @@
   min-width: 42px;
   text-align: center;
 }
-

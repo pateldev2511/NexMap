@@ -45,8 +45,8 @@ export function ContextMenu({
   }, [onClose]);
 
   // Keep the menu on-screen.
-  const left = Math.min(x, window.innerWidth - 200);
-  const top = Math.min(y, window.innerHeight - items.length * 30 - 16);
+  const left = Math.max(8, Math.min(x, window.innerWidth - 200));
+  const top = Math.max(8, Math.min(y, window.innerHeight - items.length * 30 - 16));
 
   return (
     <div ref={ref} className={styles.menu} style={{ left, top }} role="menu">

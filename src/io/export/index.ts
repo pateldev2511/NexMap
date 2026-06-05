@@ -2,7 +2,7 @@
  * Export orchestrator: format → build-from-model → download. One entry point so
  * the dialog stays declarative and the build/download wiring lives in one place.
  */
-import type { CanvasObject, Device, Link } from '@/model/types';
+import type { CanvasObject, Device, Link, Rack, Subnet, Vlan } from '@/model/types';
 import { buildSvg } from './buildSvg';
 import { rasterize, downloadBlob } from './raster';
 import { buildPdfBlob, type PageSize } from './pdf';
@@ -22,6 +22,9 @@ export interface ExportScene {
   devices: Device[];
   links: Link[];
   objects: CanvasObject[];
+  vlans: Vlan[];
+  subnets: Subnet[];
+  racks: Rack[];
   projectName: string;
   /** Serialized .nexmap JSON (for the ZIP package's editable file). */
   docJson: string;
@@ -36,10 +39,16 @@ export interface ExportOptions {
   pageSize: PageSize;
   orientation: 'portrait' | 'landscape';
   fileName: string;
+  /** Render the isometric projection in image/vector exports (Phase 9.6). */
+  projection?: 'flat' | 'iso';
 }
 
 function safeName(name: string, ext: string): string {
-  const base = name.trim().replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80) || 'nexmap';
+  const base =
+    name
+      .trim()
+      .replace(/[\\/:*?"<>|]+/g, '_')
+      .slice(0, 80) || 'nexmap';
   return base.endsWith(`.${ext}`) ? base : `${base}.${ext}`;
 }
 
@@ -48,7 +57,10 @@ export interface ExportOutcome {
   warning?: string;
 }
 
-export async function runExport(scene: ExportScene, opts: ExportOptions): Promise<ExportOutcome> {
+export async function runExport(
+  scene: ExportScene,
+  opts: ExportOptions,
+): Promise<ExportOutcome> {
   const { devices, links } = scene;
 
   if (opts.format === 'csv-inventory') {
@@ -66,7 +78,16 @@ export async function runExport(scene: ExportScene, opts: ExportOptions): Promis
 
   if (opts.format === 'zip') {
     const blob = await buildPackageZip(
-      { devices, links, objects: scene.objects, projectName: scene.projectName, docJson: scene.docJson },
+      {
+        devices,
+        links,
+        objects: scene.objects,
+        vlans: scene.vlans,
+        subnets: scene.subnets,
+        racks: scene.racks,
+        projectName: scene.projectName,
+        docJson: scene.docJson,
+      },
       opts.scale,
     );
     const fn = safeName(opts.fileName || `${scene.projectName}-package`, 'zip');
@@ -78,6 +99,7 @@ export async function runExport(scene: ExportScene, opts: ExportOptions): Promis
     background: opts.format === 'jpg' ? (opts.background ?? '#ffffff') : opts.background,
     includeLabels: opts.includeLabels,
     objects: scene.objects,
+    projection: opts.projection,
   });
 
   if (opts.format === 'svg') {

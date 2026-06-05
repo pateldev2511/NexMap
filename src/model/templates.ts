@@ -37,7 +37,12 @@ interface Placed {
   ip?: string;
 }
 
-function build(now: string, name: string, placed: Placed[], edges: [number, number][]): NexMapDocument {
+function build(
+  now: string,
+  name: string,
+  placed: Placed[],
+  edges: [number, number][],
+): NexMapDocument {
   const doc = createEmptyDocument(now);
   doc.project = { ...doc.project, name };
   const layerId = doc.layers[0]!.id;

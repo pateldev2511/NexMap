@@ -82,7 +82,10 @@ describe('validate — MVP checks', () => {
     const issues = validate({
       devices: [],
       links: [],
-      subnets: [createSubnet('10.0.0.0/16'), createSubnet('10.0.1.0/24', { gateway: '10.0.1.1' })],
+      subnets: [
+        createSubnet('10.0.0.0/16'),
+        createSubnet('10.0.1.0/24', { gateway: '10.0.1.1' }),
+      ],
     });
     expect(issues.some((i) => i.code === 'overlapping-subnet')).toBe(true);
     expect(issues.some((i) => i.code === 'subnet-no-gateway')).toBe(true); // the /16 has none
@@ -106,9 +109,24 @@ describe('validate — MVP checks', () => {
 
   it('flags rack RU collisions and overflow', () => {
     const rack = createRack('R1', 42);
-    const a = createDevice('server', 0, 0, LAYER, { name: 'srv-a', rackId: rack.id, ru: 1, ruSpan: 2 });
-    const b = createDevice('server', 0, 0, LAYER, { name: 'srv-b', rackId: rack.id, ru: 2, ruSpan: 1 }); // overlaps U2
-    const c = createDevice('server', 0, 0, LAYER, { name: 'srv-c', rackId: rack.id, ru: 41, ruSpan: 4 }); // overflows 42U
+    const a = createDevice('server', 0, 0, LAYER, {
+      name: 'srv-a',
+      rackId: rack.id,
+      ru: 1,
+      ruSpan: 2,
+    });
+    const b = createDevice('server', 0, 0, LAYER, {
+      name: 'srv-b',
+      rackId: rack.id,
+      ru: 2,
+      ruSpan: 1,
+    }); // overlaps U2
+    const c = createDevice('server', 0, 0, LAYER, {
+      name: 'srv-c',
+      rackId: rack.id,
+      ru: 41,
+      ruSpan: 4,
+    }); // overflows 42U
     const issues = validate({ devices: [a, b, c], links: [], racks: [rack] });
     expect(issues.some((i) => i.code === 'rack-ru-collision')).toBe(true);
     expect(issues.some((i) => i.code === 'rack-ru-overflow')).toBe(true);
@@ -128,7 +146,10 @@ describe('validate — MVP checks', () => {
     const a = dev('a');
     const b = dev('b');
     const c = dev('c');
-    const issues = validate({ devices: [a, b, c], links: [createLink(a.id, b.id, LAYER)] });
+    const issues = validate({
+      devices: [a, b, c],
+      links: [createLink(a.id, b.id, LAYER)],
+    });
     const orphan = issues.find((i) => i.code === 'orphaned-device');
     expect(orphan?.objectIds).toEqual([c.id]);
   });

@@ -22,8 +22,8 @@ export function RackView() {
     return (
       <div className={styles.root}>
         <div className={styles.empty}>
-          No racks yet. Add a rack in the Racks panel, then assign devices to it
-          (Rack placement in the inspector).
+          No racks yet. Add a rack in the Racks panel, then assign devices to it (Rack
+          placement in the inspector).
         </div>
       </div>
     );
@@ -104,7 +104,11 @@ function RackFrame({
               <div
                 key={d.id}
                 className={`${styles.device} ${selection.has(d.id) ? styles.selected : ''}`}
-                style={{ top, height: span * SLOT_H - 1, background: deviceVisual(d.type).accent }}
+                style={{
+                  top,
+                  height: span * SLOT_H - 1,
+                  background: deviceVisual(d.type).accent,
+                }}
                 onPointerDown={(e) => onPointerDown(e, d)}
                 title={`${d.name} — U${d.ru}${span > 1 ? `–U${d.ru! + span - 1}` : ''}`}
               >

@@ -58,7 +58,9 @@ describe('loadDocument', () => {
 
 describe('stripDangerousKeys', () => {
   it('removes prototype-pollution keys recursively', () => {
-    const evil = JSON.parse('{"a":1,"__proto__":{"polluted":true},"nested":{"constructor":2,"ok":3}}');
+    const evil = JSON.parse(
+      '{"a":1,"__proto__":{"polluted":true},"nested":{"constructor":2,"ok":3}}',
+    );
     const clean = stripDangerousKeys(evil) as Record<string, unknown>;
     const has = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
     expect(clean.a).toBe(1);
@@ -69,7 +71,10 @@ describe('stripDangerousKeys', () => {
 
   it('loadDocument strips dangerous keys before use', () => {
     const doc = createEmptyDocument(NOW) as unknown as Record<string, unknown>;
-    const raw = JSON.stringify(doc).replace('"devices":[]', '"devices":[],"__proto__":{"x":1}');
+    const raw = JSON.stringify(doc).replace(
+      '"devices":[]',
+      '"devices":[],"__proto__":{"x":1}',
+    );
     const result = loadDocument(raw);
     expect(result.ok).toBe(true);
     expect(({} as Record<string, unknown>).x).toBeUndefined(); // global proto not polluted

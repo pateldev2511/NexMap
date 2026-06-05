@@ -27,7 +27,11 @@ export async function buildPdfBlob(svg: string, opts: PdfOptions): Promise<Blob>
 
   // Lazy-load jsPDF so non-PDF users don't pay for it (it pulls in html2canvas).
   const { jsPDF } = await import('jspdf');
-  const doc = new jsPDF({ orientation: opts.orientation, unit: 'pt', format: opts.pageSize });
+  const doc = new jsPDF({
+    orientation: opts.orientation,
+    unit: 'pt',
+    format: opts.pageSize,
+  });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const margin = 24;

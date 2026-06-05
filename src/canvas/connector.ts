@@ -63,15 +63,23 @@ export function orthogonalPoints(a: Pt, b: Pt): Pt[] {
   return [a, { x: midX, y: a.y }, { x: midX, y: b.y }, b];
 }
 
+/** Coerce a possibly-non-string field to a trimmed string (tolerant of numbers
+ *  from imports). Returns '' for null/undefined so the renderer never crashes on
+ *  unexpected data — a render-time throw would blank the whole canvas. */
+function field(v: unknown): string {
+  if (v == null) return '';
+  return String(v).trim();
+}
+
 /** The connector's stacked label lines (multi-label: name, bandwidth, VLANs, etc.). */
 export function connectorLabelLines(link: Link): string[] {
   const lines: string[] = [];
-  if (link.name?.trim()) lines.push(link.name.trim());
-  if (link.bandwidth?.trim()) lines.push(link.bandwidth.trim());
-  if (link.vlan?.trim()) lines.push(`VLAN ${link.vlan.trim()}`);
-  if (link.nativeVlan?.trim()) lines.push(`native ${link.nativeVlan.trim()}`);
-  if (link.lacp?.trim()) lines.push(`LACP ${link.lacp.trim()}`);
-  if (link.circuitId?.trim()) lines.push(`circuit ${link.circuitId.trim()}`);
+  if (field(link.name)) lines.push(field(link.name));
+  if (field(link.bandwidth)) lines.push(field(link.bandwidth));
+  if (field(link.vlan)) lines.push(`VLAN ${field(link.vlan)}`);
+  if (field(link.nativeVlan)) lines.push(`native ${field(link.nativeVlan)}`);
+  if (field(link.lacp)) lines.push(`LACP ${field(link.lacp)}`);
+  if (field(link.circuitId)) lines.push(`circuit ${field(link.circuitId)}`);
   return lines;
 }
 
@@ -93,7 +101,10 @@ export function pathD(points: Pt[]): string {
 export function segmentMidpoints(points: Pt[]): Pt[] {
   const mids: Pt[] = [];
   for (let i = 0; i < points.length - 1; i++) {
-    mids.push({ x: (points[i]!.x + points[i + 1]!.x) / 2, y: (points[i]!.y + points[i + 1]!.y) / 2 });
+    mids.push({
+      x: (points[i]!.x + points[i + 1]!.x) / 2,
+      y: (points[i]!.y + points[i + 1]!.y) / 2,
+    });
   }
   return mids;
 }
@@ -106,5 +117,5 @@ export function labelAnchor(points: Pt[]): Pt {
 
 /** Short text shown on the connector: name, else bandwidth, else ''. */
 export function connectorLabel(link: Link): string {
-  return link.name?.trim() || link.bandwidth?.trim() || '';
+  return field(link.name) || field(link.bandwidth) || '';
 }

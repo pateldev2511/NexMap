@@ -52,7 +52,84 @@ function layout(i: number, origin = { x: 80, y: 80 }) {
 
 function deviceFromLabel(label: string, i: number, layerId: string): Device {
   const pos = layout(i);
-  return createDevice(inferType(label), pos.x, pos.y, layerId, { name: label || `node-${i}` });
+  return createDevice(inferType(label), pos.x, pos.y, layerId, {
+    name: label || `node-${i}`,
+  });
+}
+
+function bestGraphmlLabel(
+  node: Element,
+  fallback: string,
+  keyNames: Map<string, string>,
+): string {
+  const data = [...node.querySelectorAll('data')]
+    .map((d) => ({
+      key: d.getAttribute('key') ?? '',
+      name: keyNames.get(d.getAttribute('key') ?? '') ?? '',
+      text: d.textContent?.trim() ?? '',
+    }))
+    .filter((d) => d.text.length > 0);
+  const labelish = data.find((d) =>
+    /label|name|title|hostname/i.test(`${d.key} ${d.name}`),
+  );
+  return labelish?.text ?? data[0]?.text ?? fallback;
+}
+
+function isExternalSvgReference(value: string): boolean {
+  const v = value.trim().replace(/^url\(\s*['"]?|['"]?\s*\)$/g, '');
+  if (v.startsWith('#')) return false;
+  if (/^(https?:)?\/\//i.test(v)) return true;
+  if (/^(file|ftp|blob):/i.test(v)) return true;
+  if (/^data:/i.test(v) && !/^data:image\/(?:png|jpe?g|gif|webp|svg\+xml);/i.test(v))
+    return true;
+  return false;
+}
+
+/**
+ * Remove external fetch references from sanitized SVG underlays. DOMPurify handles
+ * scripts/unsafe markup; this extra pass protects the local-first privacy promise
+ * by preventing imported SVGs from loading remote images, filters, masks, etc.
+ */
+export function stripExternalSvgReferences(svg: string): {
+  svg: string;
+  stripped: number;
+} {
+  const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+  if (doc.querySelector('parsererror')) return { svg, stripped: 0 };
+  let stripped = 0;
+  doc.querySelectorAll('script,foreignObject,iframe,object,embed').forEach((el) => {
+    stripped++;
+    el.remove();
+  });
+  const attrs = [
+    'href',
+    'xlink:href',
+    'src',
+    'filter',
+    'clip-path',
+    'mask',
+    'marker-start',
+    'marker-mid',
+    'marker-end',
+    'fill',
+    'stroke',
+  ];
+  doc.querySelectorAll('*').forEach((el) => {
+    for (const attr of attrs) {
+      const value = el.getAttribute(attr);
+      if (value && isExternalSvgReference(value)) {
+        el.removeAttribute(attr);
+        stripped++;
+      }
+    }
+    for (const attr of [...el.attributes]) {
+      if (/^on/i.test(attr.name)) {
+        el.removeAttribute(attr.name);
+        stripped++;
+      }
+    }
+  });
+  return { svg: new XMLSerializer().serializeToString(doc.documentElement), stripped };
 }
 
 /** Parse GraphML: <node id> → device, <edge source target> → link. */
@@ -62,15 +139,20 @@ export function parseGraphml(text: string, layerId: string): ImportResult {
   if (doc.querySelector('parsererror')) {
     return { devices: [], links: [], warnings: ['File is not valid XML.'], skipped: 0 };
   }
+  const keyNames = new Map<string, string>();
+  doc.querySelectorAll('key').forEach((key) => {
+    const id = key.getAttribute('id');
+    if (id)
+      keyNames.set(
+        id,
+        key.getAttribute('attr.name') ?? key.getAttribute('yfiles.type') ?? '',
+      );
+  });
   const idToDevice = new Map<string, Device>();
   const devices: Device[] = [];
   doc.querySelectorAll('node').forEach((node, i) => {
     const gid = node.getAttribute('id') ?? `n${i}`;
-    // Label: a <data> child (common: key="label"/"name"/"d*") or the id.
-    const dataLabel = [...node.querySelectorAll('data')]
-      .map((d) => d.textContent?.trim())
-      .find((t) => t && t.length > 0);
-    const device = deviceFromLabel(dataLabel || gid, i, layerId);
+    const device = deviceFromLabel(bestGraphmlLabel(node, gid, keyNames), i, layerId);
     idToDevice.set(gid, device);
     devices.push(device);
   });
@@ -110,7 +192,11 @@ export function parseDrawio(text: string, layerId: string): ImportResult {
   }
   const idToDevice = new Map<string, Device>();
   const devices: Device[] = [];
-  const stripHtml = (s: string) => s.replace(/<[^>]+>/g, ' ').replace(/&[^;]+;/g, ' ').trim();
+  const stripHtml = (s: string) =>
+    s
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&[^;]+;/g, ' ')
+      .trim();
   cells.forEach((cell, i) => {
     if (cell.getAttribute('vertex') !== '1') return;
     const gid = cell.getAttribute('id') ?? `v${i}`;
@@ -131,9 +217,12 @@ export function parseDrawio(text: string, layerId: string): ImportResult {
       return;
     }
     const label = (cell.getAttribute('value') ?? '').trim();
-    links.push(createLink(src.id, tgt.id, layerId, label ? { name: stripHtml(label) } : {}));
+    links.push(
+      createLink(src.id, tgt.id, layerId, label ? { name: stripHtml(label) } : {}),
+    );
   });
-  if (skipped > 0) warnings.push(`${skipped} edge(s) had unmapped endpoints and were skipped.`);
+  if (skipped > 0)
+    warnings.push(`${skipped} edge(s) had unmapped endpoints and were skipped.`);
   return { devices, links, warnings, skipped };
 }
 
@@ -146,7 +235,12 @@ export function parseNmapXml(text: string, layerId: string): ImportResult {
   const warnings: string[] = [];
   const doc = new DOMParser().parseFromString(text, 'application/xml');
   if (doc.querySelector('parsererror') || !doc.querySelector('nmaprun')) {
-    return { devices: [], links: [], warnings: ['Not a valid Nmap XML scan.'], skipped: 0 };
+    return {
+      devices: [],
+      links: [],
+      warnings: ['Not a valid Nmap XML scan.'],
+      skipped: 0,
+    };
   }
   const devices: Device[] = [];
   let skipped = 0;
@@ -250,7 +344,12 @@ export function parseTopologyJson(text: string, layerId: string): ImportResult {
     const pos = layout(i);
     const device = createDevice(type, pos.x, pos.y, layerId, {
       name,
-      managementIp: typeof d.managementIp === 'string' ? d.managementIp : (typeof d.ip === 'string' ? d.ip : undefined),
+      managementIp:
+        typeof d.managementIp === 'string'
+          ? d.managementIp
+          : typeof d.ip === 'string'
+            ? d.ip
+            : undefined,
       vendor: typeof d.vendor === 'string' ? d.vendor : undefined,
       notes: typeof d.notes === 'string' ? d.notes : undefined,
     });
@@ -270,6 +369,7 @@ export function parseTopologyJson(text: string, layerId: string): ImportResult {
     }
     links.push(createLink(src.id, tgt.id, layerId));
   }
-  if (skipped > 0) warnings.push(`${skipped} link(s) referenced unknown devices and were skipped.`);
+  if (skipped > 0)
+    warnings.push(`${skipped} link(s) referenced unknown devices and were skipped.`);
   return { devices, links, warnings, skipped };
 }

@@ -25,7 +25,11 @@ describe('connector geometry', () => {
   });
 
   it('pathD emits a polyline', () => {
-    const pts = [{ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 20, y: 0 }];
+    const pts = [
+      { x: 0, y: 0 },
+      { x: 10, y: 10 },
+      { x: 20, y: 0 },
+    ];
     expect(pathD(pts)).toBe('M0 0 L10 10 L20 0');
   });
 
@@ -88,8 +92,23 @@ describe('orthogonal routing + multi-label', () => {
   });
 
   it('connectorLabelLines stacks configured labels', () => {
-    const link = createLink(a.id, b.id, L, { name: 'up', bandwidth: '10G', vlan: '10,20', lacp: 'Po1' });
+    const link = createLink(a.id, b.id, L, {
+      name: 'up',
+      bandwidth: '10G',
+      vlan: '10,20',
+      lacp: 'Po1',
+    });
     expect(connectorLabelLines(link)).toEqual(['up', '10G', 'VLAN 10,20', 'LACP Po1']);
     expect(connectorLabelLines(createLink(a.id, b.id, L))).toEqual([]);
+  });
+
+  it('tolerates non-string label fields without throwing (defensive)', () => {
+    // Bad data (e.g. a numeric vlan from an import) must not crash the renderer.
+    const link = createLink(a.id, b.id, L, {
+      vlan: 10 as unknown as string,
+      nativeVlan: 1 as unknown as string,
+    });
+    expect(() => connectorLabelLines(link)).not.toThrow();
+    expect(connectorLabelLines(link)).toEqual(['VLAN 10', 'native 1']);
   });
 });

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { DeviceType } from '@/model/types';
-import { deviceVisual } from '@/canvas/deviceVisuals';
+import { deviceVisual, deviceIcon } from '@/canvas/deviceVisuals';
 import { defaultDeviceName } from '@/model/schema';
 import styles from './Library.module.css';
 
@@ -19,7 +19,16 @@ const GROUPS: Group[] = [
   {
     name: 'Common',
     defaultOpen: true,
-    types: ['router', 'switch', 'firewall', 'access-point', 'server', 'cloud', 'end-user', 'generic'],
+    types: [
+      'router',
+      'switch',
+      'firewall',
+      'access-point',
+      'server',
+      'cloud',
+      'end-user',
+      'generic',
+    ],
   },
   { name: 'Network', types: ['wireless-controller', 'load-balancer', 'isp'] },
   { name: 'Compute & Storage', types: ['vm', 'container', 'storage'] },
@@ -28,8 +37,16 @@ const GROUPS: Group[] = [
   {
     name: 'Cloud',
     types: [
-      'vpc', 'cloud-subnet', 'internet-gateway', 'nat-gateway', 'route-table',
-      'security-group', 'vpn-gateway', 'k8s', 'managed-db', 'object-storage',
+      'vpc',
+      'cloud-subnet',
+      'internet-gateway',
+      'nat-gateway',
+      'route-table',
+      'security-group',
+      'vpn-gateway',
+      'k8s',
+      'managed-db',
+      'object-storage',
     ],
   },
 ];
@@ -47,7 +64,17 @@ function LibraryItem({ type }: { type: DeviceType }) {
       title={`Drag to add ${defaultDeviceName(type)}`}
     >
       <span className={styles.swatch} style={{ background: visual.accent }}>
-        {visual.glyph}
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          stroke="#fff"
+          strokeWidth={2}
+          fill="none"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          dangerouslySetInnerHTML={{ __html: deviceIcon(type) }}
+        />
       </span>
       <span className={styles.itemLabel}>{defaultDeviceName(type)}</span>
     </div>

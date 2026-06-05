@@ -26,7 +26,16 @@ function toCsv(headers: string[], rows: string[][]): string {
 }
 
 export function exportInventoryCsv(devices: Device[]): string {
-  const headers = ['name', 'type', 'vendor', 'model', 'role', 'location', 'management_ip', 'notes'];
+  const headers = [
+    'name',
+    'type',
+    'vendor',
+    'model',
+    'role',
+    'location',
+    'management_ip',
+    'notes',
+  ];
   const rows = devices.map((d) => [
     d.name,
     defaultDeviceName(d.type),
@@ -43,7 +52,13 @@ export function exportInventoryCsv(devices: Device[]): string {
 export function exportLinksCsv(links: Link[], devices: Device[]): string {
   const name = new Map(devices.map((d) => [d.id, d.name]));
   const headers = [
-    'name', 'source', 'source_interface', 'target', 'target_interface', 'type', 'bandwidth',
+    'name',
+    'source',
+    'source_interface',
+    'target',
+    'target_interface',
+    'type',
+    'bandwidth',
   ];
   const rows = links.map((l) => [
     l.name ?? '',

@@ -6,16 +6,27 @@ interface ObjectNodeProps {
   object: CanvasObject;
   selected: boolean;
   onPointerDown: (e: React.PointerEvent, id: string) => void;
+  /** When set (iso mode), de-shears the shape label to stay upright. */
+  labelUpright?: (ax: number, ay: number) => string;
 }
 
 const LOCK_GLYPH = '\u{1F512}';
 
 /** Renders a text note or a shape/zone. Selection/drag go through the shared handler. */
-function ObjectNodeImpl({ object, selected, onPointerDown }: ObjectNodeProps) {
+function ObjectNodeImpl({
+  object,
+  selected,
+  onPointerDown,
+  labelUpright,
+}: ObjectNodeProps) {
   const cls = `${styles.objNode} ${selected ? styles.selected : ''}`;
   if (object.kind === 'image') {
     return (
-      <g className={cls} onPointerDown={(e) => onPointerDown(e, object.id)} data-id={object.id}>
+      <g
+        className={cls}
+        onPointerDown={(e) => onPointerDown(e, object.id)}
+        data-id={object.id}
+      >
         <image
           href={object.href}
           x={object.x}
@@ -47,9 +58,20 @@ function ObjectNodeImpl({ object, selected, onPointerDown }: ObjectNodeProps) {
       stroke: object.stroke ?? 'var(--accent)',
     };
     return (
-      <g className={cls} onPointerDown={(e) => onPointerDown(e, object.id)} data-id={object.id}>
+      <g
+        className={cls}
+        onPointerDown={(e) => onPointerDown(e, object.id)}
+        data-id={object.id}
+      >
         {Tag === 'rect' ? (
-          <rect {...common} x={object.x} y={object.y} width={object.width} height={object.height} rx={6} />
+          <rect
+            {...common}
+            x={object.x}
+            y={object.y}
+            width={object.width}
+            height={object.height}
+            rx={6}
+          />
         ) : (
           <ellipse
             {...common}
@@ -60,12 +82,21 @@ function ObjectNodeImpl({ object, selected, onPointerDown }: ObjectNodeProps) {
           />
         )}
         {object.label && (
-          <text className={styles.shapeLabel} x={object.x + 8} y={object.y + 16}>
+          <text
+            className={styles.shapeLabel}
+            x={object.x + 8}
+            y={object.y + 16}
+            transform={labelUpright ? labelUpright(object.x + 8, object.y + 16) : undefined}
+          >
             {object.label}
           </text>
         )}
         {object.locked && (
-          <text className={styles.lockGlyph} x={object.x + object.width - 2} y={object.y + object.height - 2}>
+          <text
+            className={styles.lockGlyph}
+            x={object.x + object.width - 2}
+            y={object.y + object.height - 2}
+          >
             {LOCK_GLYPH}
           </text>
         )}
@@ -74,8 +105,18 @@ function ObjectNodeImpl({ object, selected, onPointerDown }: ObjectNodeProps) {
   }
   // text
   return (
-    <g className={cls} onPointerDown={(e) => onPointerDown(e, object.id)} data-id={object.id}>
-      <rect x={object.x} y={object.y} width={object.width} height={object.height} fill="transparent" />
+    <g
+      className={cls}
+      onPointerDown={(e) => onPointerDown(e, object.id)}
+      data-id={object.id}
+    >
+      <rect
+        x={object.x}
+        y={object.y}
+        width={object.width}
+        height={object.height}
+        fill="transparent"
+      />
       <text
         className={styles.textObj}
         x={object.x + 4}
