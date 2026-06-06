@@ -90,6 +90,11 @@ export interface Device {
   location?: string;
   managementIp?: string;
   notes?: string;
+  /**
+   * Rich-text component description (sanitized HTML, schema v2 additive). UNTRUSTED on
+   * load — always run through sanitizeHtml() before rendering with dangerouslySetInnerHTML.
+   */
+  descriptionHtml?: string;
   fill?: string;
   /** Rack placement (Phase 4): rack id, lowest occupied RU (1-based), height in U. */
   rackId?: string;

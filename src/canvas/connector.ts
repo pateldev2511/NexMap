@@ -54,28 +54,9 @@ export function pairKey(link: Link): string {
 // ── Semantic stroke (Stage: connectors) ─────────────────────────────────────
 
 export const DEFAULT_LINK_WIDTH = 1.5;
-
-/**
- * Map a bandwidth string to a stroke width so thickness communicates capacity.
- * Total + pure: case-insensitive, trims, and ANY unparseable value returns the
- * default (never throws — the connectorLabelLines lesson). "100M"→thin; G values
- * scale (1G=1.5, 10G=2.5, 40G=3, 100G=4, 400G=5), clamped to [1, 6].
- */
-export function bandwidthToWidth(bandwidth: string | undefined): number {
-  if (!bandwidth) return DEFAULT_LINK_WIDTH;
-  const m = bandwidth.trim().toLowerCase().match(/^(\d+(?:\.\d+)?)\s*(g|m|t)?/);
-  if (!m) return DEFAULT_LINK_WIDTH;
-  const n = Number(m[1]);
-  if (!Number.isFinite(n) || n <= 0) return DEFAULT_LINK_WIDTH;
-  const unit = m[2] ?? 'g';
-  let gbps: number;
-  if (unit === 'm') gbps = n / 1000;
-  else if (unit === 't') gbps = n * 1000;
-  else gbps = n; // 'g' or bare number treated as Gbps
-  // log-ish scale: 1G→1.5, 10G→2.5, 100G→4, 400G→~5. Clamp to a sane band.
-  const w = 1.5 + Math.log10(Math.max(gbps, 0.1)) * 1.0 + (gbps >= 1 ? 0.5 : 0);
-  return Math.max(1, Math.min(6, Number(w.toFixed(2))));
-}
+/** Allowed manual stroke-width range (the inspector slider bounds). */
+export const MIN_LINK_WIDTH = 1;
+export const MAX_LINK_WIDTH = 8;
 
 /** Minimal health context for stroke derivation (subset of HealthReport). */
 export interface StrokeHealth {
@@ -101,7 +82,8 @@ export const EXPORT_DEFAULT_STROKE = '#94a3b8';
  *
  * Color precedence: manual `link.color` wins; else conflict→red, critical bridge→amber,
  * else default grey. Dash is INDEPENDENT: inferred (scan-derived) → dashed; else honor
- * `link.style`. Width: manual `link.width` wins; else bandwidth-derived.
+ * `link.style`. Width: manual `link.width` (inspector slider) or the default — bandwidth
+ * no longer drives thickness (it stays a data/label field).
  */
 export function deriveLinkStroke(
   link: Link,
@@ -120,7 +102,7 @@ export function deriveLinkStroke(
   else color = null; // surface default (theme grey in-app, EXPORT_DEFAULT_STROKE in export)
 
   const dashed = link.inferred === true || link.style === 'dashed';
-  const width = link.width ?? bandwidthToWidth(link.bandwidth);
+  const width = link.width ?? DEFAULT_LINK_WIDTH;
   return { color, dashed, width };
 }
 

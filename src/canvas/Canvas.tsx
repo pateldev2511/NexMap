@@ -4,7 +4,6 @@ import { NexIcon } from '@/ui/icons/NexIcon';
 import { useProjectStore, type AlignEdge, type ProjectStore } from '@/store/projectStore';
 import { CanvasSearch } from './CanvasSearch';
 import { MiniMap } from './MiniMap';
-import { BandwidthLegend } from './BandwidthLegend';
 import { getConnectMode } from '@/lib/prefs';
 import { DeviceNode } from './DeviceNode';
 import { IsoDeviceNode } from './IsoDeviceNode';
@@ -178,6 +177,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     null,
   );
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
+  const [editingDeviceId, setEditingDeviceId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [lassoPts, setLassoPts] = useState<{ x: number; y: number }[] | null>(null);
   const [linkCursor, setLinkCursor] = useState<{ x: number; y: number } | null>(null);
@@ -883,6 +883,20 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     [store, localPoint, toFlat, readOnly],
   );
 
+  const commitDeviceName = useCallback(
+    (id: string, name: string) => {
+      const d = store().getDevice(id);
+      const trimmed = name.trim();
+      if (d && trimmed && trimmed !== d.name) {
+        store().updateDevice(id, { name: d.name }, { name: trimmed });
+        store().endEdit();
+        store().runValidation();
+      }
+      setEditingDeviceId(null);
+    },
+    [store],
+  );
+
   const commitText = useCallback(
     (id: string, text: string) => {
       const o = store().getObject(id);
@@ -1042,8 +1056,6 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   // hover connect-ports yield to avoid overlapping click targets (eng-review lock).
   const anyLinkSelected = [...selection].some((id) => !!store().getLink(id));
 
-  // Show the bandwidth→thickness key only when a link actually carries a bandwidth.
-  const showBandwidthLegend = links.some((l) => !!l.bandwidth);
 
   const svgClass = `${styles.svg} ${
     gesture.current.kind === 'pan'
@@ -1356,6 +1368,10 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
                 validTarget={linkTarget === dev.id || pendingSource === dev.id}
                 hasIssue={errorIds.has(dev.id)}
                 onPointerDown={onDevicePointerDown}
+                onLabelDoubleClick={(e, id) => {
+                  e.stopPropagation();
+                  if (!readOnly) setEditingDeviceId(id);
+                }}
               />
             ))}
 
@@ -1444,6 +1460,10 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
                   validTarget={linkTarget === dev.id || pendingSource === dev.id}
                   hasIssue={errorIds.has(dev.id)}
                   onPointerDown={onDevicePointerDown}
+                  onLabelDoubleClick={(e, id) => {
+                    e.stopPropagation();
+                    if (!readOnly) setEditingDeviceId(id);
+                  }}
                 />
               ))}
             {texts.map((o) =>
@@ -1564,8 +1584,6 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         </button>
       </div>
 
-      {showBandwidthLegend && <BandwidthLegend />}
-
       <MiniMap
         viewRect={
           projection === 'flat' && size.w > 0
@@ -1628,6 +1646,35 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
                 } else if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   commitText(editingTextId, e.currentTarget.value);
+                }
+              }}
+            />
+          );
+        })()}
+
+      {editingDeviceId &&
+        (() => {
+          const d = store().getDevice(editingDeviceId);
+          if (!d) return null;
+          const fp =
+            projection === 'iso'
+              ? isoProjectPx(d.x + d.width / 2, d.y, GRID_SIZE, ISO_TILE)
+              : { x: d.x + d.width / 2, y: d.y };
+          const p = canvasToScreen(viewport, fp.x, fp.y);
+          return (
+            <input
+              autoFocus
+              className={styles.textEditor}
+              defaultValue={d.name}
+              style={{ left: p.x - 70, top: p.y - 24, width: 140, textAlign: 'center' }}
+              onFocus={(e) => e.currentTarget.select()}
+              onBlur={(e) => commitDeviceName(editingDeviceId, e.target.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Escape') setEditingDeviceId(null);
+                else if (e.key === 'Enter') {
+                  e.preventDefault();
+                  commitDeviceName(editingDeviceId, e.currentTarget.value);
                 }
               }}
             />

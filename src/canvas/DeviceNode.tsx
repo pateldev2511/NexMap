@@ -15,6 +15,8 @@ interface DeviceNodeProps {
   /** Carries an error/critical validation issue → badge. */
   hasIssue?: boolean;
   onPointerDown: (e: React.PointerEvent, id: string) => void;
+  /** Double-click the on-top name label → edit it inline. */
+  onLabelDoubleClick?: (e: React.MouseEvent, id: string) => void;
 }
 
 /**
@@ -29,6 +31,7 @@ function DeviceNodeImpl({
   validTarget,
   hasIssue,
   onPointerDown,
+  onLabelDoubleClick,
 }: DeviceNodeProps) {
   const visual = deviceVisual(device.type);
   const showLabel = scale >= LOD_LABEL_HIDE;
@@ -69,7 +72,12 @@ function DeviceNodeImpl({
         </text>
       )}
       {showLabel && (
-        <text className={styles.label} x={cx} y={height + 4}>
+        <text
+          className={styles.labelTop}
+          x={cx}
+          y={-6}
+          onDoubleClick={(e) => onLabelDoubleClick?.(e, device.id)}
+        >
           {device.name}
         </text>
       )}

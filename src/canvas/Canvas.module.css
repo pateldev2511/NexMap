@@ -145,6 +145,20 @@
   pointer-events: none;
 }
 
+/* Component name label rendered ABOVE the icon (FossFLOW-style), double-click to edit. */
+.node .labelTop {
+  fill: var(--chrome-fg);
+  font-size: 11px;
+  font-weight: 600;
+  text-anchor: middle;
+  dominant-baseline: auto;
+  font-family: var(--font-ui);
+  paint-order: stroke;
+  stroke: var(--canvas-bg);
+  stroke-width: 3;
+  cursor: text;
+}
+
 .issueBadge circle {
   fill: var(--sev-error);
   stroke: #fff;

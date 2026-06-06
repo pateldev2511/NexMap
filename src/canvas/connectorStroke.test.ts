@@ -1,40 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import {
-  bandwidthToWidth,
-  deriveLinkStroke,
-  DEFAULT_LINK_WIDTH,
-  type StrokeHealth,
-} from './connector';
+import { deriveLinkStroke, DEFAULT_LINK_WIDTH, type StrokeHealth } from './connector';
 import type { Link } from '@/model/types';
 
 function link(partial: Partial<Link> = {}): Link {
   return { id: 'l1', kind: 'link', sourceId: 'a', targetId: 'b', layerId: 'L', ...partial };
 }
 const noHealth: StrokeHealth = { criticalLinkPairs: [], conflictLinkIds: [] };
-
-describe('bandwidthToWidth', () => {
-  it('scales by Gbps', () => {
-    expect(bandwidthToWidth('1G')).toBeCloseTo(2.0, 1); // 1.5 + 0 + 0.5
-    expect(bandwidthToWidth('10G')).toBeGreaterThan(bandwidthToWidth('1G'));
-    expect(bandwidthToWidth('100G')).toBeGreaterThan(bandwidthToWidth('10G'));
-    expect(bandwidthToWidth('400G')).toBeGreaterThanOrEqual(bandwidthToWidth('100G'));
-  });
-  it('handles M and T units and is case/space-insensitive', () => {
-    expect(bandwidthToWidth('100M')).toBeLessThan(bandwidthToWidth('1G'));
-    expect(bandwidthToWidth(' 10g ')).toBe(bandwidthToWidth('10G'));
-    expect(bandwidthToWidth('1T')).toBeLessThanOrEqual(6);
-  });
-  it('clamps to [1, 6]', () => {
-    expect(bandwidthToWidth('999999G')).toBeLessThanOrEqual(6);
-    expect(bandwidthToWidth('0.001G')).toBeGreaterThanOrEqual(1);
-  });
-  it('returns the default for empty/garbage, never throws', () => {
-    expect(bandwidthToWidth(undefined)).toBe(DEFAULT_LINK_WIDTH);
-    expect(bandwidthToWidth('')).toBe(DEFAULT_LINK_WIDTH);
-    expect(bandwidthToWidth('fast')).toBe(DEFAULT_LINK_WIDTH);
-    expect(() => bandwidthToWidth('!@#')).not.toThrow();
-  });
-});
 
 describe('deriveLinkStroke — precedence', () => {
   it('manual color wins over health', () => {
@@ -61,9 +32,11 @@ describe('deriveLinkStroke — precedence', () => {
     expect(deriveLinkStroke(link({ style: 'dashed' }), noHealth, true).dashed).toBe(true);
     expect(deriveLinkStroke(link({ style: 'solid' }), noHealth, true).dashed).toBe(false);
   });
-  it('width: manual override wins, else bandwidth-derived', () => {
-    expect(deriveLinkStroke(link({ width: 9 }), noHealth, true).width).toBe(9);
-    expect(deriveLinkStroke(link({ bandwidth: '100G' }), noHealth, true).width).toBeGreaterThan(DEFAULT_LINK_WIDTH);
+  it('width: manual link.width drives thickness, else the default (bandwidth no longer matters)', () => {
+    expect(deriveLinkStroke(link({ width: 6 }), noHealth, true).width).toBe(6);
+    expect(deriveLinkStroke(link(), noHealth, true).width).toBe(DEFAULT_LINK_WIDTH);
+    // bandwidth set but no manual width → still the default (thickness is slider-driven now)
+    expect(deriveLinkStroke(link({ bandwidth: '100G' }), noHealth, true).width).toBe(DEFAULT_LINK_WIDTH);
   });
   it('tolerates null health', () => {
     expect(() => deriveLinkStroke(link(), null, true)).not.toThrow();

@@ -4,6 +4,9 @@ import { NexIcon } from '@/ui/icons/NexIcon';
 import { isValidIp, isValidCidr } from '@/lib/ipcidr';
 import { nextFreeHost } from '@/lib/ipam';
 import { defaultDeviceName } from '@/model/schema';
+import { VENDORS, MODELS, ROLES } from '@/lib/deviceCatalog';
+import { MIN_LINK_WIDTH, MAX_LINK_WIDTH, DEFAULT_LINK_WIDTH } from '@/canvas/connector';
+import { RichTextEditor } from './RichTextEditor';
 import styles from './Inspector.module.css';
 
 /**
@@ -116,24 +119,45 @@ function DeviceInspector({ device }: { device: Device }) {
         </Field>
         <Field label="Vendor">
           <input
+            list="nexmap-vendors"
             value={device.vendor ?? ''}
+            placeholder="Pick or type a vendor"
             onChange={(e) => set('vendor', e.target.value)}
             onBlur={endEdit}
           />
+          <datalist id="nexmap-vendors">
+            {VENDORS.map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
         </Field>
         <Field label="Model">
           <input
+            list="nexmap-models"
             value={device.model ?? ''}
+            placeholder="Pick or type a model"
             onChange={(e) => set('model', e.target.value)}
             onBlur={endEdit}
           />
+          <datalist id="nexmap-models">
+            {MODELS.map((m) => (
+              <option key={m} value={m} />
+            ))}
+          </datalist>
         </Field>
         <Field label="Role">
           <input
+            list="nexmap-roles"
             value={device.role ?? ''}
+            placeholder="Pick or type a role"
             onChange={(e) => set('role', e.target.value)}
             onBlur={endEdit}
           />
+          <datalist id="nexmap-roles">
+            {ROLES.map((r) => (
+              <option key={r} value={r} />
+            ))}
+          </datalist>
         </Field>
       </div>
 
@@ -176,6 +200,13 @@ function DeviceInspector({ device }: { device: Device }) {
             value={device.location ?? ''}
             onChange={(e) => set('location', e.target.value)}
             onBlur={endEdit}
+          />
+        </Field>
+        <Field label="Description">
+          <RichTextEditor
+            value={device.descriptionHtml ?? ''}
+            onChange={(html) => set('descriptionHtml', html)}
+            onCommit={endEdit}
           />
         </Field>
         <Field label="Notes">
@@ -454,18 +485,19 @@ function LinkInspector({ link }: { link: Link }) {
         <Field label="Width">
           <div className={styles.ipRow}>
             <input
-              type="number"
-              min={1}
-              max={8}
+              type="range"
+              min={MIN_LINK_WIDTH}
+              max={MAX_LINK_WIDTH}
               step={0.5}
-              value={link.width ?? ''}
-              placeholder="auto (by bandwidth)"
-              onChange={(e) =>
-                set('width', e.target.value ? Number(e.target.value) : undefined)
-              }
-              onBlur={endEdit}
-              aria-label="Link width"
+              value={link.width ?? DEFAULT_LINK_WIDTH}
+              onChange={(e) => set('width', Number(e.target.value))}
+              onPointerUp={endEdit}
+              aria-label="Link thickness"
+              style={{ flex: '1 1 auto' }}
             />
+            <span style={{ minWidth: 34, textAlign: 'right', fontSize: 11, color: 'var(--chrome-fg-muted)' }}>
+              {(link.width ?? DEFAULT_LINK_WIDTH).toFixed(1)}px
+            </span>
           </div>
         </Field>
         {(link.waypoints?.length ?? 0) > 0 && (

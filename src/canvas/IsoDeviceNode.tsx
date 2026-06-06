@@ -15,6 +15,7 @@ interface IsoDeviceNodeProps {
   validTarget?: boolean;
   hasIssue?: boolean;
   onPointerDown: (e: React.PointerEvent, id: string) => void;
+  onLabelDoubleClick?: (e: React.MouseEvent, id: string) => void;
 }
 
 /**
@@ -31,6 +32,7 @@ function IsoDeviceNodeImpl({
   validTarget,
   hasIssue,
   onPointerDown,
+  onLabelDoubleClick,
 }: IsoDeviceNodeProps) {
   const visual = deviceVisual(device.type);
   const showLabel = scale >= LOD_LABEL_HIDE;
@@ -49,7 +51,8 @@ function IsoDeviceNodeImpl({
   const accent = visual.accent;
   const iconSize = Math.max(24, Math.min(width * 0.55, height * 0.76));
   const iconCy = c.y - 2;
-  const labelY = Math.max(br.y + 8, iconCy + iconSize * 0.72);
+  // Name label rendered ABOVE the icon (FossFLOW-style), double-click to edit.
+  const labelY = iconCy - iconSize * 0.7;
 
   return (
     <g
@@ -89,7 +92,13 @@ function IsoDeviceNodeImpl({
         </text>
       )}
       {showLabel && (
-        <text className={styles.isoLabel} x={c.x} y={labelY}>
+        <text
+          className={styles.isoLabel}
+          x={c.x}
+          y={labelY}
+          style={{ cursor: 'text' }}
+          onDoubleClick={(e) => onLabelDoubleClick?.(e, device.id)}
+        >
           {device.name}
         </text>
       )}

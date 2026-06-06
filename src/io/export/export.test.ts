@@ -16,12 +16,12 @@ describe('buildSvg — connectors + annotation cards', () => {
     expect(svg).toContain('stroke-width="4"');
   });
 
-  it('derives width from bandwidth when no override', () => {
+  it('uses the manual link.width for stroke-width', () => {
     const a = createDevice('router', 0, 0, L);
     const b = createDevice('switch', 200, 0, L);
-    const link = createLink(a.id, b.id, L, { bandwidth: '100G' });
+    const link = createLink(a.id, b.id, L, { width: 5 });
     const svg = buildSvg([a, b], [link], { background: '#fff', includeLabels: true });
-    expect(svg).not.toContain('stroke-width="1.5"'); // thicker than default
+    expect(svg).toContain('stroke-width="5"');
   });
 
   it('tints a critical (bridge) link amber when a health report is passed', () => {
@@ -34,21 +34,6 @@ describe('buildSvg — connectors + annotation cards', () => {
     expect(tinted).toContain('#d97706'); // amber
     const plain = buildSvg([a, b], [link], { background: '#fff', includeLabels: true, health: null });
     expect(plain).not.toContain('#d97706');
-  });
-
-  it('includes a bandwidth legend only when a link carries bandwidth', () => {
-    const a = createDevice('router', 0, 0, L);
-    const b = createDevice('switch', 200, 0, L);
-    const withBw = buildSvg([a, b], [createLink(a.id, b.id, L, { bandwidth: '10G' })], {
-      background: '#fff',
-      includeLabels: true,
-    });
-    expect(withBw).toContain('BANDWIDTH');
-    const noBw = buildSvg([a, b], [createLink(a.id, b.id, L)], {
-      background: '#fff',
-      includeLabels: true,
-    });
-    expect(noBw).not.toContain('BANDWIDTH');
   });
 
   it('renders a stacked annotation card and escapes heading/subheading', () => {
