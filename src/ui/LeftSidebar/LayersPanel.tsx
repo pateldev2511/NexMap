@@ -1,4 +1,5 @@
 import { useProjectStore } from '@/store/projectStore';
+import { NexIcon } from '@/ui/icons/NexIcon';
 import styles from './LayersPanel.module.css';
 
 /**
@@ -24,7 +25,7 @@ export function LayersPanel() {
           title="Add layer"
           aria-label="Add layer"
         >
-          +
+          <NexIcon name="plus" />
         </button>
       </div>
       <div className={styles.list}>
@@ -45,7 +46,7 @@ export function LayersPanel() {
                 title={visible ? 'Hide layer' : 'Show layer'}
                 aria-label={visible ? 'Hide layer' : 'Show layer'}
               >
-                {visible ? '👁' : '🚫'}
+                <NexIcon name={visible ? 'eye' : 'eye-off'} />
               </button>
               <button
                 className={`${styles.iconBtn} ${l.locked ? '' : styles.off}`}
@@ -56,7 +57,7 @@ export function LayersPanel() {
                 title={l.locked ? 'Unlock layer' : 'Lock layer'}
                 aria-label={l.locked ? 'Unlock layer' : 'Lock layer'}
               >
-                {l.locked ? '🔒' : '🔓'}
+                <NexIcon name={l.locked ? 'lock' : 'unlock'} />
               </button>
               <input
                 className={styles.name}
@@ -75,7 +76,7 @@ export function LayersPanel() {
                 title="Move up (front)"
                 aria-label="Move layer up"
               >
-                ↑
+                <NexIcon name="arrow-up" />
               </button>
               <button
                 className={styles.iconBtn}
@@ -87,7 +88,7 @@ export function LayersPanel() {
                 title="Move down (back)"
                 aria-label="Move layer down"
               >
-                ↓
+                <NexIcon name="arrow-down" />
               </button>
               {layers.length > 1 && (
                 <button
@@ -102,7 +103,7 @@ export function LayersPanel() {
                   title="Delete layer"
                   aria-label="Delete layer"
                 >
-                  ✕
+                  <NexIcon name="close" />
                 </button>
               )}
             </div>

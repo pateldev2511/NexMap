@@ -32,10 +32,24 @@
 }
 
 .close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
   background: transparent;
   border: none;
   color: var(--chrome-fg-muted);
-  font-size: 18px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.close svg {
+  width: 16px;
+  height: 16px;
+}
+
+.close:hover {
+  color: var(--chrome-fg);
 }
 
 .body {
@@ -50,11 +64,19 @@
 }
 
 .kindBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 1px solid var(--chrome-border);
   background: transparent;
   color: var(--chrome-fg);
   border-radius: 7px;
   padding: 6px 12px;
+}
+
+.kindBtn svg {
+  width: 15px;
+  height: 15px;
 }
 
 .kindBtn.active {
@@ -141,6 +163,18 @@
   border-radius: 6px;
   padding: 8px 10px;
   margin-bottom: 10px;
+}
+
+.messageLine {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.messageLine svg {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
 }
 
 .error {

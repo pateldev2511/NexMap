@@ -17,11 +17,20 @@
 }
 
 .add {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
   background: transparent;
   border: none;
   color: var(--chrome-fg-muted);
-  font-size: 15px;
+  padding: 0;
   cursor: pointer;
+}
+
+.add svg {
+  width: 15px;
+  height: 15px;
 }
 
 .add:hover {
@@ -48,13 +57,21 @@
 }
 
 .iconBtn {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
   background: transparent;
   border: none;
   color: var(--chrome-fg-muted);
   cursor: pointer;
-  font-size: 12px;
-  padding: 2px 3px;
+  padding: 0;
   line-height: 1;
+}
+
+.iconBtn svg {
+  width: 14px;
+  height: 14px;
 }
 
 .iconBtn:hover {

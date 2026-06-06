@@ -49,12 +49,20 @@
 }
 
 .collapseBtn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 24px;
   margin-left: auto;
   background: transparent;
   border: none;
   color: var(--chrome-fg-muted);
-  font-size: 14px;
-  padding: 2px 8px;
+  padding: 0;
+}
+
+.collapseBtn svg {
+  width: 15px;
+  height: 15px;
 }
 
 .body {
@@ -125,11 +133,20 @@
 }
 
 .rowDelete {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
   background: transparent;
   border: none;
   color: var(--chrome-fg-muted);
   cursor: pointer;
-  font-size: 13px;
+  padding: 0;
+}
+
+.rowDelete svg {
+  width: 14px;
+  height: 14px;
 }
 
 .rowDelete:hover {
@@ -137,6 +154,9 @@
 }
 
 .addRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   margin: 8px 10px;
   background: transparent;
   border: 1px dashed var(--chrome-border);
@@ -144,6 +164,11 @@
   border-radius: 6px;
   padding: 5px 10px;
   font-size: 11px;
+}
+
+.addRow svg {
+  width: 14px;
+  height: 14px;
 }
 
 .addRow:hover {
@@ -188,8 +213,17 @@
 }
 
 .cleanState {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   color: var(--sev-info);
   padding: 20px;
   text-align: center;
   font-size: 12px;
+}
+
+.cleanState svg {
+  width: 15px;
+  height: 15px;
 }

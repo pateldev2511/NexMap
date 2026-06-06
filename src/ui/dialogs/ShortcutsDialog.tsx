@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { getConnectMode, setConnectMode, type ConnectMode } from '@/lib/prefs';
+import { NexIcon } from '@/ui/icons/NexIcon';
 import styles from './ImportDialog.module.css';
 
 const GROUPS: { title: string; items: [string, string][] }[] = [
@@ -51,7 +52,7 @@ export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
         <div className={styles.head}>
           <h2>Keyboard shortcuts &amp; settings</h2>
           <button className={styles.close} onClick={onClose} aria-label="Close">
-            ✕
+            <NexIcon name="close" />
           </button>
         </div>
         <div className={styles.body}>

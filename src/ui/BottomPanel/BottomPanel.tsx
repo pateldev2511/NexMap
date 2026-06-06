@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useProjectStore } from '@/store/projectStore';
+import { NexIcon } from '@/ui/icons/NexIcon';
 import { defaultDeviceName } from '@/model/schema';
 import { severityRank } from '@/model/validate';
 import type { Device, Link, Rack, Subnet, ValidationIssue, Vlan } from '@/model/types';
@@ -66,7 +67,7 @@ export function BottomPanel() {
           onClick={() => setOpen((o) => !o)}
           aria-label={open ? 'Collapse panel' : 'Expand panel'}
         >
-          {open ? '▾' : '▴'}
+          <NexIcon name={open ? 'chevron-down' : 'chevron-up'} />
         </button>
       </div>
       {open && (
@@ -250,7 +251,7 @@ function SubnetTable({ subnets, vlans }: { subnets: Subnet[]; vlans: Vlan[] }) {
                   onClick={() => del(sn.id)}
                   aria-label="Delete subnet"
                 >
-                  ✕
+                  <NexIcon name="close" />
                 </button>
               </td>
             </tr>
@@ -258,7 +259,8 @@ function SubnetTable({ subnets, vlans }: { subnets: Subnet[]; vlans: Vlan[] }) {
         </tbody>
       </table>
       <button className={styles.addRow} onClick={() => add('10.0.0.0/24')}>
-        + Add subnet
+        <NexIcon name="plus" />
+        <span>Add subnet</span>
       </button>
       {vlans.length > 0 && subnets.length === 0 && (
         <span style={{ fontSize: 11, color: 'var(--chrome-fg-muted)', marginLeft: 8 }}>
@@ -313,7 +315,7 @@ function VlanTable({ vlans }: { vlans: Vlan[] }) {
                   onClick={() => del(v.id)}
                   aria-label="Delete VLAN"
                 >
-                  ✕
+                  <NexIcon name="close" />
                 </button>
               </td>
             </tr>
@@ -321,7 +323,8 @@ function VlanTable({ vlans }: { vlans: Vlan[] }) {
         </tbody>
       </table>
       <button className={styles.addRow} onClick={() => add(nextId, `VLAN ${nextId}`)}>
-        + Add VLAN
+        <NexIcon name="plus" />
+        <span>Add VLAN</span>
       </button>
     </div>
   );
@@ -391,7 +394,7 @@ function RackTable({ racks, devices }: { racks: Rack[]; devices: Device[] }) {
                     onClick={() => del(r.id)}
                     aria-label="Delete rack"
                   >
-                    ✕
+                    <NexIcon name="close" />
                   </button>
                 </td>
               </tr>
@@ -400,7 +403,8 @@ function RackTable({ racks, devices }: { racks: Rack[]; devices: Device[] }) {
         </tbody>
       </table>
       <button className={styles.addRow} onClick={() => add(`Rack ${racks.length + 1}`)}>
-        + Add rack
+        <NexIcon name="plus" />
+        <span>Add rack</span>
       </button>
     </div>
   );
@@ -411,7 +415,8 @@ function ValidationList({ issues }: { issues: ValidationIssue[] }) {
   if (issues.length === 0) {
     return (
       <div className={styles.cleanState}>
-        ✓ No validation issues — your design looks clean.
+        <NexIcon name="check" />
+        <span>No validation issues - your design looks clean.</span>
       </div>
     );
   }

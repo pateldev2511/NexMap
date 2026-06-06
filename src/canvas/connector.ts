@@ -13,9 +13,37 @@ export function center(d: Device): Pt {
   return { x: d.x + d.width / 2, y: d.y + d.height / 2 };
 }
 
+/**
+ * Point on the visible 3D icon boundary facing `toward`. The model still stores
+ * links between device IDs; this helper trims rendered lines so they meet the
+ * icon object instead of visually running into the device center.
+ */
+export function iconEdgePoint(device: Device, toward: Pt): Pt {
+  const c = center(device);
+  const dx = toward.x - c.x;
+  const dy = toward.y - c.y;
+  if (dx === 0 && dy === 0) return c;
+  const rx = Math.max(10, Math.min(device.width * 0.34, 22));
+  const ry = Math.max(8, Math.min(device.height * 0.38, 18));
+  const t = 1 / Math.sqrt((dx * dx) / (rx * rx) + (dy * dy) / (ry * ry));
+  return { x: c.x + dx * t, y: c.y + dy * t };
+}
+
 /** Full ordered point list of a connector. */
 export function connectorPoints(link: Link, source: Device, target: Device): Pt[] {
   return [center(source), ...(link.waypoints ?? []), center(target)];
+}
+
+/** Render points with endpoints trimmed to the visible 3D icon boundary. */
+export function connectorIconPoints(link: Link, source: Device, target: Device): Pt[] {
+  const waypoints = link.waypoints ?? [];
+  const sourceToward = waypoints[0] ?? center(target);
+  const targetToward = waypoints[waypoints.length - 1] ?? center(source);
+  return [
+    iconEdgePoint(source, sourceToward),
+    ...waypoints,
+    iconEdgePoint(target, targetToward),
+  ];
 }
 
 /** Unordered device-pair key for grouping parallel links. */
@@ -52,6 +80,30 @@ export function parallelPoints(
   return [a, mid, b];
 }
 
+/** Parallel-link render points with endpoints attached to icon boundaries. */
+export function parallelIconPoints(
+  link: Link,
+  source: Device,
+  target: Device,
+  indexInGroup: number,
+  groupSize: number,
+  spacing = 18,
+): Pt[] {
+  if ((link.waypoints?.length ?? 0) > 0 || groupSize <= 1) {
+    return connectorIconPoints(link, source, target);
+  }
+  const a = center(source);
+  const b = center(target);
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const px = -dy / len;
+  const py = dx / len;
+  const offset = (indexInGroup - (groupSize - 1) / 2) * spacing;
+  const mid = { x: (a.x + b.x) / 2 + px * offset, y: (a.y + b.y) / 2 + py * offset };
+  return [iconEdgePoint(source, mid), mid, iconEdgePoint(target, mid)];
+}
+
 /**
  * Convert a 2-point straight run into an orthogonal Z-elbow (horizontal-first
  * via the mid-x). Applied only to the source→target run when routing is
@@ -61,6 +113,19 @@ export function orthogonalPoints(a: Pt, b: Pt): Pt[] {
   if (a.x === b.x || a.y === b.y) return [a, b]; // already straight
   const midX = (a.x + b.x) / 2;
   return [a, { x: midX, y: a.y }, { x: midX, y: b.y }, b];
+}
+
+/** Orthogonal render points trimmed to icon boundaries. */
+export function orthogonalIconPoints(source: Device, target: Device): Pt[] {
+  const centerRun = orthogonalPoints(center(source), center(target));
+  if (centerRun.length === 2) {
+    return [iconEdgePoint(source, center(target)), iconEdgePoint(target, center(source))];
+  }
+  return [
+    iconEdgePoint(source, centerRun[1]!),
+    ...centerRun.slice(1, -1),
+    iconEdgePoint(target, centerRun[centerRun.length - 2]!),
+  ];
 }
 
 /** Coerce a possibly-non-string field to a trimmed string (tolerant of numbers

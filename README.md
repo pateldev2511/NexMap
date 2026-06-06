@@ -1,110 +1,157 @@
 # NexMap
 
-**The network diagram that validates itself.** A local-first, no-login browser app
-for designing, documenting, validating, importing, and exporting network
-infrastructure diagrams. Open it, draw your topology, and get instant feedback —
-"duplicate IP", "invalid CIDR", "missing link endpoint" — while you work.
+**NexMap is a local-first network infrastructure designer that validates your
+diagram while you draw it.**
 
-No accounts. No cloud. No upload. Your project data stays on your machine.
+It runs in the browser, has no login, and keeps project data on the user's
+machine through IndexedDB and `.nexmap` files. The long-term goal is an open
+source alternative to heavyweight network diagramming tools: fast enough for
+daily design work, structured enough for real infrastructure documentation, and
+pleasant enough to present.
 
-## Quick start
+> **Project status:** work in progress. NexMap is feature-rich, but it is not a
+> stable release yet. Expect UI polish gaps, changing file/schema details, missing
+> contributor docs, and rough edges around advanced workflows.
 
-```bash
-npm install
-npm run dev        # http://localhost:5173
-npm run build      # production build
-npm test           # unit + property tests (Vitest)
-npm run lint       # ESLint
-```
+![NexMap editor preview](docs/assets/nexmap-screenshot.svg)
 
-## What it does
+## Demo
 
-**Canvas & editing.** Drag devices from the library, connect them, pan/zoom,
-box-select, lasso-select, multi-drag, snap-to-grid, level-of-detail at scale, copy/
-cut/paste, grouping, z-order, lock, keyboard nudge, context menus, text notes and
-zone/shape annotations, image/SVG background underlays. Floating tool palette
-(Select / Lasso / Pan / Connect / Text / Zone). Undo/redo throughout.
+The editor supports flat and isometric views over the same underlying model. The
+visual below is a generated documentation asset showing the current workflow:
+edit, switch projection, preview imports, validate, and export.
 
-**Connectors.** Editable connectors with waypoints + reroute handles, arrowheads,
-solid/dashed styles, orthogonal elbow routing, parallel-link fan-out, multi-labels
-(name / bandwidth / VLAN / native VLAN / LACP / circuit ID + endpoint interfaces),
-click-to-connect or drag-to-connect.
+![NexMap demo animation](docs/assets/nexmap-demo.gif)
 
-**Live validation (the wedge).** Duplicate IPs, invalid CIDR/IP, missing endpoints,
-duplicate names, overlapping subnets, VLAN range/duplicate, IP-outside-subnet,
-missing gateway, rack RU collision/overflow, trunk/access mismatch, orphaned
-devices — flagged on the canvas + the Validation panel as you edit; click to jump.
+## Current State
 
-**Network semantics.** First-class VLANs, subnets, racks; device rack-placement;
-IP Plan / VLANs / Racks / Inventory / Links panels.
+NexMap already has the core of a usable local network designer:
 
-**Views & layers.** Layer management (visibility/lock/reorder/active), multi-view
-saved perspectives, rack elevation view, presentation/read-only mode, page
-boundaries for print.
+- **Canvas editing:** drag/drop device library, pan/zoom, marquee select, lasso,
+  smart snap/alignment guides, grouping, lock/unlock, z-order, copy/cut/paste,
+  keyboard nudge, context menus, resize handles for canvas objects, and undo/redo.
+- **Flat + isometric rendering:** toggle between 2D and isometric view without
+  changing the canonical flat model. Isometric mode includes projected grid,
+  upright device tiles, upright labels, connectors, hit testing, editing, and
+  export support.
+- **Network model:** typed devices, links, text notes, shapes/zones, image/SVG
+  underlays, VLANs, subnets, racks, layers, saved views, and `.nexmap` documents.
+- **Validation:** duplicate IP/name, invalid IP/CIDR, missing link endpoints,
+  overlapping subnets, VLAN range/duplicates, IP outside subnet, missing gateway,
+  trunk/access mismatch, orphaned devices, and rack RU collisions/overflow.
+- **Import:** CSV devices/links/IP plans/VLANs, GraphML, uncompressed draw.io XML,
+  topology JSON, NetBox-style JSON/CSV flows, Nmap XML, image underlays, and
+  sanitized SVG underlays. Imports preview before commit and undo as one action.
+- **Export:** PNG, JPG, SVG, PDF, inventory CSV, links CSV, and ZIP packages with
+  `.nexmap`, renders, CSVs, and validation reports. Export can honor the current
+  isometric projection.
+- **Local persistence:** IndexedDB autosave, recovery dialog, Web Locks
+  single-writer protection, File System Access save/open when supported, download
+  fallback elsewhere, offline/PWA shell, and settings for theme/connect behavior.
+- **Polish already underway:** auto-layout, canvas search, alignment/distribution,
+  rack elevation view, presentation/read-only mode, responsive shell, keyboard
+  shortcuts, light/dark themes, and an error boundary around the canvas.
 
-**Local persistence.** Debounced IndexedDB autosave + crash recovery; multi-tab
-single-writer via Web Locks; `.nexmap` save/open via File System Access with
-download fallback; newer schema is refused rather than silently re-saved.
+## What Is Not Ready Yet
 
-**Import.** CSV (devices/links/IP-plan/VLANs), GraphML, uncompressed draw.io XML,
-topology JSON, NetBox CSV/JSON, Nmap XML (OS-inferred types), image/SVG underlays
-— all previewed before commit and transactional (Cancel changes nothing; Undo
-reverts the committed import).
+These are the main reasons the project should still be treated as WIP:
 
-**Export.** PNG / JPG / SVG / PDF + CSV, plus a ZIP package (`.nexmap` + images +
-PDF + CSVs + validation report). Live preview, crop-to-selection, DPI slider,
-transparency. Built from the model; SVG/CSV sanitized.
-
-**Offline & hardening.** Installable PWA with an offline service worker; settings
-(theme, connect behavior, reduced motion); storage diagnostics + clear-data;
-browser-capability warnings; keyboard shortcuts (press `?`); light/dark themes.
-
-## Isometric view
-
-Toggle the canvas between **flat (2D)** and **isometric (2.5D)** from the toolbar
-(`◈`). Iso renders your network as 3-D blocks on a diamond grid with upright,
-readable labels and a coherent pictographic icon set — presentation-grade output —
-while the model stays flat and editable underneath (drag, connect, select, and
-align all work in iso). Exports (PNG/JPG/SVG/PDF) honor the active projection, and
-each saved view remembers whether it's flat or iso.
-
-## Direction
-
-NexMap's moat is **validate-as-you-draw**, and it leads FossFLOW on validation,
-import/export breadth, layers, racks, and data safety — now matched by an
-isometric aesthetic of its own. Editor feel follows draw.io conventions
-(right-drag to pan, click-to-isolate, drag threshold). See `TODOS.md` (Phases 8–9,
-both complete) for the roadmap and remaining stretch ideas.
-
-## Where your data lives
-
-- **IndexedDB** — autosaved drafts and recovery snapshots.
-- **localStorage** — small preferences (theme).
-- **`.nexmap` files** — wherever you save them on disk.
-
-Clearing browser data deletes local autosaves — export a `.nexmap` file to keep a
-project safe. Private/incognito windows may lose local data on close.
+- No stable release process or published package yet.
+- Contributor guide, issue templates, security policy, and project governance are
+  still missing.
+- File format/schema may still evolve before a stable `1.0`.
+- First-class interfaces/ports are not modeled yet; endpoint interface labels are
+  still free text.
+- Advanced routing is still basic; obstacle avoidance and cable tracing are
+  future work.
+- Browser/E2E coverage is still lighter than the unit coverage.
+- Accessibility, mobile/tablet ergonomics, and large-diagram performance still
+  need more real-user testing.
 
 ## Architecture
 
+![NexMap architecture](docs/assets/nexmap-architecture.svg)
+
+```mermaid
+flowchart LR
+  UI["React UI\ncanvas, panels, dialogs"] --> Store["Zustand store\nsingle writer"]
+  Store --> History["Command history\nundo / redo"]
+  Store --> Model["Typed model\n.nexmap document"]
+  Model --> Validate["Validation engine"]
+  Model --> Render["SVG renderer\nflat or isometric"]
+  Import["Import parsers\nCSV / GraphML / draw.io / JSON / Nmap / media"] --> Store
+  Model --> Export["Export pipeline\nPNG / JPG / SVG / PDF / CSV / ZIP"]
+  Store --> Persistence["Local persistence\nIndexedDB / File System Access / Web Locks"]
+  Persistence --> Files["Local .nexmap files"]
 ```
+
+```mermaid
+flowchart TD
+  Draw["Draw or import topology"] --> Edit["Edit devices, links, layers, views"]
+  Edit --> Validate["Validate while editing"]
+  Validate --> Fix["Fix warnings/errors"]
+  Fix --> Present["Present in flat or isometric view"]
+  Present --> Export["Export image, PDF, CSV, ZIP, or .nexmap"]
+```
+
+## Quick Start
+
+```bash
+npm install
+npm run dev        # Vite dev server, usually http://localhost:5173
+npm test           # Vitest unit tests
+npm run typecheck  # TypeScript project check
+npm run lint       # ESLint
+npm run build      # production build
+```
+
+If port `5173` is busy, Vite will choose another local port.
+
+## Project Layout
+
+```text
 src/
-  model/      pure types, schema, migrations, validation (no React)
-  store/      Zustand store + inverse-based command/undo stack (single writer)
-  lib/        ip/cidr math, spatial index (hit-test/cull/snap), CSV parser
-  canvas/     SVG renderer (reads a SceneSource interface, not the store directly)
-  persistence/ IndexedDB autosave, FS Access save/open, Web Locks, recovery
-  io/         import (CSV/GraphML/draw.io/JSON/NetBox/Nmap/media) and export
-              (SVG/PNG/JPG/PDF/CSV/ZIP)
-  ui/         top bar, library, inspector, bottom panel, dialogs, first-run
+  model/        pure types, schema, migrations, validation
+  store/        Zustand store, command history, single-writer model updates
+  canvas/       SVG canvas, flat/iso projection, gestures, toolbar, rendering
+  io/           import and export pipelines
+  persistence/ IndexedDB drafts, File System Access, Web Locks, recovery
+  lib/          CSV, IP/CIDR, spatial index, layout, geometry helpers
+  ui/           shell, sidebars, inspector, bottom panels, dialogs
+docs/assets/    README visuals and generated documentation media
 ```
 
-Key invariants: every object has a stable ID; links reference IDs (never names);
-the model is the single writer through commands; exports come from the model;
-unknown future fields survive load→save. See `PLAN.md` for the full design and
-`TODOS.md` for the shipped phase map plus remaining low-priority work.
+## Data And Privacy
 
-## Stack
+NexMap is designed to be local-first:
 
-React 18 · TypeScript · Vite · Zustand · Vitest. PDF via jsPDF (lazy-loaded).
-Built dependency-light on purpose — it should keep working offline, forever.
+- No account system.
+- No required backend.
+- No hidden cloud sync.
+- Autosaves live in browser storage.
+- Durable project files are saved as `.nexmap` JSON on the user's machine.
+
+Clearing browser data can remove autosaved drafts. Export or save a `.nexmap`
+file when the project matters.
+
+## Roadmap
+
+The detailed roadmap lives in [`TODOS.md`](TODOS.md). Near-term open-source work
+should focus on:
+
+- hardening browser/E2E tests for import/export/canvas workflows;
+- contributor docs, issue templates, and release notes;
+- first-class interfaces/ports;
+- better connector routing and cable tracing;
+- rack rear view and physical cabling workflows;
+- guided discovery import;
+- performance and accessibility passes on large diagrams.
+
+## Tech Stack
+
+React 18, TypeScript, Vite, Zustand, Vitest, SVG rendering, IndexedDB, File System
+Access API where available, Web Locks, fflate, DOMPurify, and jsPDF.
+
+## License
+
+See [`LICENSE`](LICENSE).

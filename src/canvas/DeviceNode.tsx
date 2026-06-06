@@ -1,7 +1,8 @@
 import { memo } from 'react';
 import type { Device } from '@/model/types';
+import { NexIcon } from '@/ui/icons/NexIcon';
 import { deviceVisual, LOD_GLYPH_ONLY, LOD_LABEL_HIDE } from './deviceVisuals';
-import { DeviceGlyph } from './DeviceGlyph';
+import { IsoIcon } from './IsoIcon';
 import styles from './Canvas.module.css';
 
 interface DeviceNodeProps {
@@ -15,8 +16,6 @@ interface DeviceNodeProps {
   hasIssue?: boolean;
   onPointerDown: (e: React.PointerEvent, id: string) => void;
 }
-
-const LOCK_GLYPH = '\u{1F512}';
 
 /**
  * One device. Memoized so panning (which changes only the parent transform)
@@ -35,6 +34,9 @@ function DeviceNodeImpl({
   const showLabel = scale >= LOD_LABEL_HIDE;
   const detailed = scale >= LOD_GLYPH_ONLY;
   const { width, height } = device;
+  const cx = width / 2;
+  const cy = height / 2 - 1;
+  const iconSize = Math.max(22, Math.min(width * 0.72, height * 0.82));
 
   return (
     <g
@@ -45,40 +47,50 @@ function DeviceNodeImpl({
       onPointerDown={(e) => onPointerDown(e, device.id)}
       data-id={device.id}
     >
-      <rect className={styles.body} width={width} height={height} rx={6} />
+      <rect className={styles.hitArea} width={width} height={height} rx={8} />
+      <ellipse
+        className={styles.deviceIconHalo}
+        cx={cx}
+        cy={cy + iconSize * 0.14}
+        rx={iconSize * 0.68}
+        ry={iconSize * 0.52}
+      />
       {detailed ? (
-        <>
-          <rect
-            className={styles.accent}
-            x={4}
-            y={4}
-            width={18}
-            height={height - 8}
-            rx={3}
-            fill={visual.accent}
-          />
-          <DeviceGlyph type={device.type} cx={13} cy={height / 2} size={15} />
-        </>
+        <IsoIcon
+          type={device.type}
+          accent={visual.accent}
+          cx={cx}
+          cy={cy}
+          size={iconSize}
+        />
       ) : (
-        <text className={styles.glyph} x={width / 2} y={height / 2}>
+        <text className={styles.glyph} x={cx} y={cy} fill={visual.accent}>
           {visual.glyph}
         </text>
       )}
       {showLabel && (
-        <text className={styles.label} x={width / 2} y={height + 4}>
+        <text className={styles.label} x={cx} y={height + 4}>
           {device.name}
         </text>
       )}
       {device.locked && detailed && (
-        <text className={styles.lockGlyph} x={width - 2} y={height - 2}>
-          {LOCK_GLYPH}
-        </text>
+        <NexIcon
+          name="lock"
+          className={styles.lockMark}
+          size={12}
+          x={cx + iconSize * 0.33}
+          y={cy + iconSize * 0.22}
+        />
       )}
-      {/* Validation badge — color + glyph (non-color indicator, DA-DES-6.2). */}
+      {/* Validation badge: color plus vector mark for non-color recognition. */}
       {hasIssue && detailed && (
-        <g className={styles.issueBadge} transform={`translate(${width - 6} -6)`}>
+        <g
+          className={styles.issueBadge}
+          transform={`translate(${cx + iconSize * 0.46} ${cy - iconSize * 0.45})`}
+        >
           <circle r={7} />
-          <text y={0.5}>!</text>
+          <path d="M0 -3.8v4.3" />
+          <circle className={styles.issueDot} cx={0} cy={3.4} r={1} />
         </g>
       )}
     </g>

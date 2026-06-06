@@ -7,7 +7,8 @@
  * echoed back — and we escape all text, so the output carries no scripts or
  * external references by construction. Object IDs are preserved for round-trip.
  */
-import { deviceVisual, deviceIconGroup } from '@/canvas/deviceVisuals';
+import { connectorIconPoints, orthogonalIconPoints, pathD } from '@/canvas/connector';
+import { deviceIsoGroup } from '@/canvas/deviceIso';
 import { isoProjectPx, DEFAULT_TILE } from '@/canvas/iso';
 import type { CanvasObject, Device, Link } from '@/model/types';
 
@@ -124,26 +125,22 @@ export function buildSvg(
     const a = byId.get(l.sourceId);
     const t = byId.get(l.targetId);
     if (!a || !t) continue;
-    const x1 = a.x + a.width / 2,
-      y1 = a.y + a.height / 2;
-    const x2 = t.x + t.width / 2,
-      y2 = t.y + t.height / 2;
+    const pts =
+      l.routing === 'orthogonal' && (l.waypoints?.length ?? 0) === 0
+        ? orthogonalIconPoints(a, t)
+        : connectorIconPoints(l, a, t);
     parts.push(
-      `<line data-id="${escapeXml(l.id)}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#94a3b8" stroke-width="1.5"/>`,
+      `<path data-id="${escapeXml(l.id)}" d="${pathD(pts)}" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`,
     );
   }
 
   // Devices.
   for (const d of devices) {
-    const v = deviceVisual(d.type);
     parts.push(`<g data-id="${escapeXml(d.id)}" transform="translate(${d.x} ${d.y})">`);
+    const iconSize = Math.max(22, Math.min(d.width * 0.72, d.height * 0.82));
     parts.push(
-      `<rect width="${d.width}" height="${d.height}" rx="6" fill="${escapeXml(d.fill ?? '#ffffff')}" stroke="#cbd5e1" stroke-width="1.5"/>`,
+      deviceIsoGroup(d.type, d.width / 2, d.height / 2 - 1, iconSize),
     );
-    parts.push(
-      `<rect x="4" y="4" width="18" height="${d.height - 8}" rx="3" fill="${escapeXml(v.accent)}"/>`,
-    );
-    parts.push(deviceIconGroup(d.type, 13, d.height / 2, 15));
     if (opts.includeLabels) {
       parts.push(
         `<text x="${d.width / 2}" y="${d.height + 12}" fill="#1c2733" font-size="11" text-anchor="middle">${escapeXml(d.name)}</text>`,
@@ -242,8 +239,12 @@ function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): 
     const s = byId.get(l.sourceId);
     const t = byId.get(l.targetId);
     if (!s || !t) continue;
+    const pts =
+      l.routing === 'orthogonal' && (l.waypoints?.length ?? 0) === 0
+        ? orthogonalIconPoints(s, t)
+        : connectorIconPoints(l, s, t);
     parts.push(
-      `<line x1="${s.x + s.width / 2}" y1="${s.y + s.height / 2}" x2="${t.x + t.width / 2}" y2="${t.y + t.height / 2}" stroke="#94a3b8" stroke-width="1.5" vector-effect="non-scaling-stroke"/>`,
+      `<path d="${pathD(pts)}" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`,
     );
   }
   parts.push(`</g>`);
@@ -260,29 +261,15 @@ function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): 
   // --- Device tiles (upright, painter's order by x+y). ---
   const sorted = [...devices].sort((d1, d2) => d1.x + d1.y - (d2.x + d2.y));
   for (const d of sorted) {
-    const v = deviceVisual(d.type);
-    const tl = P(d.x, d.y);
-    const tr = P(d.x + d.width, d.y);
     const br = P(d.x + d.width, d.y + d.height);
-    const bl = P(d.x, d.y + d.height);
     const c = P(d.x + d.width / 2, d.y + d.height / 2);
-    const accent = escapeXml(v.accent);
-    const top = `${tl.x},${tl.y} ${tr.x},${tr.y} ${br.x},${br.y} ${bl.x},${bl.y}`;
-    const skirtL = `${bl.x},${bl.y} ${br.x},${br.y} ${br.x},${br.y + ISO_DEPTH} ${bl.x},${bl.y + ISO_DEPTH}`;
-    const skirtR = `${tr.x},${tr.y} ${br.x},${br.y} ${br.x},${br.y + ISO_DEPTH} ${tr.x},${tr.y + ISO_DEPTH}`;
-    parts.push(`<polygon points="${skirtL}" fill="${accent}" fill-opacity="0.55"/>`);
-    parts.push(`<polygon points="${skirtR}" fill="${accent}" fill-opacity="0.72"/>`);
-    parts.push(
-      `<polygon points="${top}" fill="${escapeXml(d.fill ?? '#ffffff')}" stroke="#cbd5e1" stroke-width="1.5" stroke-linejoin="round"/>`,
-    );
-    const bs = 20;
-    parts.push(
-      `<rect x="${c.x - bs / 2}" y="${c.y - bs / 2 - 2}" width="${bs}" height="${bs}" rx="4" fill="${accent}"/>`,
-    );
-    parts.push(deviceIconGroup(d.type, c.x, c.y - 2, bs - 3));
+    const iconSize = Math.max(24, Math.min(d.width * 0.55, d.height * 0.76));
+    const iconCy = c.y - 2;
+    parts.push(deviceIsoGroup(d.type, c.x, iconCy, iconSize));
     if (opts.includeLabels) {
+      const labelY = Math.max(br.y + 8, iconCy + iconSize * 0.72);
       parts.push(
-        `<text x="${c.x}" y="${br.y + ISO_DEPTH + 12}" fill="#1c2733" font-size="11" text-anchor="middle">${escapeXml(d.name)}</text>`,
+        `<text x="${c.x}" y="${labelY + 8}" fill="#1c2733" font-size="11" text-anchor="middle">${escapeXml(d.name)}</text>`,
       );
     }
   }

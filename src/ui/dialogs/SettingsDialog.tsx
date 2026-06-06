@@ -7,6 +7,7 @@ import {
   type ConnectMode,
 } from '@/lib/prefs';
 import { canWriteBack, canOpenPicker } from '@/persistence/fsaccess';
+import { NexIcon } from '@/ui/icons/NexIcon';
 import styles from './ImportDialog.module.css';
 
 /**
@@ -65,9 +66,11 @@ export function SettingsDialog({
 
   const Status = ({ ok, label }: { ok: boolean; label: string }) => (
     <div style={{ display: 'flex', gap: 8, fontSize: 12, padding: '2px 0' }}>
-      <span style={{ color: ok ? 'var(--sev-info)' : 'var(--sev-warn)' }}>
-        {ok ? '✓' : '⚠'}
-      </span>
+      <NexIcon
+        name={ok ? 'check' : 'warning'}
+        size={14}
+        style={{ color: ok ? 'var(--sev-info)' : 'var(--sev-warn)' }}
+      />
       <span>{label}</span>
     </div>
   );
@@ -82,7 +85,7 @@ export function SettingsDialog({
         <div className={styles.head}>
           <h2>Settings</h2>
           <button className={styles.close} onClick={onClose} aria-label="Close">
-            ✕
+            <NexIcon name="close" />
           </button>
         </div>
         <div className={styles.body}>
@@ -93,7 +96,8 @@ export function SettingsDialog({
               onClick={onToggleTheme}
               style={{ width: 'fit-content' }}
             >
-              {theme === 'light' ? '☀ Light' : '☽ Dark'}
+              <NexIcon name="theme" />
+              <span>{theme === 'light' ? 'Light' : 'Dark'}</span>
             </button>
 
             <label>Connect behavior</label>

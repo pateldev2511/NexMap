@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   connectorPoints,
+  connectorIconPoints,
   parallelPoints,
+  parallelIconPoints,
   orthogonalPoints,
+  orthogonalIconPoints,
   connectorLabelLines,
   pairKey,
   pathD,
@@ -49,6 +52,14 @@ describe('connector geometry', () => {
     expect(connectorLabel(createLink(a.id, b.id, L, { bandwidth: '10G' }))).toBe('10G');
     expect(connectorLabel(createLink(a.id, b.id, L))).toBe('');
   });
+
+  it('trims rendered connectors to the visible icon edge', () => {
+    const pts = connectorIconPoints(createLink(a.id, b.id, L), a, b);
+    expect(pts[0]!.x).toBeGreaterThan(28);
+    expect(pts[0]!.x).toBeLessThan(55);
+    expect(pts[1]!.x).toBeLessThan(228);
+    expect(pts[1]!.x).toBeGreaterThan(200);
+  });
 });
 
 describe('parallel links', () => {
@@ -74,6 +85,15 @@ describe('parallel links', () => {
   it('pairKey is order-independent', () => {
     expect(pairKey(createLink(a.id, b.id, L))).toBe(pairKey(createLink(b.id, a.id, L)));
   });
+
+  it('parallel render points keep fan-out while ending on icon edges', () => {
+    const l = createLink(a.id, b.id, L);
+    const pts = parallelIconPoints(l, a, b, 0, 3);
+    expect(pts).toHaveLength(3);
+    expect(pts[0]!.x).toBeGreaterThan(28);
+    expect(pts[2]!.x).toBeLessThan(228);
+    expect(pts[1]!.y).not.toBeCloseTo(20);
+  });
 });
 
 describe('orthogonal routing + multi-label', () => {
@@ -89,6 +109,14 @@ describe('orthogonal routing + multi-label', () => {
 
   it('orthogonalPoints leaves already-straight runs alone', () => {
     expect(orthogonalPoints({ x: 0, y: 0 }, { x: 100, y: 0 })).toHaveLength(2);
+  });
+
+  it('orthogonal render points attach to icon edges', () => {
+    const c = createDevice('firewall', 200, 120, L, { name: 'C' });
+    const pts = orthogonalIconPoints(a, c);
+    expect(pts).toHaveLength(4);
+    expect(pts[0]!.x).toBeGreaterThan(28);
+    expect(pts[pts.length - 1]!.x).toBeLessThan(228);
   });
 
   it('connectorLabelLines stacks configured labels', () => {

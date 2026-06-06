@@ -13,6 +13,7 @@ import { RackView } from './ui/RackView/RackView';
 import { SettingsDialog } from './ui/dialogs/SettingsDialog';
 import { applyReduceMotion, getReduceMotion } from './lib/prefs';
 import { ReadOnlyBanner, ErrorToast } from './ui/dialogs/ReadOnlyBanner';
+import { NexIcon } from './ui/icons/NexIcon';
 import { Canvas } from './canvas/Canvas';
 import { PerfHarness } from './perf/PerfHarness';
 import { useProjectStore } from './store/projectStore';
@@ -137,35 +138,40 @@ export function App() {
         onClick={handleNew}
         title="New project (Ctrl+N)"
       >
-        New
+        <NexIcon name="new-file" />
+        <span>New</span>
       </button>
       <button
         className={shell.topbarBtn}
         onClick={handleOpen}
         title="Open .nexmap (Ctrl+O)"
       >
-        Open
+        <NexIcon name="open-file" />
+        <span>Open</span>
       </button>
       <button
         className={shell.topbarBtn}
         onClick={() => persistence.save()}
         title="Save (Ctrl+S)"
       >
-        Save
+        <NexIcon name="save" />
+        <span>Save</span>
       </button>
       <button
         className={shell.topbarBtn}
         onClick={() => setImporting(true)}
         title="Import CSV"
       >
-        Import
+        <NexIcon name="import" />
+        <span>Import</span>
       </button>
       <button
         className={shell.topbarBtn}
         onClick={() => setExporting(true)}
         title="Export (Ctrl+E)"
       >
-        Export
+        <NexIcon name="export" />
+        <span>Export</span>
       </button>
       <ViewSwitcher />
       <button
@@ -173,20 +179,23 @@ export function App() {
         onClick={doUndo}
         disabled={!canUndo}
         title="Undo (Ctrl+Z)"
+        aria-label="Undo"
       >
-        ↶
+        <NexIcon name="undo" />
       </button>
       <button
         className={shell.topbarBtn}
         onClick={doRedo}
         disabled={!canRedo}
         title="Redo"
+        aria-label="Redo"
       >
-        ↷
+        <NexIcon name="redo" />
       </button>
       <details className={shell.moreMenu}>
         <summary className={shell.topbarBtn} title="More actions">
-          More
+          <NexIcon name="settings" />
+          <span>More</span>
         </summary>
         <div className={shell.menuPanel}>
           <button
@@ -194,32 +203,39 @@ export function App() {
             onClick={() => setShowPages((p) => !p)}
             aria-pressed={showPages}
           >
-            {showPages ? 'Hide pages' : 'Show pages'}
+            <NexIcon name="pages" />
+            <span>{showPages ? 'Hide pages' : 'Show pages'}</span>
           </button>
           <button
             className={shell.menuItem}
             onClick={() => setRackView((r) => !r)}
             aria-pressed={rackView}
           >
-            {rackView ? 'Canvas view' : 'Rack view'}
+            <NexIcon name="rack" />
+            <span>{rackView ? 'Canvas view' : 'Rack view'}</span>
           </button>
           <button className={shell.menuItem} onClick={() => setPresentation(true)}>
-            Presentation
+            <NexIcon name="presentation" />
+            <span>Presentation</span>
           </button>
           <button
             className={shell.menuItem}
             onClick={() => setView((v) => (v === 'editor' ? 'perf' : 'editor'))}
           >
-            {view === 'editor' ? 'Performance harness' : 'Editor'}
+            <NexIcon name="inspector" />
+            <span>{view === 'editor' ? 'Performance harness' : 'Editor'}</span>
           </button>
           <button className={shell.menuItem} onClick={toggleTheme}>
-            {theme === 'light' ? 'Dark theme' : 'Light theme'}
+            <NexIcon name="theme" />
+            <span>{theme === 'light' ? 'Dark theme' : 'Light theme'}</span>
           </button>
           <button className={shell.menuItem} onClick={() => setShowSettings(true)}>
-            Settings
+            <NexIcon name="settings" />
+            <span>Settings</span>
           </button>
           <button className={shell.menuItem} onClick={() => setShowHelp(true)}>
-            Keyboard shortcuts
+            <NexIcon name="help" />
+            <span>Keyboard shortcuts</span>
           </button>
         </div>
       </details>
@@ -301,7 +317,8 @@ export function App() {
             background: 'var(--chrome-bg)',
           }}
         >
-          ✕ Exit presentation (Esc)
+          <NexIcon name="close" />
+          <span>Exit presentation (Esc)</span>
         </button>
       </div>
     );

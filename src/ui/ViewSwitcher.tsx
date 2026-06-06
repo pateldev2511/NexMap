@@ -1,4 +1,5 @@
 import { useProjectStore } from '@/store/projectStore';
+import { NexIcon } from './icons/NexIcon';
 import shell from './shell/AppShell.module.css';
 
 /**
@@ -33,20 +34,22 @@ export function ViewSwitcher() {
       <button
         className={shell.topbarBtn}
         title="Save current layers + camera as a view"
+        aria-label="Save current view"
         onClick={() => {
           const name = prompt('View name', `View ${views.length + 1}`);
           if (name) s().addView(name);
         }}
       >
-        ＋
+        <NexIcon name="plus" />
       </button>
       {active && (
         <button
           className={shell.topbarBtn}
           title="Delete current view"
+          aria-label="Delete current view"
           onClick={() => s().deleteView(active)}
         >
-          ✕
+          <NexIcon name="close" />
         </button>
       )}
     </div>
