@@ -1,9 +1,43 @@
 import { describe, it, expect } from 'vitest';
 import { buildSvg, escapeXml } from './buildSvg';
 import { csvCell, exportInventoryCsv, exportLinksCsv } from './csvExport';
-import { createDevice, createLink } from '@/model/schema';
+import { createDevice, createLink, createTextObject } from '@/model/schema';
+import type { CanvasObject } from '@/model/types';
 
 const L = 'layer';
+
+describe('buildSvg — connectors + annotation cards', () => {
+  it('applies manual link color and width in the export', () => {
+    const a = createDevice('router', 0, 0, L, { name: 'R1' });
+    const b = createDevice('switch', 200, 0, L, { name: 'SW1' });
+    const link = createLink(a.id, b.id, L, { color: '#ff0000', width: 4 });
+    const svg = buildSvg([a, b], [link], { background: '#fff', includeLabels: true });
+    expect(svg).toContain('stroke="#ff0000"');
+    expect(svg).toContain('stroke-width="4"');
+  });
+
+  it('derives width from bandwidth when no override', () => {
+    const a = createDevice('router', 0, 0, L);
+    const b = createDevice('switch', 200, 0, L);
+    const link = createLink(a.id, b.id, L, { bandwidth: '100G' });
+    const svg = buildSvg([a, b], [link], { background: '#fff', includeLabels: true });
+    expect(svg).not.toContain('stroke-width="1.5"'); // thicker than default
+  });
+
+  it('renders a stacked annotation card and escapes heading/subheading', () => {
+    const card = createTextObject(10, 10, L, {
+      heading: '<b>Core</b>',
+      subheading: 'site A',
+      text: 'rack 1',
+    }) as CanvasObject;
+    const svg = buildSvg([], [], { background: '#fff', includeLabels: true, objects: [card] });
+    expect(svg).toContain('&lt;b&gt;Core&lt;/b&gt;'); // escaped, not raw markup
+    expect(svg).not.toContain('<b>Core</b>');
+    expect(svg).toContain('site A');
+    expect(svg).toContain('rack 1');
+    expect(svg).toContain('font-weight="700"'); // heading styled bold
+  });
+});
 
 describe('buildSvg', () => {
   it('emits a sized SVG with devices and links', () => {

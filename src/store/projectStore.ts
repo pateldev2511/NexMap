@@ -298,6 +298,12 @@ export interface ProjectStore {
   applyView(id: string): void;
   updateDevice(id: string, before: Partial<Device>, after: Partial<Device>): void;
   updateLink(id: string, before: Partial<Link>, after: Partial<Link>): void;
+  /**
+   * Re-wire one endpoint of a link to a different device (drag-to-relink). Clears that
+   * endpoint's interface ref. Rejects a self-loop (new device == the other endpoint).
+   * One undoable transaction; re-validates. Returns true if the link was changed.
+   */
+  relinkEndpoint(linkId: string, endpoint: 'source' | 'target', newDeviceId: string): boolean;
   /** First-class interfaces (schema v2). */
   addInterface(deviceId: string, name?: string): string | null;
   updateInterface(deviceId: string, ifaceId: string, partial: Partial<Interface>): void;
@@ -408,7 +414,15 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     rev: 0,
     selection: new Set<string>(),
     issues: [],
-    health: { issues: [], score: 100, spofIds: [], componentCount: 0, scanDerived: false },
+    health: {
+      issues: [],
+      score: 100,
+      spofIds: [],
+      componentCount: 0,
+      scanDerived: false,
+      criticalLinkPairs: [],
+      conflictLinkIds: [],
+    },
     canUndo: false,
     canRedo: false,
     dirty: false,
@@ -1214,6 +1228,26 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     updateLink(id, before, after) {
       commit(new UpdateLinkCommand(id, before, after));
+    },
+
+    relinkEndpoint(linkId, endpoint, newDeviceId) {
+      const link = model.links.get(linkId);
+      if (!link || !model.devices.has(newDeviceId)) return false;
+      const otherId = endpoint === 'source' ? link.targetId : link.sourceId;
+      if (newDeviceId === otherId) return false; // self-loop — reject
+      const idKey = endpoint === 'source' ? 'sourceId' : 'targetId';
+      const ifaceKey = endpoint === 'source' ? 'sourceIfaceId' : 'targetIfaceId';
+      const labelKey = endpoint === 'source' ? 'sourceInterface' : 'targetInterface';
+      if (link[idKey] === newDeviceId) return false; // no change
+      commit(
+        new UpdateLinkCommand(
+          linkId,
+          { [idKey]: link[idKey], [ifaceKey]: link[ifaceKey], [labelKey]: link[labelKey] },
+          { [idKey]: newDeviceId, [ifaceKey]: undefined, [labelKey]: undefined },
+        ),
+      );
+      get().runValidation();
+      return true;
     },
 
     addInterface(deviceId, name) {

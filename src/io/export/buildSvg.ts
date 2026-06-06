@@ -7,10 +7,16 @@
  * echoed back — and we escape all text, so the output carries no scripts or
  * external references by construction. Object IDs are preserved for round-trip.
  */
-import { connectorIconPoints, orthogonalIconPoints, pathD } from '@/canvas/connector';
+import {
+  connectorIconPoints,
+  orthogonalIconPoints,
+  pathD,
+  deriveLinkStroke,
+  EXPORT_DEFAULT_STROKE,
+} from '@/canvas/connector';
 import { deviceIsoGroup } from '@/canvas/deviceIso';
 import { isoProjectPx, DEFAULT_TILE } from '@/canvas/iso';
-import type { CanvasObject, Device, Link } from '@/model/types';
+import type { CanvasObject, Device, Link, TextObject } from '@/model/types';
 
 export interface ExportSvgOptions {
   background: string | null; // null = transparent
@@ -61,6 +67,37 @@ const ESC: Record<string, string> = {
 };
 export function escapeXml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ESC[c]!);
+}
+
+/**
+ * Stroke attributes for a link in static export. Honors manual color/width + bandwidth
+ * thickness + inferred/style dash (health auto-tint is live-only, omitted from exports).
+ */
+function linkStrokeAttrs(l: Link): string {
+  const s = deriveLinkStroke(l, null, true);
+  const dash = s.dashed ? ' stroke-dasharray="6 4"' : '';
+  return `stroke="${escapeXml(s.color ?? EXPORT_DEFAULT_STROKE)}" stroke-width="${s.width}"${dash}`;
+}
+
+/**
+ * Annotation card → stacked, escaped SVG text (heading / subheading / body). Absent
+ * fields collapse. Used by both flat and iso export so they match the canvas.
+ */
+function textObjectSvg(o: TextObject, baseX: number, baseY: number): string {
+  const fs = o.fontSize ?? 14;
+  const fill = escapeXml(o.color ?? '#1c2733');
+  const rows: { t: string; size: number; weight: number; fill: string }[] = [];
+  if (o.heading) rows.push({ t: o.heading, size: Math.round(fs * 1.3), weight: 700, fill });
+  if (o.subheading)
+    rows.push({ t: o.subheading, size: Math.round(fs * 0.95), weight: 500, fill: '#64748b' });
+  if (o.text) rows.push({ t: o.text, size: fs, weight: 400, fill });
+  let y = baseY;
+  return rows
+    .map((r) => {
+      y += r.size * 1.25;
+      return `<text x="${baseX}" y="${y}" font-size="${r.size}" font-weight="${r.weight}" fill="${r.fill}">${escapeXml(r.t)}</text>`;
+    })
+    .join('');
 }
 
 export function buildSvg(
@@ -130,7 +167,7 @@ export function buildSvg(
         ? orthogonalIconPoints(a, t)
         : connectorIconPoints(l, a, t);
     parts.push(
-      `<path data-id="${escapeXml(l.id)}" d="${pathD(pts)}" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`,
+      `<path data-id="${escapeXml(l.id)}" d="${pathD(pts)}" fill="none" ${linkStrokeAttrs(l)} stroke-linecap="round" stroke-linejoin="round"/>`,
     );
   }
 
@@ -152,9 +189,7 @@ export function buildSvg(
   // Text notes render on top.
   for (const o of objects) {
     if (o.kind !== 'text') continue;
-    parts.push(
-      `<text data-id="${escapeXml(o.id)}" x="${o.x + 4}" y="${o.y + (o.fontSize ?? 14)}" font-size="${o.fontSize ?? 14}" fill="${escapeXml(o.color ?? '#1c2733')}">${escapeXml(o.text)}</text>`,
-    );
+    parts.push(`<g data-id="${escapeXml(o.id)}">${textObjectSvg(o, o.x + 4, o.y)}</g>`);
   }
 
   parts.push(`</svg>`);
@@ -244,7 +279,7 @@ function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): 
         ? orthogonalIconPoints(s, t)
         : connectorIconPoints(l, s, t);
     parts.push(
-      `<path d="${pathD(pts)}" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`,
+      `<path d="${pathD(pts)}" fill="none" ${linkStrokeAttrs(l)} stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`,
     );
   }
   parts.push(`</g>`);
@@ -278,9 +313,7 @@ function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): 
   for (const o of objects) {
     if (o.kind !== 'text') continue;
     const p = P(o.x, o.y);
-    parts.push(
-      `<text x="${p.x}" y="${p.y + (o.fontSize ?? 14)}" font-size="${o.fontSize ?? 14}" fill="${escapeXml(o.color ?? '#1c2733')}">${escapeXml(o.text)}</text>`,
-    );
+    parts.push(textObjectSvg(o, p.x, p.y));
   }
 
   parts.push(`</svg>`);

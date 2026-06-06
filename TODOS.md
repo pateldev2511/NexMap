@@ -395,3 +395,36 @@ Local-first amputates the SaaS growth loop, so the shareable file is the growth 
       own strict CSP (`default-src 'none'`) so it stays 100% local. Opens in any browser,
       no NexMap install. Wired into runExport + the Export dialog ("HTML (viewer)").
       Live-verified (exported a working doc). Tests: html.test.ts (6).
+
+## Connectors & annotations — semantic-first (CEO review 2026-06-05)
+
+Mode: SELECTIVE EXPANSION, Approach B. Full plan + spec-review clarifications:
+`~/.gstack/projects/NexMap/ceo-plans/2026-06-05-connectors-and-annotations.md`.
+Premise: reframe the requested draw.io-style knobs to carry network meaning (moat),
+not commodity styling. Run /plan-design-review before implementing (UI scope).
+
+### Accepted scope (this plan) — P2
+- [ ] **Per-member connector identity:** optional `Link.color` + reuse `Link.name`;
+      parallel links stay independent records (no LAG object v1). Additive, no migration.
+- [ ] **Width = bandwidth-derived + override:** pure `bandwidthToWidth(bandwidth)`
+      (M/G scaled, unparseable→default, never throws) + optional `Link.width` override.
+- [ ] **Drag-to-relink (M / CC ~35m):** drag a selected link's endpoint onto another
+      device → rewire via connect()-style + clear that endpoint's iface ref + one
+      undoable txn + runValidation on DROP. Recompute parallel offsets for old+new pair.
+      Drop-in-air / self-loop → snap back. Health/color are derived, re-computed on undo.
+- [ ] **Annotation card:** extend `TextObject` with optional `heading`/`subheading`
+      (existing `text` = body); width+height resizable (reuse resize handles); absent
+      fields collapse+reflow; NO WYSIWYG. heading/subheading MUST escapeXml in export.
+- [ ] **Link-health coloring (cherry-pick, S):** auto-tint from the Stage-2 health
+      report (SPOF→amber, conflict→red; scan-inferred→dashed). Manual `Link.color` wins
+      for color; dash is independent. Reuses the existing health pass.
+
+### Deferred
+- [ ] **Bandwidth/width legend overlay** (S) — on-canvas thickness→speed key, included in
+      exports. Useful, not load-bearing; fast-follow after width ships.
+- [ ] **Explicit LAG/bundle object** (M) — only if independent per-link members prove
+      insufficient for modeling port-channels. Revisit; not needed for v1.
+
+### Rejected
+- Floating/dangling connector endpoints (breaks the validates-itself invariant).
+- Full inline WYSIWYG rich-text editor (off-moat; fights the SVG canvas).

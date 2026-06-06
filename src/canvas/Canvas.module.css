@@ -271,6 +271,18 @@
   cursor: grab;
 }
 
+/* Drag-to-relink endpoint handles (filled diamond, inset on the selected link). */
+.relinkHandle {
+  fill: var(--accent);
+  stroke: #fff;
+  stroke-width: 1.5;
+  cursor: grab;
+}
+
+.relinkHandle:hover {
+  fill: color-mix(in srgb, var(--accent) 80%, #fff);
+}
+
 .addWaypoint {
   fill: var(--canvas-bg);
   stroke: var(--accent);

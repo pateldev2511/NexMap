@@ -140,6 +140,10 @@ export interface Link {
   arrow?: 'none' | 'end' | 'both';
   /** Line style. */
   style?: 'solid' | 'dashed';
+  /** Manual stroke color (overrides health-derived tint). Schema v2 additive. */
+  color?: string;
+  /** Manual stroke width in px (overrides bandwidth-derived width). Schema v2 additive. */
+  width?: number;
   /** Routing: straight polyline (default) or orthogonal elbow. */
   routing?: 'straight' | 'orthogonal';
   // Extra connector labels (rendered stacked at the midpoint).
@@ -170,7 +174,11 @@ interface BaseCanvasObject {
 
 export interface TextObject extends BaseCanvasObject {
   kind: 'text';
+  /** Body / description text. */
   text: string;
+  /** Optional annotation-card title + subtitle (schema v2 additive). */
+  heading?: string;
+  subheading?: string;
   fontSize?: number;
   color?: string;
 }

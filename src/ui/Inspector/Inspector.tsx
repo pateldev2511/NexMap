@@ -428,6 +428,46 @@ function LinkInspector({ link }: { link: Link }) {
             <option value="orthogonal">Orthogonal (elbow)</option>
           </select>
         </Field>
+        <Field label="Color">
+          <div className={styles.ipRow}>
+            <input
+              type="color"
+              value={link.color ?? '#94a3b8'}
+              onChange={(e) => set('color', e.target.value)}
+              onBlur={endEdit}
+              aria-label="Link color"
+            />
+            <button
+              type="button"
+              className={styles.suggestBtn}
+              disabled={!link.color}
+              onClick={() => {
+                set('color', undefined);
+                endEdit();
+              }}
+              title="Clear manual color — fall back to health tint / default"
+            >
+              Auto
+            </button>
+          </div>
+        </Field>
+        <Field label="Width">
+          <div className={styles.ipRow}>
+            <input
+              type="number"
+              min={1}
+              max={8}
+              step={0.5}
+              value={link.width ?? ''}
+              placeholder="auto (by bandwidth)"
+              onChange={(e) =>
+                set('width', e.target.value ? Number(e.target.value) : undefined)
+              }
+              onBlur={endEdit}
+              aria-label="Link width"
+            />
+          </div>
+        </Field>
         {(link.waypoints?.length ?? 0) > 0 && (
           <Field label="Waypoints">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -554,7 +594,23 @@ function ObjectInspector({ object }: { object: CanvasObject }) {
       </div>
       {object.kind === 'text' && (
         <>
-          <Field label="Text">
+          <Field label="Heading">
+            <input
+              value={object.heading ?? ''}
+              placeholder="(optional title)"
+              onChange={(e) => set({ heading: e.target.value || undefined })}
+              onBlur={endEdit}
+            />
+          </Field>
+          <Field label="Subheading">
+            <input
+              value={object.subheading ?? ''}
+              placeholder="(optional subtitle)"
+              onChange={(e) => set({ subheading: e.target.value || undefined })}
+              onBlur={endEdit}
+            />
+          </Field>
+          <Field label="Body">
             <textarea
               value={object.text}
               onChange={(e) => set({ text: e.target.value })}
