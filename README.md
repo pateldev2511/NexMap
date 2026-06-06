@@ -16,7 +16,7 @@ pleasant enough to present.
 > stable release yet. Expect UI polish gaps, changing file/schema details, missing
 > contributor docs, and rough edges around advanced workflows.
 
-![NexMap editor preview](docs/assets/nexmap-screenshot.svg)
+[![NexMap — local-first network diagram designer](public/og.png)](https://nexmap.xyz/)
 
 ## Demo
 
