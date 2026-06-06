@@ -13,7 +13,9 @@ import {
   pathD,
   deriveLinkStroke,
   bandwidthToWidth,
+  pairKey,
   EXPORT_DEFAULT_STROKE,
+  type StrokeHealth,
 } from '@/canvas/connector';
 import { deviceIsoGroup } from '@/canvas/deviceIso';
 import { isoProjectPx, DEFAULT_TILE } from '@/canvas/iso';
@@ -27,6 +29,8 @@ export interface ExportSvgOptions {
   objects?: CanvasObject[];
   /** Render the isometric projection instead of the flat scene (Phase 9.6). */
   projection?: 'flat' | 'iso';
+  /** Topology-health context to tint risky links (SPOF/conflict). Null = no tint. */
+  health?: StrokeHealth | null;
 }
 
 interface Bounds {
@@ -74,8 +78,18 @@ export function escapeXml(s: string): string {
  * Stroke attributes for a link in static export. Honors manual color/width + bandwidth
  * thickness + inferred/style dash (health auto-tint is live-only, omitted from exports).
  */
-function linkStrokeAttrs(l: Link): string {
-  const s = deriveLinkStroke(l, null, true);
+function countPairs(links: Link[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const l of links) {
+    if (l.sourceId === l.targetId) continue;
+    const k = pairKey(l);
+    m.set(k, (m.get(k) ?? 0) + 1);
+  }
+  return m;
+}
+
+function linkStrokeAttrs(l: Link, health: StrokeHealth | null, sole: boolean): string {
+  const s = deriveLinkStroke(l, health, sole);
   const dash = s.dashed ? ' stroke-dasharray="6 4"' : '';
   return `stroke="${escapeXml(s.color ?? EXPORT_DEFAULT_STROKE)}" stroke-width="${s.width}"${dash}`;
 }
@@ -135,6 +149,8 @@ export function buildSvg(
   const w = Math.max(1, b.maxX - b.minX);
   const h = Math.max(1, b.maxY - b.minY);
   const byId = new Map(devices.map((d) => [d.id, d]));
+  const health = opts.health ?? null;
+  const pairCount = countPairs(links);
 
   const parts: string[] = [];
   parts.push(
@@ -185,7 +201,7 @@ export function buildSvg(
         ? orthogonalIconPoints(a, t)
         : connectorIconPoints(l, a, t);
     parts.push(
-      `<path data-id="${escapeXml(l.id)}" d="${pathD(pts)}" fill="none" ${linkStrokeAttrs(l)} stroke-linecap="round" stroke-linejoin="round"/>`,
+      `<path data-id="${escapeXml(l.id)}" d="${pathD(pts)}" fill="none" ${linkStrokeAttrs(l, health, (pairCount.get(pairKey(l)) ?? 0) === 1)} stroke-linecap="round" stroke-linejoin="round"/>`,
     );
   }
 
@@ -255,6 +271,8 @@ function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): 
   const maxY = Math.max(...pts.map((p) => p.y)) + padding + ISO_DEPTH + 16;
   const w = Math.max(1, maxX - minX);
   const h = Math.max(1, maxY - minY);
+  const health = opts.health ?? null;
+  const pairCount = countPairs(links);
 
   const parts: string[] = [];
   parts.push(
@@ -298,7 +316,7 @@ function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): 
         ? orthogonalIconPoints(s, t)
         : connectorIconPoints(l, s, t);
     parts.push(
-      `<path d="${pathD(pts)}" fill="none" ${linkStrokeAttrs(l)} stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`,
+      `<path d="${pathD(pts)}" fill="none" ${linkStrokeAttrs(l, health, (pairCount.get(pairKey(l)) ?? 0) === 1)} stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`,
     );
   }
   parts.push(`</g>`);

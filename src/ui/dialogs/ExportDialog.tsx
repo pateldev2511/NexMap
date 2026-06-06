@@ -36,6 +36,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const [bgColor, setBgColor] = useState('#ffffff');
   const [includeLabels, setIncludeLabels] = useState(true);
   const [iso, setIso] = useState(() => store().projection === 'iso');
+  const [highlightHealth, setHighlightHealth] = useState(true);
   const [quality, setQuality] = useState(0.92);
   const [fileName, setFileName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -85,8 +86,9 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         includeLabels,
         objects: scene.objects as CanvasObject[],
         projection: iso ? 'iso' : 'flat',
+        health: highlightHealth ? store().health : null,
       }),
-    [scene, transparent, bgColor, includeLabels, supportsTransparent, iso],
+    [scene, transparent, bgColor, includeLabels, supportsTransparent, iso, highlightHealth, store],
   );
   const previewUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(previewSvg);
 
@@ -104,6 +106,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         orientation: 'landscape',
         fileName,
         projection: iso ? 'iso' : 'flat',
+        health: highlightHealth ? store().health : null,
       };
       const outcome = await runExport(
         {
@@ -274,6 +277,16 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                   Isometric view
                 </label>
               </>
+            )}
+            {!isCsv && (
+              <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                <input
+                  type="checkbox"
+                  checked={highlightHealth}
+                  onChange={(e) => setHighlightHealth(e.target.checked)}
+                />
+                Highlight risks (SPOF / conflicts)
+              </label>
             )}
             <label>Filename</label>
             <input

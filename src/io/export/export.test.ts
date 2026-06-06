@@ -24,6 +24,18 @@ describe('buildSvg — connectors + annotation cards', () => {
     expect(svg).not.toContain('stroke-width="1.5"'); // thicker than default
   });
 
+  it('tints a critical (bridge) link amber when a health report is passed', () => {
+    const a = createDevice('router', 0, 0, L);
+    const b = createDevice('switch', 200, 0, L);
+    const link = createLink(a.id, b.id, L);
+    const pair = [a.id, b.id].sort().join('|');
+    const health = { criticalLinkPairs: [pair], conflictLinkIds: [] };
+    const tinted = buildSvg([a, b], [link], { background: '#fff', includeLabels: true, health });
+    expect(tinted).toContain('#d97706'); // amber
+    const plain = buildSvg([a, b], [link], { background: '#fff', includeLabels: true, health: null });
+    expect(plain).not.toContain('#d97706');
+  });
+
   it('includes a bandwidth legend only when a link carries bandwidth', () => {
     const a = createDevice('router', 0, 0, L);
     const b = createDevice('switch', 200, 0, L);

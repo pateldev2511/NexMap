@@ -43,6 +43,8 @@ export interface ExportOptions {
   fileName: string;
   /** Render the isometric projection in image/vector exports (Phase 9.6). */
   projection?: 'flat' | 'iso';
+  /** Topology-health context to tint risky links in exports (null = no tint). */
+  health?: import('@/canvas/connector').StrokeHealth | null;
 }
 
 function safeName(name: string, ext: string): string {
@@ -102,6 +104,7 @@ export async function runExport(
     includeLabels: opts.includeLabels,
     objects: scene.objects,
     projection: opts.projection,
+    health: opts.health,
   });
 
   if (opts.format === 'svg') {
