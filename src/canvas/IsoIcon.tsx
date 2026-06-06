@@ -21,12 +21,20 @@ export function IsoIcon({ type, cx, cy, size }: IsoIconProps) {
   const s = size / 22;
   return (
     <g className={styles.deviceIso}>
+      {/* Grounded contact shadow — the key depth cue that separates iso from flat. */}
+      <ellipse
+        className={styles.deviceIsoShadowSoft}
+        cx={cx}
+        cy={cy + size * 0.4}
+        rx={size * 0.56}
+        ry={size * 0.2}
+      />
       <ellipse
         className={styles.deviceIsoShadow}
         cx={cx}
-        cy={cy + size * 0.36}
-        rx={size * 0.44}
-        ry={size * 0.15}
+        cy={cy + size * 0.4}
+        rx={size * 0.4}
+        ry={size * 0.14}
       />
       <g
         transform={`translate(${cx} ${cy + size * 0.06}) scale(${s})`}

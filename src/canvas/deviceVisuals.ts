@@ -6,6 +6,7 @@
  * extreme zoom levels where a full icon would collapse into noise.
  */
 import type { DeviceType } from '@/model/types';
+import { deviceFlatArt } from './deviceFlatArt';
 
 export interface DeviceVisual {
   glyph: string;
@@ -278,6 +279,25 @@ export function deviceIcon3DGroup(
       0.9,
     ),
   ].join('');
+}
+
+/**
+ * Flat 2D device icon: a detailed, multi-colored flat illustration that resembles
+ * the real hardware (see {@link deviceFlatArt}), with NO background tile. The art is
+ * authored in a 0..24 box, so we just translate+scale it to (cx,cy,size).
+ *
+ * Used only in flat projection; iso keeps the 3D {@link deviceIcon3DGroup}/deviceIso.
+ */
+export function deviceIconFlatGroup(
+  type: DeviceType,
+  cx: number,
+  cy: number,
+  size: number,
+): string {
+  const s = size / 24;
+  const x = cx - size / 2;
+  const y = cy - size / 2;
+  return `<g data-flat-icon="1" transform="translate(${x} ${y}) scale(${s})">${deviceFlatArt(type)}</g>`;
 }
 
 /** Below this zoom, hide secondary detail; below the second, icons only (LOD). */

@@ -118,15 +118,33 @@ function ObjectNodeImpl({
         height={object.height}
         fill="transparent"
       />
-      <text
-        className={styles.textObj}
-        x={object.x + 4}
-        y={object.y + (object.fontSize ?? 14)}
-        fontSize={object.fontSize ?? 14}
-        fill={object.color ?? 'var(--chrome-fg)'}
-      >
-        {object.text || 'Text'}
-      </text>
+      {(() => {
+        // Annotation card: stacked heading / subheading / body. Absent fields collapse.
+        const fs = object.fontSize ?? 14;
+        const rows: { t: string; size: number; weight: number; muted?: boolean }[] = [];
+        if (object.heading) rows.push({ t: object.heading, size: Math.round(fs * 1.3), weight: 700 });
+        if (object.subheading)
+          rows.push({ t: object.subheading, size: Math.round(fs * 0.95), weight: 500, muted: true });
+        const body = object.text || (rows.length === 0 ? 'Text' : '');
+        if (body) rows.push({ t: body, size: fs, weight: 400 });
+        let y = object.y;
+        return rows.map((r, i) => {
+          y += r.size * 1.25;
+          return (
+            <text
+              key={i}
+              className={styles.textObj}
+              x={object.x + 4}
+              y={y}
+              fontSize={r.size}
+              fontWeight={r.weight}
+              fill={r.muted ? 'var(--chrome-fg-muted)' : (object.color ?? 'var(--chrome-fg)')}
+            >
+              {r.t}
+            </text>
+          );
+        });
+      })()}
     </g>
   );
 }

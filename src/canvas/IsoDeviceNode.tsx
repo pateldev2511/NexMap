@@ -4,6 +4,8 @@ import { NexIcon } from '@/ui/icons/NexIcon';
 import { deviceVisual, LOD_GLYPH_ONLY, LOD_LABEL_HIDE } from './deviceVisuals';
 import { IsoIcon } from './IsoIcon';
 import { isoProjectPx, type IsoTile } from './iso';
+import { NodeInfoCard } from './NodeInfoCard';
+import { clampIconScale, DEFAULT_LABEL_HEIGHT } from './nodeCard';
 import styles from './Canvas.module.css';
 
 interface IsoDeviceNodeProps {
@@ -15,6 +17,7 @@ interface IsoDeviceNodeProps {
   validTarget?: boolean;
   hasIssue?: boolean;
   onPointerDown: (e: React.PointerEvent, id: string) => void;
+  onLabelDoubleClick?: (e: React.MouseEvent, id: string) => void;
 }
 
 /**
@@ -31,6 +34,7 @@ function IsoDeviceNodeImpl({
   validTarget,
   hasIssue,
   onPointerDown,
+  onLabelDoubleClick,
 }: IsoDeviceNodeProps) {
   const visual = deviceVisual(device.type);
   const showLabel = scale >= LOD_LABEL_HIDE;
@@ -47,9 +51,9 @@ function IsoDeviceNodeImpl({
   const top = `${tl.x},${tl.y} ${tr.x},${tr.y} ${br.x},${br.y} ${bl.x},${bl.y}`;
 
   const accent = visual.accent;
-  const iconSize = Math.max(24, Math.min(width * 0.55, height * 0.76));
+  const iconSize =
+    Math.max(24, Math.min(width * 0.55, height * 0.76)) * clampIconScale(device.iconScale);
   const iconCy = c.y - 2;
-  const labelY = Math.max(br.y + 8, iconCy + iconSize * 0.72);
 
   return (
     <g
@@ -89,9 +93,15 @@ function IsoDeviceNodeImpl({
         </text>
       )}
       {showLabel && (
-        <text className={styles.isoLabel} x={c.x} y={labelY}>
-          {device.name}
-        </text>
+        <NodeInfoCard
+          name={device.name}
+          descriptionHtml={device.descriptionHtml}
+          cx={c.x}
+          anchorY={iconCy - iconSize / 2}
+          labelHeight={device.labelHeight ?? DEFAULT_LABEL_HEIGHT}
+          selected={selected}
+          onDoubleClickName={(e) => onLabelDoubleClick?.(e, device.id)}
+        />
       )}
       {device.locked && detailed && (
         <NexIcon

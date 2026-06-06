@@ -1,9 +1,80 @@
 import { describe, it, expect } from 'vitest';
 import { buildSvg, escapeXml } from './buildSvg';
 import { csvCell, exportInventoryCsv, exportLinksCsv } from './csvExport';
-import { createDevice, createLink } from '@/model/schema';
+import { createDevice, createLink, createTextObject } from '@/model/schema';
+import type { CanvasObject } from '@/model/types';
 
 const L = 'layer';
+
+describe('buildSvg — connectors + annotation cards', () => {
+  it('applies manual link color and width in the export', () => {
+    const a = createDevice('router', 0, 0, L, { name: 'R1' });
+    const b = createDevice('switch', 200, 0, L, { name: 'SW1' });
+    const link = createLink(a.id, b.id, L, { color: '#ff0000', width: 4 });
+    const svg = buildSvg([a, b], [link], { background: '#fff', includeLabels: true });
+    expect(svg).toContain('stroke="#ff0000"');
+    expect(svg).toContain('stroke-width="4"');
+  });
+
+  it('uses the manual link.width for stroke-width', () => {
+    const a = createDevice('router', 0, 0, L);
+    const b = createDevice('switch', 200, 0, L);
+    const link = createLink(a.id, b.id, L, { width: 5 });
+    const svg = buildSvg([a, b], [link], { background: '#fff', includeLabels: true });
+    expect(svg).toContain('stroke-width="5"');
+  });
+
+  it('tints a critical (bridge) link amber when a health report is passed', () => {
+    const a = createDevice('router', 0, 0, L);
+    const b = createDevice('switch', 200, 0, L);
+    const link = createLink(a.id, b.id, L);
+    const pair = [a.id, b.id].sort().join('|');
+    const health = { criticalLinkPairs: [pair], conflictLinkIds: [] };
+    const tinted = buildSvg([a, b], [link], { background: '#fff', includeLabels: true, health });
+    expect(tinted).toContain('#d97706'); // amber
+    const plain = buildSvg([a, b], [link], { background: '#fff', includeLabels: true, health: null });
+    expect(plain).not.toContain('#d97706');
+  });
+
+  it('renders a stacked annotation card and escapes heading/subheading', () => {
+    const card = createTextObject(10, 10, L, {
+      heading: '<b>Core</b>',
+      subheading: 'site A',
+      text: 'rack 1',
+    }) as CanvasObject;
+    const svg = buildSvg([], [], { background: '#fff', includeLabels: true, objects: [card] });
+    expect(svg).toContain('&lt;b&gt;Core&lt;/b&gt;'); // escaped, not raw markup
+    expect(svg).not.toContain('<b>Core</b>');
+    expect(svg).toContain('site A');
+    expect(svg).toContain('rack 1');
+    expect(svg).toContain('font-weight="700"'); // heading styled bold
+  });
+});
+
+describe('buildSvg — projection icons', () => {
+  it('flat export uses the flat device-model art, not the 3D iso model', () => {
+    const a = createDevice('router', 0, 0, L, { name: 'R1' });
+    const svg = buildSvg([a], [], { background: '#fff', includeLabels: true });
+    expect(svg).toContain('data-flat-icon');
+  });
+
+  it('flat export scales the icon by device.iconScale', () => {
+    const base = createDevice('router', 0, 0, L);
+    const big = createDevice('router', 0, 0, L, { iconScale: 2 });
+    const svgBase = buildSvg([base], [], { background: '#fff', includeLabels: false });
+    const svgBig = buildSvg([big], [], { background: '#fff', includeLabels: false });
+    // The flat art is wrapped in a scale() transform driven by icon size.
+    const scale = (s: string) =>
+      Number(/data-flat-icon="1" transform="translate\([^)]*\) scale\(([\d.]+)\)"/.exec(s)?.[1]);
+    expect(scale(svgBig)).toBeGreaterThan(scale(svgBase));
+  });
+
+  it('iso export keeps the 3D model (no flat-icon marker)', () => {
+    const a = createDevice('router', 0, 0, L, { name: 'R1' });
+    const svg = buildSvg([a], [], { background: '#fff', includeLabels: true, projection: 'iso' });
+    expect(svg).not.toContain('data-flat-icon');
+  });
+});
 
 describe('buildSvg', () => {
   it('emits a sized SVG with devices and links', () => {

@@ -47,6 +47,29 @@ describe('articulationPoints', () => {
   });
 });
 
+describe('analyzeHealth — critical links (bridges)', () => {
+  it('flags the single link in a chain as a critical pair', () => {
+    const devices = ['A', 'B', 'C'].map(dev);
+    const r = analyzeHealth(devices, [link('A', 'B'), link('B', 'C')]);
+    expect(r.criticalLinkPairs.sort()).toEqual(['A|B', 'B|C']);
+  });
+  it('a redundant ring has no critical links', () => {
+    const devices = ['A', 'B', 'C'].map(dev);
+    const r = analyzeHealth(devices, [link('A', 'B'), link('B', 'C'), link('C', 'A')]);
+    expect(r.criticalLinkPairs).toEqual([]);
+  });
+  it('parallel links between a pair are NOT critical (alternate path exists)', () => {
+    const devices = ['A', 'B'].map(dev);
+    const r = analyzeHealth(devices, [link('A', 'B'), link('A', 'B')]);
+    expect(r.criticalLinkPairs).toEqual([]);
+  });
+  it('exposes conflict link ids', () => {
+    const devices = ['A', 'B'].map(dev);
+    const r = analyzeHealth(devices, [link('A', 'B', { vlan: '10' }), link('A', 'B', { vlan: '20' })]);
+    expect(r.conflictLinkIds.length).toBe(2);
+  });
+});
+
 describe('analyzeHealth — SPOF', () => {
   it('flags the middle device of a chain as a SPOF', () => {
     const devices = ['A', 'B', 'C'].map(dev);

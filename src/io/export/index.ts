@@ -4,6 +4,7 @@
  */
 import type { CanvasObject, Device, Link, Rack, Subnet, Vlan } from '@/model/types';
 import { buildSvg } from './buildSvg';
+import { buildStandaloneHtml } from './html';
 import { rasterize, downloadBlob } from './raster';
 import { buildPdfBlob, type PageSize } from './pdf';
 import { exportInventoryCsv, exportLinksCsv } from './csvExport';
@@ -14,6 +15,7 @@ export type ExportFormat =
   | 'jpg'
   | 'svg'
   | 'pdf'
+  | 'html'
   | 'csv-inventory'
   | 'csv-links'
   | 'zip';
@@ -41,6 +43,8 @@ export interface ExportOptions {
   fileName: string;
   /** Render the isometric projection in image/vector exports (Phase 9.6). */
   projection?: 'flat' | 'iso';
+  /** Topology-health context to tint risky links in exports (null = no tint). */
+  health?: import('@/canvas/connector').StrokeHealth | null;
 }
 
 function safeName(name: string, ext: string): string {
@@ -100,11 +104,23 @@ export async function runExport(
     includeLabels: opts.includeLabels,
     objects: scene.objects,
     projection: opts.projection,
+    health: opts.health,
   });
 
   if (opts.format === 'svg') {
     const fn = safeName(opts.fileName || scene.projectName, 'svg');
     downloadBlob(new Blob([svg], { type: 'image/svg+xml' }), fn);
+    return { fileName: fn };
+  }
+
+  if (opts.format === 'html') {
+    const html = buildStandaloneHtml(svg, {
+      projectName: scene.projectName,
+      deviceCount: devices.length,
+      linkCount: links.length,
+    });
+    const fn = safeName(opts.fileName || scene.projectName, 'html');
+    downloadBlob(new Blob([html], { type: 'text/html' }), fn);
     return { fileName: fn };
   }
 

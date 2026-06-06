@@ -14,6 +14,7 @@ const FORMATS: { key: ExportFormat; label: string }[] = [
   { key: 'png', label: 'PNG' },
   { key: 'jpg', label: 'JPG' },
   { key: 'svg', label: 'SVG' },
+  { key: 'html', label: 'HTML (viewer)' },
   { key: 'pdf', label: 'PDF' },
   { key: 'zip', label: 'ZIP package' },
   { key: 'csv-inventory', label: 'CSV · Inventory' },
@@ -35,6 +36,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const [bgColor, setBgColor] = useState('#ffffff');
   const [includeLabels, setIncludeLabels] = useState(true);
   const [iso, setIso] = useState(() => store().projection === 'iso');
+  const [highlightHealth, setHighlightHealth] = useState(true);
   const [quality, setQuality] = useState(0.92);
   const [fileName, setFileName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -84,8 +86,9 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         includeLabels,
         objects: scene.objects as CanvasObject[],
         projection: iso ? 'iso' : 'flat',
+        health: highlightHealth ? store().health : null,
       }),
-    [scene, transparent, bgColor, includeLabels, supportsTransparent, iso],
+    [scene, transparent, bgColor, includeLabels, supportsTransparent, iso, highlightHealth, store],
   );
   const previewUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(previewSvg);
 
@@ -103,6 +106,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         orientation: 'landscape',
         fileName,
         projection: iso ? 'iso' : 'flat',
+        health: highlightHealth ? store().health : null,
       };
       const outcome = await runExport(
         {
@@ -274,6 +278,16 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                 </label>
               </>
             )}
+            {!isCsv && (
+              <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                <input
+                  type="checkbox"
+                  checked={highlightHealth}
+                  onChange={(e) => setHighlightHealth(e.target.checked)}
+                />
+                Highlight risks (SPOF / conflicts)
+              </label>
+            )}
             <label>Filename</label>
             <input
               value={fileName}
@@ -287,7 +301,9 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
               ? `Exports the ${format === 'csv-inventory' ? 'device inventory' : 'link list'} as CSV.`
               : format === 'zip'
                 ? `Bundles .nexmap + PNG + SVG + PDF + CSVs + validation report (${countSummary}).`
-                : `Exports ${scope === 'selection' ? 'the selection' : 'the whole diagram'} (${countSummary}).`}
+                : format === 'html'
+                  ? `A single self-contained .html file with a pan/zoom viewer — opens in any browser, 100% local, no NexMap needed (${countSummary}).`
+                  : `Exports ${scope === 'selection' ? 'the selection' : 'the whole diagram'} (${countSummary}).`}
           </div>
           {msg && (
             <div

@@ -33,6 +33,14 @@ export interface HealthReport {
   componentCount: number;
   /** True if any link is reachability-inferred (results should be read with that caveat). */
   scanDerived: boolean;
+  /**
+   * Sorted `"a|b"` device-pair keys whose single connecting link is a bridge — losing
+   * that link splits the network. Only pairs with exactly ONE link are included
+   * (parallel members provide an alternate path, so they're never critical).
+   */
+  criticalLinkPairs: string[];
+  /** Link ids flagged by the conflicting-parallel-links check. */
+  conflictLinkIds: string[];
 }
 
 /** Build an undirected adjacency map over devices, ignoring self-loops and dangling links. */
@@ -55,10 +63,25 @@ function buildAdjacency(devices: Device[], links: Link[]): Map<string, Set<strin
  * disconnect part of the network. Iterative DFS (stack-safe). Standard low-link algorithm.
  */
 export function articulationPoints(adj: Map<string, Set<string>>): Set<string> {
+  return cutVerticesAndBridges(adj).cut;
+}
+
+/**
+ * Cut vertices AND bridges (cut edges) in one DFS. A bridge is an edge whose removal
+ * disconnects the graph — "a link whose loss splits the network." Bridges are returned
+ * as sorted `"a|b"` device-pair keys. NOTE: computed on the SIMPLE graph (parallel links
+ * collapse in the adjacency Set), so a returned pair is only a *real* critical link when
+ * that device pair has exactly one link — the caller checks group size.
+ */
+export function cutVerticesAndBridges(adj: Map<string, Set<string>>): {
+  cut: Set<string>;
+  bridges: Set<string>;
+} {
   const disc = new Map<string, number>();
   const low = new Map<string, number>();
   const parent = new Map<string, string | null>();
   const cut = new Set<string>();
+  const bridges = new Set<string>();
   let timer = 0;
 
   for (const start of adj.keys()) {
@@ -86,6 +109,10 @@ export function articulationPoints(adj: Map<string, Set<string>>): Set<string> {
           if (parent.get(p) !== null && low.get(frame.node)! >= disc.get(p)!) {
             cut.add(p);
           }
+          // Edge (p, frame.node) is a bridge if the child can't reach p or above.
+          if (low.get(frame.node)! > disc.get(p)!) {
+            bridges.add([p, frame.node].sort().join('|'));
+          }
         }
         continue;
       }
@@ -106,7 +133,7 @@ export function articulationPoints(adj: Map<string, Set<string>>): Set<string> {
     // The DFS root is a cut vertex iff it has more than one DFS child.
     if (rootChildren > 1) cut.add(start);
   }
-  return cut;
+  return { cut, bridges };
 }
 
 /** Count connected components among devices that have at least one link. */
@@ -170,9 +197,19 @@ export function analyzeHealth(devices: Device[], links: Link[]): HealthReport {
   const adj = buildAdjacency(devices, links);
   const idToName = new Map(devices.map((d) => [d.id, d.name]));
 
-  // Single points of failure.
-  const spof = articulationPoints(adj);
+  // Single points of failure + bridges (critical links) in one DFS.
+  const { cut: spof, bridges } = cutVerticesAndBridges(adj);
   const spofIds = [...spof];
+
+  // A bridge pair is a *critical link* only when the pair has exactly one link
+  // (parallel members provide an alternate path). pairKey = sorted "a|b".
+  const pairCount = new Map<string, number>();
+  for (const l of links) {
+    if (l.sourceId === l.targetId) continue;
+    const k = [l.sourceId, l.targetId].sort().join('|');
+    pairCount.set(k, (pairCount.get(k) ?? 0) + 1);
+  }
+  const criticalLinkPairs = [...bridges].filter((k) => (pairCount.get(k) ?? 0) === 1);
   for (const id of spofIds) {
     issues.push({
       id: hid(),
@@ -218,7 +255,19 @@ export function analyzeHealth(devices: Device[], links: Link[]): HealthReport {
   if (componentCount > 1) score -= 10;
   score = Math.max(0, Math.min(100, score));
 
-  return { issues, score, spofIds, componentCount, scanDerived };
+  const conflictLinkIds = issues
+    .filter((i) => i.code === 'conflicting-parallel-links')
+    .flatMap((i) => i.objectIds);
+
+  return {
+    issues,
+    score,
+    spofIds,
+    componentCount,
+    scanDerived,
+    criticalLinkPairs,
+    conflictLinkIds,
+  };
 }
 
 /**

@@ -90,6 +90,21 @@ export interface Device {
   location?: string;
   managementIp?: string;
   notes?: string;
+  /**
+   * Rich-text component description (sanitized HTML, schema v2 additive). UNTRUSTED on
+   * load — always run through sanitizeHtml() before rendering with dangerouslySetInnerHTML.
+   */
+  descriptionHtml?: string;
+  /**
+   * On-canvas icon size multiplier (schema v2 additive). 1 = default. Drives the
+   * rendered icon scale in both flat and iso projections. Absent = 1 (back-compat).
+   */
+  iconScale?: number;
+  /**
+   * Height in px the floating info card sits above the node, driving the dotted
+   * leader line (schema v2 additive). Absent = DEFAULT_LABEL_HEIGHT.
+   */
+  labelHeight?: number;
   fill?: string;
   /** Rack placement (Phase 4): rack id, lowest occupied RU (1-based), height in U. */
   rackId?: string;
@@ -140,6 +155,10 @@ export interface Link {
   arrow?: 'none' | 'end' | 'both';
   /** Line style. */
   style?: 'solid' | 'dashed';
+  /** Manual stroke color (overrides health-derived tint). Schema v2 additive. */
+  color?: string;
+  /** Manual stroke width in px (overrides bandwidth-derived width). Schema v2 additive. */
+  width?: number;
   /** Routing: straight polyline (default) or orthogonal elbow. */
   routing?: 'straight' | 'orthogonal';
   // Extra connector labels (rendered stacked at the midpoint).
@@ -170,7 +189,11 @@ interface BaseCanvasObject {
 
 export interface TextObject extends BaseCanvasObject {
   kind: 'text';
+  /** Body / description text. */
   text: string;
+  /** Optional annotation-card title + subtitle (schema v2 additive). */
+  heading?: string;
+  subheading?: string;
   fontSize?: number;
   color?: string;
 }

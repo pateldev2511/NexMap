@@ -1,0 +1,57 @@
+.editor {
+  border: 1px solid var(--chrome-border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--canvas-bg);
+}
+
+.toolbar {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-bottom: 1px solid var(--chrome-border);
+  background: var(--chrome-bg);
+}
+
+.toolbar button {
+  min-width: 26px;
+  height: 24px;
+  padding: 0 6px;
+  font-size: 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--chrome-fg);
+  cursor: pointer;
+}
+
+.toolbar button:hover {
+  background: var(--canvas-bg);
+  border-color: var(--chrome-border);
+}
+
+.surface {
+  min-height: 64px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 6px 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--chrome-fg);
+  outline: none;
+}
+
+.surface:focus {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.surface ul,
+.surface ol {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+
+.surface:empty::before {
+  content: 'Description…';
+  color: var(--chrome-fg-muted);
+}

@@ -86,6 +86,14 @@ const history = new History();
 const index = new SpatialIndex();
 /** Origin positions captured at drag start (transient, not in history). */
 let dragOrigins: Map<string, { x: number; y: number }> | null = null;
+/**
+ * Waypoint origins for links whose BOTH endpoints are in the moving selection.
+ * Such links translate rigidly with the group (waypoints follow); links with only
+ * one endpoint selected reshape as before. Transient — captured at beginDrag.
+ */
+let dragLinkWaypoints:
+  | Map<string, { origins: { x: number; y: number }[]; sourceId: string }>
+  | null = null;
 /** Alignment guide lines for the in-flight drag/resize (transient). */
 let alignGuides: AlignGuide[] = [];
 /** Original box captured at resize start (transient, not in history). */
@@ -298,6 +306,12 @@ export interface ProjectStore {
   applyView(id: string): void;
   updateDevice(id: string, before: Partial<Device>, after: Partial<Device>): void;
   updateLink(id: string, before: Partial<Link>, after: Partial<Link>): void;
+  /**
+   * Re-wire one endpoint of a link to a different device (drag-to-relink). Clears that
+   * endpoint's interface ref. Rejects a self-loop (new device == the other endpoint).
+   * One undoable transaction; re-validates. Returns true if the link was changed.
+   */
+  relinkEndpoint(linkId: string, endpoint: 'source' | 'target', newDeviceId: string): boolean;
   /** First-class interfaces (schema v2). */
   addInterface(deviceId: string, name?: string): string | null;
   updateInterface(deviceId: string, ifaceId: string, partial: Partial<Interface>): void;
@@ -408,7 +422,15 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     rev: 0,
     selection: new Set<string>(),
     issues: [],
-    health: { issues: [], score: 100, spofIds: [], componentCount: 0, scanDerived: false },
+    health: {
+      issues: [],
+      score: 100,
+      spofIds: [],
+      componentCount: 0,
+      scanDerived: false,
+      criticalLinkPairs: [],
+      conflictLinkIds: [],
+    },
     canUndo: false,
     canRedo: false,
     dirty: false,
@@ -507,6 +529,24 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         }
       }
       dragOrigins = origins;
+
+      // Links whose BOTH endpoints move translate rigidly: remember their waypoint
+      // origins so dragTo can carry the bends along with the group. (Single-endpoint
+      // links are skipped here, so they reshape as the moved end follows its node.)
+      const linkWp = new Map<
+        string,
+        { origins: { x: number; y: number }[]; sourceId: string }
+      >();
+      for (const l of model.links.values()) {
+        if (!l.waypoints?.length) continue;
+        if (origins.has(l.sourceId) && origins.has(l.targetId)) {
+          linkWp.set(l.id, {
+            origins: l.waypoints.map((p) => ({ x: p.x, y: p.y })),
+            sourceId: l.sourceId,
+          });
+        }
+      }
+      dragLinkWaypoints = linkWp;
     },
 
     dragTo(dx, dy, suspendSnap, scale = 1) {
@@ -594,6 +634,24 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           index.update(id, { x, y, width: o.width, height: o.height });
         }
       }
+
+      // Carry waypoints of fully-grouped links by the same net delta their source
+      // node moved, so the connector stays rigid relative to the group.
+      if (dragLinkWaypoints) {
+        for (const [linkId, info] of dragLinkWaypoints) {
+          const link = model.links.get(linkId);
+          const srcOrigin = dragOrigins.get(info.sourceId);
+          const srcDev = model.devices.get(info.sourceId);
+          if (!link || !srcOrigin || !srcDev) continue;
+          const ndx = srcDev.x - srcOrigin.x;
+          const ndy = srcDev.y - srcOrigin.y;
+          model.links.set(linkId, {
+            ...link,
+            waypoints: info.origins.map((p) => ({ x: p.x + ndx, y: p.y + ndy })),
+          });
+        }
+      }
+
       set({ rev: get().rev + 1, dirty: true });
     },
 
@@ -661,6 +719,23 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           );
         }
       }
+      // Record rigid waypoint moves in the SAME transaction so one undo restores
+      // both the nodes and the connector bends.
+      if (dragLinkWaypoints) {
+        for (const [linkId, info] of dragLinkWaypoints) {
+          const link = model.links.get(linkId);
+          if (!link) continue;
+          const before = info.origins;
+          const after = link.waypoints ?? [];
+          const moved = after.some(
+            (p, i) => !before[i] || p.x !== before[i]!.x || p.y !== before[i]!.y,
+          );
+          if (moved) {
+            moves.push(new UpdateLinkCommand(linkId, { waypoints: before }, { waypoints: after }));
+          }
+        }
+      }
+      dragLinkWaypoints = null;
       dragOrigins = null;
       if (moves.length === 0) return;
       // Already applied during dragTo; record without disturbing positions.
@@ -981,12 +1056,22 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         return m && !m.locked && !model.layers.get(m.layerId)?.locked;
       });
       if (ids.length === 0) return;
-      const cmds = ids.map((id) => {
+      const idSet = new Set(ids);
+      const cmds: Command[] = ids.map((id) => {
         const m = movable(id)!;
         return model.devices.has(id)
           ? new MoveDeviceCommand(id, { x: m.x, y: m.y }, { x: m.x + dx, y: m.y + dy })
           : new MoveObjectCommand(id, { x: m.x, y: m.y }, { x: m.x + dx, y: m.y + dy });
       });
+      // Fully-grouped links carry their waypoints by the same delta (matches drag).
+      for (const l of model.links.values()) {
+        if (!l.waypoints?.length) continue;
+        if (idSet.has(l.sourceId) && idSet.has(l.targetId)) {
+          const before = l.waypoints.map((p) => ({ x: p.x, y: p.y }));
+          const after = before.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+          cmds.push(new UpdateLinkCommand(l.id, { waypoints: before }, { waypoints: after }));
+        }
+      }
       history.dispatch(transaction('Nudge', cmds), model);
       for (const id of ids) {
         const m = movable(id)!;
@@ -1214,6 +1299,26 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     updateLink(id, before, after) {
       commit(new UpdateLinkCommand(id, before, after));
+    },
+
+    relinkEndpoint(linkId, endpoint, newDeviceId) {
+      const link = model.links.get(linkId);
+      if (!link || !model.devices.has(newDeviceId)) return false;
+      const otherId = endpoint === 'source' ? link.targetId : link.sourceId;
+      if (newDeviceId === otherId) return false; // self-loop — reject
+      const idKey = endpoint === 'source' ? 'sourceId' : 'targetId';
+      const ifaceKey = endpoint === 'source' ? 'sourceIfaceId' : 'targetIfaceId';
+      const labelKey = endpoint === 'source' ? 'sourceInterface' : 'targetInterface';
+      if (link[idKey] === newDeviceId) return false; // no change
+      commit(
+        new UpdateLinkCommand(
+          linkId,
+          { [idKey]: link[idKey], [ifaceKey]: link[ifaceKey], [labelKey]: link[labelKey] },
+          { [idKey]: newDeviceId, [ifaceKey]: undefined, [labelKey]: undefined },
+        ),
+      );
+      get().runValidation();
+      return true;
     },
 
     addInterface(deviceId, name) {

@@ -51,6 +51,61 @@ export function pairKey(link: Link): string {
   return [link.sourceId, link.targetId].sort().join('|');
 }
 
+// ── Semantic stroke (Stage: connectors) ─────────────────────────────────────
+
+export const DEFAULT_LINK_WIDTH = 1.5;
+/** Allowed manual stroke-width range (the inspector slider bounds). */
+export const MIN_LINK_WIDTH = 1;
+export const MAX_LINK_WIDTH = 8;
+
+/** Minimal health context for stroke derivation (subset of HealthReport). */
+export interface StrokeHealth {
+  criticalLinkPairs: string[];
+  conflictLinkIds: string[];
+}
+
+export interface LinkStroke {
+  /** Explicit stroke color, or null to use the surface default (theme grey in-app, #94a3b8 in export). */
+  color: string | null;
+  dashed: boolean;
+  width: number;
+}
+
+export const HEALTH_AMBER = '#d97706';
+export const HEALTH_RED = '#dc2626';
+/** Concrete default used where CSS vars don't resolve (SVG/PNG/HTML export). */
+export const EXPORT_DEFAULT_STROKE = '#94a3b8';
+
+/**
+ * Resolve a link's stroke from manual overrides + topology health. ONE source of truth
+ * shared by flat render, iso render, and SVG export so they never drift.
+ *
+ * Color precedence: manual `link.color` wins; else conflict→red, critical bridge→amber,
+ * else default grey. Dash is INDEPENDENT: inferred (scan-derived) → dashed; else honor
+ * `link.style`. Width: manual `link.width` (inspector slider) or the default — bandwidth
+ * no longer drives thickness (it stays a data/label field).
+ */
+export function deriveLinkStroke(
+  link: Link,
+  health: StrokeHealth | null,
+  /** Whether this link is the sole member of its device pair (parallel members aren't critical). */
+  soleMember: boolean,
+): LinkStroke {
+  const conflict = health?.conflictLinkIds.includes(link.id) ?? false;
+  const critical =
+    soleMember && (health?.criticalLinkPairs.includes(pairKey(link)) ?? false);
+
+  let color: string | null;
+  if (link.color) color = link.color;
+  else if (conflict) color = HEALTH_RED;
+  else if (critical) color = HEALTH_AMBER;
+  else color = null; // surface default (theme grey in-app, EXPORT_DEFAULT_STROKE in export)
+
+  const dashed = link.inferred === true || link.style === 'dashed';
+  const width = link.width ?? DEFAULT_LINK_WIDTH;
+  return { color, dashed, width };
+}
+
 /**
  * Points for a link that may be one of several parallel links between the same
  * pair. With no explicit waypoints and a group size > 1, insert a midpoint offset

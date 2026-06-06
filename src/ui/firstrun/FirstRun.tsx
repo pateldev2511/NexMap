@@ -1,8 +1,15 @@
 import { useRef, useState } from 'react';
 import { useProjectStore } from '@/store/projectStore';
-import { TEMPLATES, buildTemplate } from '@/model/templates';
+import {
+  TEMPLATES,
+  buildTemplate,
+  CATEGORY_LABEL,
+  type TemplateCategory,
+} from '@/model/templates';
 import { loadDocument } from '@/model/migrate';
 import styles from './FirstRun.module.css';
+
+const SECTION_ORDER: TemplateCategory[] = ['general', 'home', 'enterprise'];
 
 /**
  * First-run start screen (design review DA-DES-1.3) — the cure for "four empty
@@ -52,17 +59,28 @@ export function FirstRun({
           Design network diagrams that validate themselves. Local, no login.
         </p>
 
-        <div className={styles.grid}>
-          {TEMPLATES.map((t) => (
-            <button
-              key={t.key}
-              className={styles.template}
-              onClick={() => pickTemplate(t.key)}
-            >
-              <strong>{t.name}</strong>
-              <span>{t.description}</span>
-            </button>
-          ))}
+        <div className={styles.templates}>
+          {SECTION_ORDER.map((cat) => {
+            const items = TEMPLATES.filter((t) => t.category === cat);
+            if (items.length === 0) return null;
+            return (
+              <section key={cat} className={styles.section}>
+                <div className={styles.sectionTitle}>{CATEGORY_LABEL[cat]}</div>
+                <div className={styles.grid}>
+                  {items.map((t) => (
+                    <button
+                      key={t.key}
+                      className={styles.template}
+                      onClick={() => pickTemplate(t.key)}
+                    >
+                      <strong>{t.name}</strong>
+                      <span>{t.description}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            );
+          })}
         </div>
 
         <div className={styles.row}>

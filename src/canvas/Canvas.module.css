@@ -81,6 +81,34 @@
   cursor: crosshair;
 }
 
+/* Flat 2D icon (FlatIcon) + its rounded-rect selection halo framing the tile. */
+.deviceFlat {
+  pointer-events: none;
+}
+
+.deviceTileHalo {
+  fill: transparent;
+  stroke: var(--accent);
+  stroke-width: 1.8;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.node.selected .deviceTileHalo {
+  fill: color-mix(in srgb, var(--accent) 10%, transparent);
+  opacity: 0.9;
+}
+
+.node.validTarget .deviceTileHalo {
+  fill: color-mix(in srgb, var(--accent) 18%, transparent);
+  stroke-width: 2.4;
+  opacity: 1;
+}
+
+.node:hover .deviceTileHalo {
+  opacity: 0.65;
+}
+
 .deviceIcon3d {
   pointer-events: none;
 }
@@ -125,7 +153,13 @@
 
 .deviceIsoShadow {
   fill: #020617;
-  opacity: 0.13;
+  opacity: 0.2;
+}
+
+/* Wider, fainter halo under the contact shadow for a soft grounded look. */
+.deviceIsoShadowSoft {
+  fill: #020617;
+  opacity: 0.1;
 }
 
 .node .glyph {
@@ -143,6 +177,89 @@
   dominant-baseline: hanging;
   font-family: var(--font-ui);
   pointer-events: none;
+}
+
+/* Component name label rendered ABOVE the icon (FossFLOW-style), double-click to edit. */
+.node .labelTop {
+  fill: var(--chrome-fg);
+  font-size: 11px;
+  font-weight: 600;
+  text-anchor: middle;
+  dominant-baseline: auto;
+  font-family: var(--font-ui);
+  paint-order: stroke;
+  stroke: var(--canvas-bg);
+  stroke-width: 3;
+  cursor: text;
+}
+
+/* FossFLOW-style floating info card (name + description) rendered above a node,
+   tied back to it by a dotted leader line. The card is non-interactive so it
+   never swallows node drags; only the name accepts a double-click to rename. */
+.infoLeader {
+  stroke: var(--chrome-fg-muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 2 3;
+  stroke-linecap: round;
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.infoCardBox {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  pointer-events: none;
+}
+
+.infoCardInner {
+  max-width: 100%;
+  box-sizing: border-box;
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(2, 6, 23, 0.12);
+  padding: 6px 10px;
+  font-family: var(--font-ui);
+  text-align: center;
+}
+
+.infoCardSelected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.infoCardName {
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--chrome-fg);
+  line-height: 1.25;
+  pointer-events: auto;
+  cursor: text;
+  overflow-wrap: anywhere;
+}
+
+.infoCardDesc {
+  margin-top: 3px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--chrome-fg-muted);
+  line-height: 1.35;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.infoCardDesc p {
+  margin: 0 0 2px;
+}
+
+.infoCardDesc ul,
+.infoCardDesc ol {
+  margin: 2px 0;
+  padding-left: 18px;
+  text-align: left;
 }
 
 .issueBadge circle {
@@ -177,6 +294,36 @@
 
 .svg.panMode {
   cursor: grab;
+}
+
+/* One-shot tilt flourish when toggling between flat (2D) and iso (3D) views —
+   the scene settles in from a slight 3D rotation so the modes feel like two
+   viewpoints of one space rather than a hard icon swap. */
+@keyframes nexViewFlip {
+  0% {
+    transform: perspective(1300px) rotateX(15deg) scale(0.965);
+    opacity: 0.5;
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.svg.flip {
+  animation: nexViewFlip 280ms ease-out;
+  transform-origin: center 62%;
+}
+
+/* ISO connector cable: a soft grounded under-shadow beneath the link, so edges
+   read as cables lying on the floor (2D keeps crisp flat schematic lines). */
+.linkShadow {
+  stroke: #020617;
+  opacity: 0.16;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
 }
 
 .pageRect {
@@ -269,6 +416,18 @@
   stroke: #fff;
   stroke-width: 1.5;
   cursor: grab;
+}
+
+/* Drag-to-relink endpoint handles (filled diamond, inset on the selected link). */
+.relinkHandle {
+  fill: var(--accent);
+  stroke: #fff;
+  stroke-width: 1.5;
+  cursor: grab;
+}
+
+.relinkHandle:hover {
+  fill: color-mix(in srgb, var(--accent) 80%, #fff);
 }
 
 .addWaypoint {
@@ -375,7 +534,9 @@
 
 .alignBar {
   position: absolute;
-  top: 12px;
+  /* Sit just below the main canvas toolbar (top:12 + ~36 tall + gap) instead of
+     overlapping it when a multi-selection shows the align controls. */
+  top: 56px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;

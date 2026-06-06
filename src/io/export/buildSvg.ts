@@ -7,10 +7,20 @@
  * echoed back — and we escape all text, so the output carries no scripts or
  * external references by construction. Object IDs are preserved for round-trip.
  */
-import { connectorIconPoints, orthogonalIconPoints, pathD } from '@/canvas/connector';
+import {
+  connectorIconPoints,
+  orthogonalIconPoints,
+  pathD,
+  deriveLinkStroke,
+  pairKey,
+  EXPORT_DEFAULT_STROKE,
+  type StrokeHealth,
+} from '@/canvas/connector';
 import { deviceIsoGroup } from '@/canvas/deviceIso';
+import { deviceIconFlatGroup } from '@/canvas/deviceVisuals';
+import { clampIconScale } from '@/canvas/nodeCard';
 import { isoProjectPx, DEFAULT_TILE } from '@/canvas/iso';
-import type { CanvasObject, Device, Link } from '@/model/types';
+import type { CanvasObject, Device, Link, TextObject } from '@/model/types';
 
 export interface ExportSvgOptions {
   background: string | null; // null = transparent
@@ -20,6 +30,8 @@ export interface ExportSvgOptions {
   objects?: CanvasObject[];
   /** Render the isometric projection instead of the flat scene (Phase 9.6). */
   projection?: 'flat' | 'iso';
+  /** Topology-health context to tint risky links (SPOF/conflict). Null = no tint. */
+  health?: StrokeHealth | null;
 }
 
 interface Bounds {
@@ -63,6 +75,47 @@ export function escapeXml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ESC[c]!);
 }
 
+/**
+ * Stroke attributes for a link in static export. Honors manual color/width + bandwidth
+ * thickness + inferred/style dash (health auto-tint is live-only, omitted from exports).
+ */
+function countPairs(links: Link[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const l of links) {
+    if (l.sourceId === l.targetId) continue;
+    const k = pairKey(l);
+    m.set(k, (m.get(k) ?? 0) + 1);
+  }
+  return m;
+}
+
+function linkStrokeAttrs(l: Link, health: StrokeHealth | null, sole: boolean): string {
+  const s = deriveLinkStroke(l, health, sole);
+  const dash = s.dashed ? ' stroke-dasharray="6 4"' : '';
+  return `stroke="${escapeXml(s.color ?? EXPORT_DEFAULT_STROKE)}" stroke-width="${s.width}"${dash}`;
+}
+
+/**
+ * Annotation card → stacked, escaped SVG text (heading / subheading / body). Absent
+ * fields collapse. Used by both flat and iso export so they match the canvas.
+ */
+function textObjectSvg(o: TextObject, baseX: number, baseY: number): string {
+  const fs = o.fontSize ?? 14;
+  const fill = escapeXml(o.color ?? '#1c2733');
+  const rows: { t: string; size: number; weight: number; fill: string }[] = [];
+  if (o.heading) rows.push({ t: o.heading, size: Math.round(fs * 1.3), weight: 700, fill });
+  if (o.subheading)
+    rows.push({ t: o.subheading, size: Math.round(fs * 0.95), weight: 500, fill: '#64748b' });
+  if (o.text) rows.push({ t: o.text, size: fs, weight: 400, fill });
+  let y = baseY;
+  return rows
+    .map((r) => {
+      y += r.size * 1.25;
+      return `<text x="${baseX}" y="${y}" font-size="${r.size}" font-weight="${r.weight}" fill="${r.fill}">${escapeXml(r.t)}</text>`;
+    })
+    .join('');
+}
+
 export function buildSvg(
   devices: Device[],
   links: Link[],
@@ -80,6 +133,8 @@ export function buildSvg(
   const w = Math.max(1, b.maxX - b.minX);
   const h = Math.max(1, b.maxY - b.minY);
   const byId = new Map(devices.map((d) => [d.id, d]));
+  const health = opts.health ?? null;
+  const pairCount = countPairs(links);
 
   const parts: string[] = [];
   parts.push(
@@ -130,16 +185,19 @@ export function buildSvg(
         ? orthogonalIconPoints(a, t)
         : connectorIconPoints(l, a, t);
     parts.push(
-      `<path data-id="${escapeXml(l.id)}" d="${pathD(pts)}" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`,
+      `<path data-id="${escapeXml(l.id)}" d="${pathD(pts)}" fill="none" ${linkStrokeAttrs(l, health, (pairCount.get(pairKey(l)) ?? 0) === 1)} stroke-linecap="round" stroke-linejoin="round"/>`,
     );
   }
 
   // Devices.
   for (const d of devices) {
     parts.push(`<g data-id="${escapeXml(d.id)}" transform="translate(${d.x} ${d.y})">`);
-    const iconSize = Math.max(22, Math.min(d.width * 0.72, d.height * 0.82));
+    const iconSize =
+      Math.max(22, Math.min(d.width * 0.72, d.height * 0.82)) * clampIconScale(d.iconScale);
+    // Flat export uses the flat 2D tile icon, matching the flat canvas. (Iso
+    // export — buildSvgIso — keeps the 3D model.)
     parts.push(
-      deviceIsoGroup(d.type, d.width / 2, d.height / 2 - 1, iconSize),
+      deviceIconFlatGroup(d.type, d.width / 2, d.height / 2 - 1, iconSize),
     );
     if (opts.includeLabels) {
       parts.push(
@@ -152,9 +210,7 @@ export function buildSvg(
   // Text notes render on top.
   for (const o of objects) {
     if (o.kind !== 'text') continue;
-    parts.push(
-      `<text data-id="${escapeXml(o.id)}" x="${o.x + 4}" y="${o.y + (o.fontSize ?? 14)}" font-size="${o.fontSize ?? 14}" fill="${escapeXml(o.color ?? '#1c2733')}">${escapeXml(o.text)}</text>`,
-    );
+    parts.push(`<g data-id="${escapeXml(o.id)}">${textObjectSvg(o, o.x + 4, o.y)}</g>`);
   }
 
   parts.push(`</svg>`);
@@ -201,6 +257,8 @@ function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): 
   const maxY = Math.max(...pts.map((p) => p.y)) + padding + ISO_DEPTH + 16;
   const w = Math.max(1, maxX - minX);
   const h = Math.max(1, maxY - minY);
+  const health = opts.health ?? null;
+  const pairCount = countPairs(links);
 
   const parts: string[] = [];
   parts.push(
@@ -244,7 +302,7 @@ function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): 
         ? orthogonalIconPoints(s, t)
         : connectorIconPoints(l, s, t);
     parts.push(
-      `<path d="${pathD(pts)}" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`,
+      `<path d="${pathD(pts)}" fill="none" ${linkStrokeAttrs(l, health, (pairCount.get(pairKey(l)) ?? 0) === 1)} stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`,
     );
   }
   parts.push(`</g>`);
@@ -278,9 +336,7 @@ function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): 
   for (const o of objects) {
     if (o.kind !== 'text') continue;
     const p = P(o.x, o.y);
-    parts.push(
-      `<text x="${p.x}" y="${p.y + (o.fontSize ?? 14)}" font-size="${o.fontSize ?? 14}" fill="${escapeXml(o.color ?? '#1c2733')}">${escapeXml(o.text)}</text>`,
-    );
+    parts.push(textObjectSvg(o, p.x, p.y));
   }
 
   parts.push(`</svg>`);

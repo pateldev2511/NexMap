@@ -9,12 +9,35 @@
 }
 
 .card {
-  width: min(520px, 90%);
+  width: min(560px, 92%);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
   background: var(--chrome-bg);
   border: 1px solid var(--chrome-border);
   border-radius: 14px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.14);
   padding: 22px;
+}
+
+/* Scroll the template gallery when there are many; header + footer stay put. */
+.templates {
+  overflow-y: auto;
+  margin: 0 -6px;
+  padding: 0 6px;
+}
+
+.section {
+  margin-bottom: 14px;
+}
+
+.sectionTitle {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--chrome-fg-muted);
+  margin: 0 0 8px;
 }
 
 .title {

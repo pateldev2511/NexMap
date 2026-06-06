@@ -388,8 +388,50 @@ independent outside-voice challenge). Full reviewed plan + per-feature rigor:
       both flat and iso. Additive — reuses the existing, tested `startLinkFrom` connect
       gesture, so no gesture-machine rewrite. Live-verified (4 ports render on hover).
 
-### Strategic note (deferred — distribution)
-Local-first amputates the SaaS growth loop. The `.nexmap` file is the growth engine.
-Consider a **self-contained HTML export** (diagram + read-only viewer in one file,
-opens anywhere, still 100% local) so files can be shared without installing NexMap.
-Schema migration (Stage 3) fragments the file ecosystem — weigh this before shipping it.
+### Distribution — the growth lever ✅ SHIPPED 2026-06-05
+Local-first amputates the SaaS growth loop, so the shareable file is the growth engine.
+- [x] **Self-contained HTML export.** `io/export/html.ts` wraps the rendered SVG in a
+      single standalone `.html` with a tiny inline pan/zoom viewer; the file carries its
+      own strict CSP (`default-src 'none'`) so it stays 100% local. Opens in any browser,
+      no NexMap install. Wired into runExport + the Export dialog ("HTML (viewer)").
+      Live-verified (exported a working doc). Tests: html.test.ts (6).
+
+## Connectors & annotations — semantic-first (CEO review 2026-06-05)
+
+Mode: SELECTIVE EXPANSION, Approach B. Full plan + spec-review clarifications:
+`~/.gstack/projects/NexMap/ceo-plans/2026-06-05-connectors-and-annotations.md`.
+Premise: reframe the requested draw.io-style knobs to carry network meaning (moat),
+not commodity styling. Run /plan-design-review before implementing (UI scope).
+
+### Accepted scope (this plan) — P2
+- [ ] **Per-member connector identity:** optional `Link.color` + reuse `Link.name`;
+      parallel links stay independent records (no LAG object v1). Additive, no migration.
+- [ ] **Width = bandwidth-derived + override:** pure `bandwidthToWidth(bandwidth)`
+      (M/G scaled, unparseable→default, never throws) + optional `Link.width` override.
+- [ ] **Drag-to-relink (M / CC ~35m):** drag a selected link's endpoint onto another
+      device → rewire via connect()-style + clear that endpoint's iface ref + one
+      undoable txn + runValidation on DROP. Recompute parallel offsets for old+new pair.
+      Drop-in-air / self-loop → snap back. Health/color are derived, re-computed on undo.
+- [ ] **Annotation card:** extend `TextObject` with optional `heading`/`subheading`
+      (existing `text` = body); width+height resizable (reuse resize handles); absent
+      fields collapse+reflow; NO WYSIWYG. heading/subheading MUST escapeXml in export.
+- [ ] **Link-health coloring (cherry-pick, S):** auto-tint from the Stage-2 health
+      report (SPOF→amber, conflict→red; scan-inferred→dashed). Manual `Link.color` wins
+      for color; dash is independent. Reuses the existing health pass.
+
+### Deferred
+- [x] **Bandwidth/width legend overlay** ✅ — `BandwidthLegend` on-canvas key (1G/10G/100G
+      via bandwidthToWidth), shown when a link carries bandwidth; matching SVG group in
+      flat + iso export. Tests + live-verified.
+- [ ] **Explicit LAG/bundle object** (M) — only if independent per-link members prove
+      insufficient for modeling port-channels. Revisit; not needed for v1.
+
+### Fast-follows shipped after the eng review
+- [x] **Bandwidth/width legend** (canvas + flat/iso export).
+- [x] **Health-tint in export** — runExport → buildSvg threads the health report so
+      exported PNG/SVG/HTML highlight SPOF/critical/conflict links; Export dialog toggle
+      "Highlight risks" (default on); manual colors still win.
+
+### Rejected
+- Floating/dangling connector endpoints (breaks the validates-itself invariant).
+- Full inline WYSIWYG rich-text editor (off-moat; fights the SVG canvas).

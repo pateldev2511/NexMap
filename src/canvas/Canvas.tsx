@@ -7,6 +7,7 @@ import { MiniMap } from './MiniMap';
 import { getConnectMode } from '@/lib/prefs';
 import { DeviceNode } from './DeviceNode';
 import { IsoDeviceNode } from './IsoDeviceNode';
+import { DEFAULT_LABEL_HEIGHT } from './nodeCard';
 import { IsoTextNode } from './IsoTextNode';
 import { ObjectNode } from './ObjectNode';
 import { CanvasToolbar } from './CanvasToolbar';
@@ -22,6 +23,7 @@ import {
   segmentMidpoints,
   labelAnchor,
   connectorLabelLines,
+  deriveLinkStroke,
 } from './connector';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import {
@@ -62,6 +64,7 @@ type Gesture =
       orig: { x: number; y: number; width: number; height: number };
     }
   | { kind: 'link'; sourceId: string }
+  | { kind: 'relink'; linkId: string; endpoint: 'source' | 'target'; otherId: string }
   | {
       kind: 'waypoint';
       linkId: string;
@@ -175,6 +178,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     null,
   );
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
+  const [editingDeviceId, setEditingDeviceId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [lassoPts, setLassoPts] = useState<{ x: number; y: number }[] | null>(null);
   const [linkCursor, setLinkCursor] = useState<{ x: number; y: number } | null>(null);
@@ -200,6 +204,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   const canUndo = useProjectStore((s) => s.canUndo);
   const canRedo = useProjectStore((s) => s.canRedo);
   const cameraTick = useProjectStore((s) => s.cameraTick);
+  const health = useProjectStore((s) => s.health);
   const store = useProjectStore.getState;
 
   // Report the camera so views can capture it; restore it when a view is applied.
@@ -371,7 +376,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       if (e.key === 'c' || e.key === 'C' || e.key === 'l' || e.key === 'L')
         store().setMode('connect');
       if (e.key === 'Escape') {
-        if (gesture.current.kind === 'link') cancelLink();
+        if (gesture.current.kind === 'link' || gesture.current.kind === 'relink') cancelLink();
         gesture.current = { kind: 'none' };
         setMarquee(null);
         setLassoPts(null);
@@ -474,6 +479,22 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     const { sx, sy } = localPoint(e);
     return toFlat(sx, sy);
   }
+
+  /** Begin dragging one END of an existing link to re-wire it (drag-to-relink). */
+  const startRelink = useCallback(
+    (e: React.PointerEvent, linkId: string, endpoint: 'source' | 'target') => {
+      e.stopPropagation();
+      const link = store().getLink(linkId);
+      if (!link) return;
+      capturePointer(svgRef.current, e.pointerId);
+      const otherId = endpoint === 'source' ? link.targetId : link.sourceId;
+      gesture.current = { kind: 'relink', linkId, endpoint, otherId };
+      setLinkCursor(screenToCanvasFromEvent(e));
+      setLinkTarget(null);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [viewport],
+  );
 
   const onWaypointDown = useCallback(
     (e: React.PointerEvent, linkId: string, index: number) => {
@@ -661,6 +682,13 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         setLinkTarget(target ?? null);
         return;
       }
+      if (g.kind === 'relink') {
+        setLinkCursor(canvasPt);
+        const hit = store().hitTest(canvasPt.x, canvasPt.y);
+        const target = hit.find((id) => id !== g.otherId && store().getDevice(id));
+        setLinkTarget(target ?? null);
+        return;
+      }
       if (g.kind === 'waypoint') {
         const wps = [...(store().getLink(g.linkId)?.waypoints ?? [])];
         wps[g.index] = { x: canvasPt.x, y: canvasPt.y };
@@ -783,6 +811,12 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         } else {
           setPending(null);
         }
+      } else if (g.kind === 'relink') {
+        const target = linkTarget;
+        cancelLink();
+        // Drop on a valid device → re-wire; drop in air or on the other endpoint
+        // (relinkEndpoint rejects self-loop) → snap back, no change.
+        if (target) store().relinkEndpoint(g.linkId, g.endpoint, target);
       } else if (g.kind === 'marquee' && marquee) {
         // Project all four screen corners to flat so iso marquees cover correctly.
         const fb = flatBoxFromScreenRect(marquee, toFlat);
@@ -848,6 +882,20 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       }
     },
     [store, localPoint, toFlat, readOnly],
+  );
+
+  const commitDeviceName = useCallback(
+    (id: string, name: string) => {
+      const d = store().getDevice(id);
+      const trimmed = name.trim();
+      if (d && trimmed && trimmed !== d.name) {
+        store().updateDevice(id, { name: d.name }, { name: trimmed });
+        store().endEdit();
+        store().runValidation();
+      }
+      setEditingDeviceId(null);
+    },
+    [store],
   );
 
   const commitText = useCallback(
@@ -1001,7 +1049,25 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   const linkSource =
     gesture.current.kind === 'link'
       ? store().getDevice(gesture.current.sourceId)
-      : undefined;
+      : gesture.current.kind === 'relink'
+        ? store().getDevice(gesture.current.otherId) // anchor rubber at the FIXED endpoint
+        : undefined;
+
+  // While a link is selected its relink endpoint handles own the device edges, so the
+  // hover connect-ports yield to avoid overlapping click targets (eng-review lock).
+  const anyLinkSelected = [...selection].some((id) => !!store().getLink(id));
+
+
+  // One-shot tilt flourish when the projection (flat ↔ iso) flips.
+  const [flipping, setFlipping] = useState(false);
+  const prevProjection = useRef(projection);
+  useEffect(() => {
+    if (prevProjection.current === projection) return;
+    prevProjection.current = projection;
+    setFlipping(true);
+    const t = setTimeout(() => setFlipping(false), 300);
+    return () => clearTimeout(t);
+  }, [projection]);
 
   const svgClass = `${styles.svg} ${
     gesture.current.kind === 'pan'
@@ -1011,7 +1077,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         : mode === 'connect' || mode === 'lasso'
           ? styles.connectMode
           : ''
-  }`;
+  }${flipping ? ' ' + styles.flip : ''}`;
   const gridStep = 16 * viewport.scale;
 
   return (
@@ -1060,9 +1126,16 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           >
             <path d="M0 0 L10 5 L0 10 z" fill="var(--chrome-fg-muted)" />
           </marker>
+          {/* ISO stage: a soft floor vignette so the iso view reads as a lit scene. */}
+          <radialGradient id="nexmap-iso-stage" cx="50%" cy="40%" r="80%">
+            <stop offset="0%" stopColor="#8aa0c8" stopOpacity={0} />
+            <stop offset="100%" stopColor="#1e293b" stopOpacity={0.17} />
+          </radialGradient>
         </defs>
-        {projection !== 'iso' && (
+        {projection !== 'iso' ? (
           <rect x={0} y={0} width="100%" height="100%" fill="url(#nexmap-grid)" />
+        ) : (
+          <rect x={0} y={0} width="100%" height="100%" fill="url(#nexmap-iso-stage)" />
         )}
 
         <g
@@ -1105,6 +1178,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
                 : parallelIconPoints(l, a, b, group.indexOf(l.id), group.length);
             const d = pathD(pts);
             const sel = selection.has(l.id);
+            const stroke = deriveLinkStroke(l, health, group.length === 1);
             const labelLines = connectorLabelLines(l);
             const lblAt = labelLines.length ? labelAnchor(pts) : null;
             const arrow = l.arrow ?? 'end';
@@ -1116,6 +1190,13 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
               : null;
             return (
               <g key={l.id}>
+                {projection === 'iso' && (
+                  <path
+                    className={styles.linkShadow}
+                    d={d}
+                    style={{ strokeWidth: stroke.width + 3 }}
+                  />
+                )}
                 <path
                   className={styles.linkHit}
                   d={d}
@@ -1129,12 +1210,42 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
                 <path
                   className={`${styles.link} ${sel ? styles.selected : ''}`}
                   d={d}
-                  strokeDasharray={l.style === 'dashed' ? '6 4' : undefined}
+                  style={{
+                    // inline beats the CSS class `stroke`; selection still wins visually.
+                    // null color → omit so the theme-aware CSS class default applies.
+                    stroke: sel ? 'var(--accent)' : (stroke.color ?? undefined),
+                    strokeWidth: sel ? Math.max(stroke.width, 2.5) : stroke.width,
+                  }}
+                  strokeDasharray={stroke.dashed ? '6 4' : undefined}
                   markerEnd={
                     arrow === 'end' || arrow === 'both' ? 'url(#nexmap-arrow)' : undefined
                   }
                   markerStart={arrow === 'both' ? 'url(#nexmap-arrow)' : undefined}
                 />
+                {sel &&
+                  !readOnly &&
+                  ([
+                    ['source', first, pts[1] ?? last] as const,
+                    ['target', last, pts[pts.length - 2] ?? first] as const,
+                  ]).map(([end, anchor, toward]) => {
+                    const p = alongFrom(anchor, toward, 14 / viewport.scale);
+                    const s = 5 / viewport.scale;
+                    return (
+                      <rect
+                        key={end}
+                        className={styles.relinkHandle}
+                        x={p.x - s}
+                        y={p.y - s}
+                        width={s * 2}
+                        height={s * 2}
+                        transform={`rotate(45 ${p.x} ${p.y})`}
+                        onPointerDown={(e) => {
+                          if (e.button !== 0) return;
+                          startRelink(e, l.id, end);
+                        }}
+                      />
+                    );
+                  })}
                 {lblAt && (
                   <text
                     className={styles.linkLabel}
@@ -1283,6 +1394,10 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
                 validTarget={linkTarget === dev.id || pendingSource === dev.id}
                 hasIssue={errorIds.has(dev.id)}
                 onPointerDown={onDevicePointerDown}
+                onLabelDoubleClick={(e, id) => {
+                  e.stopPropagation();
+                  if (!readOnly) setEditingDeviceId(id);
+                }}
               />
             ))}
 
@@ -1326,6 +1441,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
             projection !== 'iso' &&
             mode === 'select' &&
             handleDevice &&
+            !anyLinkSelected &&
             gesture.current.kind === 'none' &&
             (() => {
               const c = center(handleDevice);
@@ -1370,6 +1486,10 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
                   validTarget={linkTarget === dev.id || pendingSource === dev.id}
                   hasIssue={errorIds.has(dev.id)}
                   onPointerDown={onDevicePointerDown}
+                  onLabelDoubleClick={(e, id) => {
+                    e.stopPropagation();
+                    if (!readOnly) setEditingDeviceId(id);
+                  }}
                 />
               ))}
             {texts.map((o) =>
@@ -1387,6 +1507,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
             {!readOnly &&
               mode === 'select' &&
               handleDevice &&
+              !anyLinkSelected &&
               gesture.current.kind === 'none' &&
               (() => {
                 const c = center(handleDevice);
@@ -1551,6 +1672,39 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
                 } else if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   commitText(editingTextId, e.currentTarget.value);
+                }
+              }}
+            />
+          );
+        })()}
+
+      {editingDeviceId &&
+        (() => {
+          const d = store().getDevice(editingDeviceId);
+          if (!d) return null;
+          const fp =
+            projection === 'iso'
+              ? isoProjectPx(d.x + d.width / 2, d.y, GRID_SIZE, ISO_TILE)
+              : { x: d.x + d.width / 2, y: d.y };
+          const p = canvasToScreen(viewport, fp.x, fp.y);
+          // Lift the inline rename box up to where the floating info card sits, so
+          // double-clicking the card name pops the editor right at the card.
+          const lh = d.labelHeight ?? DEFAULT_LABEL_HEIGHT;
+          const top = p.y - lh * viewport.scale - 24;
+          return (
+            <input
+              autoFocus
+              className={styles.textEditor}
+              defaultValue={d.name}
+              style={{ left: p.x - 70, top, width: 140, textAlign: 'center' }}
+              onFocus={(e) => e.currentTarget.select()}
+              onBlur={(e) => commitDeviceName(editingDeviceId, e.target.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Escape') setEditingDeviceId(null);
+                else if (e.key === 'Enter') {
+                  e.preventDefault();
+                  commitDeviceName(editingDeviceId, e.currentTarget.value);
                 }
               }}
             />
