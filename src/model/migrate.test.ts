@@ -56,6 +56,80 @@ describe('loadDocument', () => {
   });
 });
 
+// CRITICAL (eng-review IRON RULE): the v1→v2 interfaces migration is a one-way door on
+// user data. These tests guard it.
+describe('migration v1 → v2 (first-class interfaces)', () => {
+  const v1Doc = () => ({
+    schemaVersion: 1,
+    appVersion: '0.1.0',
+    project: { id: 'p', name: 'Legacy', createdAt: NOW, updatedAt: NOW, description: '', units: 'px' },
+    layers: [{ id: 'L', name: 'Default', visible: true, locked: false, order: 0 }],
+    devices: [
+      { id: 'd1', kind: 'device', type: 'router', name: 'R1', x: 0, y: 0, width: 56, height: 40, layerId: 'L' },
+      { id: 'd2', kind: 'device', type: 'switch', name: 'SW1', x: 0, y: 0, width: 56, height: 40, layerId: 'L' },
+    ],
+    links: [{ id: 'k1', kind: 'link', sourceId: 'd1', targetId: 'd2', layerId: 'L' }],
+    objects: [],
+    vlans: [],
+    subnets: [],
+    racks: [],
+    views: [],
+    interfaces: [],
+    assets: [],
+    customFields: [],
+  });
+
+  it('loads a v1 document and gives every device an interfaces array', () => {
+    const result = loadDocument(JSON.stringify(v1Doc()));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.doc.schemaVersion).toBe(2);
+      expect(result.doc.devices.every((d) => Array.isArray(d.interfaces))).toBe(true);
+      expect(result.doc.devices[0]!.interfaces).toEqual([]);
+    }
+  });
+
+  it('is non-destructive — names, links, and other fields survive', () => {
+    const result = loadDocument(JSON.stringify(v1Doc()));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.doc.devices.map((d) => d.name)).toEqual(['R1', 'SW1']);
+      expect(result.doc.links).toHaveLength(1);
+      expect(result.doc.links[0]!.sourceId).toBe('d1');
+    }
+  });
+
+  it('preserves interfaces a device already has (idempotent-safe)', () => {
+    const doc = v1Doc() as Record<string, unknown>;
+    (doc.devices as Record<string, unknown>[])[0]!.interfaces = [{ id: 'i1', name: 'Gi0/1' }];
+    const result = loadDocument(JSON.stringify(doc));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.doc.devices[0]!.interfaces).toEqual([{ id: 'i1', name: 'Gi0/1' }]);
+    }
+  });
+
+  it('reports migratedFrom so the UI can warn about the upgrade', () => {
+    const result = loadDocument(JSON.stringify(v1Doc()));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.migratedFrom).toBe(1);
+  });
+
+  it('does not set migratedFrom when no migration was needed', () => {
+    const result = loadDocument(JSON.stringify(createEmptyDocument(NOW)));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.migratedFrom).toBeUndefined();
+  });
+
+  it('still REFUSES a v3 document (forward guard holds at the new version)', () => {
+    const doc = createEmptyDocument(NOW);
+    doc.schemaVersion = 3;
+    const result = loadDocument(JSON.stringify(doc));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('too-new');
+  });
+});
+
 describe('stripDangerousKeys', () => {
   it('removes prototype-pollution keys recursively', () => {
     const evil = JSON.parse(

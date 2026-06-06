@@ -1,6 +1,8 @@
 import { useProjectStore } from '@/store/projectStore';
 import type { CanvasObject, Device, DeviceType, Link } from '@/model/types';
+import { NexIcon } from '@/ui/icons/NexIcon';
 import { isValidIp, isValidCidr } from '@/lib/ipcidr';
+import { nextFreeHost } from '@/lib/ipam';
 import { defaultDeviceName } from '@/model/schema';
 import styles from './Inspector.module.css';
 
@@ -65,6 +67,26 @@ function DeviceInspector({ device }: { device: Device }) {
   }
 
   const mgmtErr = ipError(device.managementIp);
+  const subnetCount = useProjectStore((s) => s.subnetsAll().length);
+
+  /** Allocate the lowest free host from the first subnet with room. */
+  function suggestIp() {
+    const st = useProjectStore.getState();
+    const subnets = st.subnetsAll();
+    const others = st
+      .devicesAll()
+      .filter((d) => d.id !== device.id)
+      .map((d) => d.managementIp)
+      .filter((ip): ip is string => !!ip);
+    for (const subnet of subnets) {
+      const host = nextFreeHost(subnet.cidr, others, { gateway: subnet.gateway });
+      if (host) {
+        set('managementIp', host);
+        endEdit();
+        return;
+      }
+    }
+  }
 
   return (
     <>
@@ -118,15 +140,32 @@ function DeviceInspector({ device }: { device: Device }) {
       <div className={styles.group}>
         <div className={styles.groupTitle}>Network</div>
         <Field label="Management IP" error={mgmtErr}>
-          <input
-            className={mgmtErr ? styles.invalid : ''}
-            value={device.managementIp ?? ''}
-            placeholder="10.0.0.1 or 10.0.0.1/24"
-            onChange={(e) => set('managementIp', e.target.value)}
-            onBlur={endEdit}
-          />
+          <div className={styles.ipRow}>
+            <input
+              className={mgmtErr ? styles.invalid : ''}
+              value={device.managementIp ?? ''}
+              placeholder="10.0.0.1 or 10.0.0.1/24"
+              onChange={(e) => set('managementIp', e.target.value)}
+              onBlur={endEdit}
+            />
+            <button
+              type="button"
+              className={styles.suggestBtn}
+              onClick={suggestIp}
+              disabled={subnetCount === 0}
+              title={
+                subnetCount === 0
+                  ? 'Add a subnet (IP Plan) to suggest an address'
+                  : 'Suggest the next free host from your subnets'
+              }
+            >
+              Suggest
+            </button>
+          </div>
         </Field>
       </div>
+
+      <InterfacesSection device={device} />
 
       <RackFields device={device} set={set} endEdit={endEdit} />
 
@@ -148,6 +187,82 @@ function DeviceInspector({ device }: { device: Device }) {
         </Field>
       </div>
     </>
+  );
+}
+
+function InterfacesSection({ device }: { device: Device }) {
+  const addInterface = useProjectStore((s) => s.addInterface);
+  const updateInterface = useProjectStore((s) => s.updateInterface);
+  const deleteInterface = useProjectStore((s) => s.deleteInterface);
+  const endEdit = useProjectStore((s) => s.endEdit);
+  const interfaces = device.interfaces ?? [];
+
+  return (
+    <div className={styles.group}>
+      <div className={styles.groupTitle}>Interfaces</div>
+      {interfaces.length === 0 && (
+        <div className={styles.ifaceEmpty}>
+          No interfaces yet. Add ports to attach links to specific endpoints.
+        </div>
+      )}
+      {interfaces.map((iface) => (
+        <div key={iface.id} className={styles.ifaceRow}>
+          <input
+            value={iface.name}
+            placeholder="Gi0/1"
+            aria-label="Interface name"
+            onChange={(e) => updateInterface(device.id, iface.id, { name: e.target.value })}
+            onBlur={endEdit}
+          />
+          <input
+            className={styles.ifaceSpeed}
+            value={iface.speed ?? ''}
+            placeholder="speed"
+            aria-label="Interface speed"
+            onChange={(e) => updateInterface(device.id, iface.id, { speed: e.target.value })}
+            onBlur={endEdit}
+          />
+          <button
+            type="button"
+            className={styles.ifaceDel}
+            onClick={() => deleteInterface(device.id, iface.id)}
+            aria-label={`Delete interface ${iface.name}`}
+            title="Delete interface"
+          >
+            <NexIcon name="close" />
+          </button>
+        </div>
+      ))}
+      <button type="button" className={styles.ifaceAdd} onClick={() => addInterface(device.id)}>
+        <NexIcon name="plus" />
+        <span>Add interface</span>
+      </button>
+    </div>
+  );
+}
+
+function IfacePicker({
+  device,
+  value,
+  fallbackLabel,
+  onChange,
+}: {
+  device: Device | undefined;
+  value: string | undefined;
+  fallbackLabel: string | undefined;
+  onChange: (value: string) => void;
+}) {
+  const interfaces = device?.interfaces ?? [];
+  return (
+    <select value={value ?? ''} onChange={(e) => onChange(e.target.value)} disabled={!device}>
+      <option value="">{fallbackLabel ? `(none — was "${fallbackLabel}")` : '(none)'}</option>
+      {interfaces.map((i) => (
+        <option key={i.id} value={i.id}>
+          {i.name}
+        </option>
+      ))}
+      <option value="__add">+ Add interface…</option>
+    </select>
   );
 }
 
@@ -211,12 +326,39 @@ function LinkInspector({ link }: { link: Link }) {
   const source = useProjectStore((s) => s.getDevice(link.sourceId));
   const target = useProjectStore((s) => s.getDevice(link.targetId));
 
+  const addInterface = useProjectStore((s) => s.addInterface);
+
   function set<K extends keyof Link>(key: K, value: Link[K]) {
     updateLink(
       link.id,
       { [key]: link[key] } as Partial<Link>,
       { [key]: value } as Partial<Link>,
     );
+  }
+
+  /**
+   * Assign (or clear) an endpoint's interface. Sets the id reference AND mirrors the
+   * interface name into the free-text label so connector labels and CSV export stay in
+   * sync. "__add" mints a new interface on the device and assigns it. One undoable edit.
+   */
+  function setEndpointIface(end: 'source' | 'target', value: string) {
+    const device = end === 'source' ? source : target;
+    if (!device) return;
+    const idKey = end === 'source' ? 'sourceIfaceId' : 'targetIfaceId';
+    const labelKey = end === 'source' ? 'sourceInterface' : 'targetInterface';
+    let ifaceId: string | undefined = value || undefined;
+    if (value === '__add') {
+      ifaceId = addInterface(device.id) ?? undefined;
+    }
+    // Read fresh state so a just-added interface's name is found.
+    const fresh = useProjectStore.getState().getDevice(device.id);
+    const name = ifaceId ? fresh?.interfaces?.find((i) => i.id === ifaceId)?.name : undefined;
+    updateLink(
+      link.id,
+      { [idKey]: link[idKey], [labelKey]: link[labelKey] } as Partial<Link>,
+      { [idKey]: ifaceId, [labelKey]: name } as Partial<Link>,
+    );
+    endEdit();
   }
 
   return (
@@ -317,22 +459,22 @@ function LinkInspector({ link }: { link: Link }) {
           <div className={styles.readonly}>{source?.name ?? '(missing)'}</div>
         </Field>
         <Field label="Source interface">
-          <input
-            value={link.sourceInterface ?? ''}
-            placeholder="Gi0/1"
-            onChange={(e) => set('sourceInterface', e.target.value)}
-            onBlur={endEdit}
+          <IfacePicker
+            device={source}
+            value={link.sourceIfaceId}
+            fallbackLabel={link.sourceInterface}
+            onChange={(v) => setEndpointIface('source', v)}
           />
         </Field>
         <Field label="Target">
           <div className={styles.readonly}>{target?.name ?? '(missing)'}</div>
         </Field>
         <Field label="Target interface">
-          <input
-            value={link.targetInterface ?? ''}
-            placeholder="Gi0/2"
-            onChange={(e) => set('targetInterface', e.target.value)}
-            onBlur={endEdit}
+          <IfacePicker
+            device={target}
+            value={link.targetIfaceId}
+            fallbackLabel={link.targetInterface}
+            onChange={(v) => setEndpointIface('target', v)}
           />
         </Field>
       </div>

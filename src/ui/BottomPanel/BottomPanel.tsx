@@ -5,6 +5,7 @@ import { defaultDeviceName } from '@/model/schema';
 import { severityRank } from '@/model/validate';
 import type { Device, Link, Rack, Subnet, ValidationIssue, Vlan } from '@/model/types';
 import { stripPrefix } from '@/lib/ipcidr';
+import { subnetUsage, type SubnetUsage } from '@/lib/ipam';
 import styles from './BottomPanel.module.css';
 
 /**
@@ -12,7 +13,7 @@ import styles from './BottomPanel.module.css';
  * Links, Validation. Every row/issue jumps to its object on the canvas
  * (DA-DES-2.5) via focusObject. Collapsed by default so the canvas leads.
  */
-type Tab = 'inventory' | 'links' | 'ipplan' | 'vlans' | 'racks' | 'validation';
+type Tab = 'inventory' | 'links' | 'ipplan' | 'vlans' | 'racks' | 'validation' | 'health';
 
 export function BottomPanel() {
   const [open, setOpen] = useState(false);
@@ -26,6 +27,7 @@ export function BottomPanel() {
   const subnets = store().subnetsAll();
   const vlans = store().vlansAll();
   const racks = store().racksAll();
+  const health = useProjectStore((s) => s.health);
   const errorCount = issues.filter(
     (i) => i.severity === 'error' || i.severity === 'critical',
   ).length;
@@ -37,6 +39,7 @@ export function BottomPanel() {
     { key: 'vlans', label: 'VLANs', count: vlans.length },
     { key: 'racks', label: 'Racks', count: racks.length },
     { key: 'validation', label: 'Validation', count: issues.length, err: errorCount > 0 },
+    { key: 'health', label: 'Health', count: health.issues.length },
   ];
 
   return (
@@ -78,6 +81,7 @@ export function BottomPanel() {
           {tab === 'vlans' && <VlanTable vlans={vlans} />}
           {tab === 'racks' && <RackTable racks={racks} devices={devices} />}
           {tab === 'validation' && <ValidationList issues={issues} />}
+          {tab === 'health' && <HealthPanel devices={devices} />}
         </div>
       )}
     </div>
@@ -188,10 +192,34 @@ function Cell({
   );
 }
 
+/** Compact subnet utilization bar (Stage 1 IPAM). */
+function UsageBar({ usage }: { usage: SubnetUsage }) {
+  const pct = Math.round(usage.utilization * 100);
+  const tone =
+    usage.exhausted || pct >= 90 ? 'high' : pct >= 70 ? 'mid' : 'low';
+  return (
+    <div className={styles.usage} title={`${usage.used} of ${usage.capacity} hosts used`}>
+      <div className={styles.usageBar}>
+        <div
+          className={`${styles.usageFill} ${styles[`usage_${tone}`]}`}
+          style={{ width: `${Math.min(100, pct)}%` }}
+        />
+      </div>
+      <span className={styles.usageText}>
+        {usage.used}/{usage.capacity}
+      </span>
+    </div>
+  );
+}
+
 function SubnetTable({ subnets, vlans }: { subnets: Subnet[]; vlans: Vlan[] }) {
   const update = useProjectStore((s) => s.updateSubnet);
   const del = useProjectStore((s) => s.deleteSubnet);
   const add = useProjectStore((s) => s.addSubnet);
+  const ipKey = useProjectStore((s) =>
+    s.devicesAll().map((d) => d.managementIp ?? '').join(','),
+  );
+  const usedIps = ipKey.split(',').filter(Boolean);
   const set = (sub: Subnet, key: keyof Subnet, val: string | number | undefined) =>
     update(
       sub.id,
@@ -207,6 +235,7 @@ function SubnetTable({ subnets, vlans }: { subnets: Subnet[]; vlans: Vlan[] }) {
             <th>Name</th>
             <th>Gateway</th>
             <th>VLAN</th>
+            <th>Usage</th>
             <th>Zone</th>
             <th>Notes</th>
             <th></th>
@@ -238,6 +267,12 @@ function SubnetTable({ subnets, vlans }: { subnets: Subnet[]; vlans: Vlan[] }) {
                   onCommit={(v) => set(sn, 'vlanId', v ? Number(v) : undefined)}
                   placeholder="—"
                 />
+              </td>
+              <td>
+                {(() => {
+                  const usage = subnetUsage(sn.cidr, usedIps, { gateway: sn.gateway });
+                  return usage ? <UsageBar usage={usage} /> : <span>—</span>;
+                })()}
               </td>
               <td>
                 <Cell value={sn.zone ?? ''} onCommit={(v) => set(sn, 'zone', v)} />
@@ -445,6 +480,90 @@ function ValidationList({ issues }: { issues: ValidationIssue[] }) {
           <span className={styles.issueMsg}>{i.message}</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+function HealthPanel({ devices }: { devices: Device[] }) {
+  const health = useProjectStore((s) => s.health);
+  const focus = useProjectStore((s) => s.focusObject);
+  const checkRedundancy = useProjectStore((s) => s.checkRedundancy);
+  const [a, setA] = useState('');
+  const [b, setB] = useState('');
+  const [result, setResult] = useState<number | null>(null);
+
+  const scoreTone =
+    health.score >= 85 ? styles.usage_low : health.score >= 60 ? styles.usage_mid : styles.usage_high;
+
+  const run = () => {
+    if (!a || !b || a === b) return;
+    setResult(checkRedundancy(a, b));
+  };
+
+  return (
+    <div className={styles.health}>
+      <div className={styles.healthScore}>
+        <span className={`${styles.scoreBadge} ${scoreTone}`}>{health.score}</span>
+        <span className={styles.scoreLabel}>
+          Topology soundness{health.scanDerived ? ' · some links are scan-inferred' : ''}
+        </span>
+      </div>
+
+      {health.issues.length === 0 ? (
+        <div className={styles.cleanState}>
+          <NexIcon name="check" />
+          <span>No topology-health concerns — no single points of failure or fragmentation.</span>
+        </div>
+      ) : (
+        <div>
+          {[...health.issues]
+            .sort((x, y) => severityRank(y.severity) - severityRank(x.severity))
+            .map((i) => (
+              <div
+                key={i.id}
+                className={styles.issue}
+                onClick={() => i.objectIds[0] && focus(i.objectIds[0])}
+              >
+                <span
+                  className={`${styles.sev} ${
+                    i.severity === 'warn' ? styles.sevWarn : styles.sevInfo
+                  }`}
+                >
+                  {i.severity.toUpperCase()}
+                </span>
+                <span className={styles.issueMsg}>{i.message}</span>
+              </div>
+            ))}
+        </div>
+      )}
+
+      <div className={styles.redundancy}>
+        <span className={styles.redundancyTitle}>Path redundancy</span>
+        <select value={a} onChange={(e) => { setA(e.target.value); setResult(null); }} aria-label="From device">
+          <option value="">From…</option>
+          {devices.map((d) => (
+            <option key={d.id} value={d.id}>{d.name}</option>
+          ))}
+        </select>
+        <select value={b} onChange={(e) => { setB(e.target.value); setResult(null); }} aria-label="To device">
+          <option value="">To…</option>
+          {devices.map((d) => (
+            <option key={d.id} value={d.id}>{d.name}</option>
+          ))}
+        </select>
+        <button className={styles.addRow} onClick={run} disabled={!a || !b || a === b}>
+          Check
+        </button>
+        {result !== null && (
+          <span className={styles.redundancyResult}>
+            {result === 0
+              ? 'No path between them.'
+              : result === 1
+                ? '1 path — no redundancy (any single link cut isolates them).'
+                : `${result} edge-disjoint paths — redundant.`}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

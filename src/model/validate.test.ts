@@ -164,3 +164,38 @@ describe('validate — MVP checks', () => {
     expect(first).toEqual(second);
   });
 });
+
+describe('validate — first-class interfaces (schema v2)', () => {
+  it('flags a link referencing an interface that does not exist on its device', () => {
+    const a = createDevice('switch', 0, 0, LAYER, { name: 'SW1', interfaces: [] });
+    const b = createDevice('server', 0, 0, LAYER, { name: 'Web1', interfaces: [] });
+    const link = createLink(a.id, b.id, LAYER, { sourceIfaceId: 'ghost' });
+    const issues = validate({ devices: [a, b], links: [link] });
+    expect(issues.some((i) => i.code === 'dangling-interface')).toBe(true);
+  });
+
+  it('flags an over-subscribed interface (one port, two links)', () => {
+    const a = createDevice('switch', 0, 0, LAYER, {
+      name: 'SW1',
+      interfaces: [{ id: 'i1', name: 'Gi0/1' }],
+    });
+    const b = createDevice('server', 0, 0, LAYER, { name: 'Web1', interfaces: [] });
+    const c = createDevice('server', 0, 0, LAYER, { name: 'Web2', interfaces: [] });
+    const l1 = createLink(a.id, b.id, LAYER, { sourceIfaceId: 'i1' });
+    const l2 = createLink(a.id, c.id, LAYER, { sourceIfaceId: 'i1' });
+    const issues = validate({ devices: [a, b, c], links: [l1, l2] });
+    expect(issues.some((i) => i.code === 'oversubscribed-interface')).toBe(true);
+  });
+
+  it('accepts a valid single interface reference', () => {
+    const a = createDevice('switch', 0, 0, LAYER, {
+      name: 'SW1',
+      interfaces: [{ id: 'i1', name: 'Gi0/1' }],
+    });
+    const b = createDevice('server', 0, 0, LAYER, { name: 'Web1', interfaces: [] });
+    const link = createLink(a.id, b.id, LAYER, { sourceIfaceId: 'i1' });
+    const issues = validate({ devices: [a, b], links: [link] });
+    expect(issues.some((i) => i.code === 'dangling-interface')).toBe(false);
+    expect(issues.some((i) => i.code === 'oversubscribed-interface')).toBe(false);
+  });
+});

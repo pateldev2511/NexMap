@@ -14,6 +14,7 @@ import type {
   CanvasObject,
   Device,
   DeviceType,
+  Interface,
   Link,
   Layer,
   NexMapDocument,
@@ -26,6 +27,7 @@ import type {
 import {
   createDevice,
   createEmptyDocument,
+  createInterface,
   createLink,
   createImageObject,
   createLayer,
@@ -38,9 +40,11 @@ import {
 } from '@/model/schema';
 import { validate, resetIssueIds } from '@/model/validate';
 import { SpatialIndex, type Box } from '@/lib/spatial-index';
-import { computeAlignSnap, type AlignGuide } from '@/canvas/align';
+import { computeAlignSnap, computeSpacingSnap, type AlignGuide } from '@/canvas/align';
 import { autoLayoutPositions } from '@/lib/layout';
 import { pointInPolygon, type Point } from '@/lib/geometry';
+import { parseNexText, buildModel, type Diagnostic as NexDiagnostic } from '@/lib/nextext';
+import { analyzeHealth, edgeDisjointPaths, type HealthReport } from '@/lib/health';
 import { History } from './history';
 import {
   AddDeviceCommand,
@@ -213,6 +217,8 @@ export interface ProjectStore {
   rev: number;
   selection: Set<string>;
   issues: ValidationIssue[];
+  /** Topology-health report, recomputed on the same debounce as validation. */
+  health: HealthReport;
   canUndo: boolean;
   canRedo: boolean;
   dirty: boolean;
@@ -259,6 +265,12 @@ export interface ProjectStore {
   importObjects(devices: Device[], links: Link[]): void;
   /** Apply imported VLANs/subnets as one atomic, undoable transaction. */
   importSemantics(subnets: Subnet[], vlans: Vlan[]): void;
+  /**
+   * Parse NexText and REPLACE the diagram (devices/links/objects/subnets/vlans) with
+   * the result, laid out, as one undoable transaction. Aborts without mutating if the
+   * source has parse errors. Returns the (possibly warning-only) diagnostics.
+   */
+  applyNexText(src: string): { ok: boolean; diagnostics: NexDiagnostic[] };
   /** Layer id new imported/created objects attach to (the active layer). */
   defaultLayerId(): string;
   // Layer management (Phase 5). Layer config is document state and undoable.
@@ -286,6 +298,11 @@ export interface ProjectStore {
   applyView(id: string): void;
   updateDevice(id: string, before: Partial<Device>, after: Partial<Device>): void;
   updateLink(id: string, before: Partial<Link>, after: Partial<Link>): void;
+  /** First-class interfaces (schema v2). */
+  addInterface(deviceId: string, name?: string): string | null;
+  updateInterface(deviceId: string, ifaceId: string, partial: Partial<Interface>): void;
+  /** Remove an interface and clear any link endpoint that referenced it (one transaction). */
+  deleteInterface(deviceId: string, ifaceId: string): void;
   renameProject(before: string, after: string): void;
   setMode(mode: CanvasMode): void;
   /** Switch the active render projection (flat ↔ isometric). */
@@ -332,6 +349,8 @@ export interface ProjectStore {
   undo(): void;
   redo(): void;
   runValidation(): void;
+  /** On-demand redundancy: count edge-disjoint paths between two devices (opt-in, not debounced). */
+  checkRedundancy(sourceId: string, targetId: string): number;
   loadDoc(doc: NexMapDocument): void;
   getDocument(): NexMapDocument;
   newProject(now: string): void;
@@ -389,6 +408,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     rev: 0,
     selection: new Set<string>(),
     issues: [],
+    health: { issues: [], score: 100, spofIds: [], componentCount: 0, scanDerived: false },
     canUndo: false,
     canRedo: false,
     dirty: false,
@@ -534,6 +554,26 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           adjX = snap.adjX;
           adjY = snap.adjY;
           alignGuides = snap.guides;
+
+          // Equal-spacing snap on any axis edge-alignment didn't already claim. Uses a
+          // wider neighbor set since spacing references can be farther than the edge margin.
+          if (adjX === null || adjY === null) {
+            const wide = 600 / scale;
+            const spacingStatics: Box[] = [];
+            for (const id of index.query({
+              x: moving.x - wide,
+              y: moving.y - wide,
+              width: moving.width + wide * 2,
+              height: moving.height + wide * 2,
+            })) {
+              if (dragOrigins.has(id)) continue;
+              const m = movable(id);
+              if (m) spacingStatics.push({ x: m.x, y: m.y, width: m.width, height: m.height });
+            }
+            const spacing = computeSpacingSnap(moving, spacingStatics, threshold);
+            if (adjX === null) adjX = spacing.adjX;
+            if (adjY === null) adjY = spacing.adjY;
+          }
         }
       }
 
@@ -677,6 +717,49 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         canRedo: history.canRedo,
         dirty: true,
       });
+    },
+
+    applyNexText(src) {
+      const result = parseNexText(src);
+      if (result.diagnostics.some((d) => d.severity === 'error')) {
+        return { ok: false, diagnostics: result.diagnostics };
+      }
+      const built = buildModel(result, { layerId: firstLayerId() });
+
+      // Replace the whole diagram in one undoable transaction: clear existing
+      // devices (links cascade), objects, subnets, and vlans, then add the new ones.
+      const cmds: Command[] = [];
+      const deviceIds = [...model.devices.keys()];
+      const objectIds = [...model.objects.keys()];
+      if (deviceIds.length || objectIds.length) {
+        cmds.push(new DeleteCommand(deviceIds, [], objectIds));
+      }
+      for (const id of model.subnets.keys()) cmds.push(new DeleteSubnetCommand(id));
+      for (const id of model.vlans.keys()) cmds.push(new DeleteVlanCommand(id));
+      for (const d of built.devices) cmds.push(new AddDeviceCommand(d));
+      for (const l of built.links) cmds.push(new AddLinkCommand(l));
+      for (const s of built.subnets) cmds.push(new AddSubnetCommand(s));
+      for (const v of built.vlans) cmds.push(new AddVlanCommand(v));
+
+      history.dispatch(transaction('Apply NexText', cmds), model);
+      history.commitCoalesceBoundary();
+      rebuildIndex();
+      resetIssueIds();
+      set({
+        rev: get().rev + 1,
+        selection: new Set(),
+        issues: validate({
+          devices: [...model.devices.values()],
+          links: [...model.links.values()],
+          vlans: [...model.vlans.values()],
+          subnets: [...model.subnets.values()],
+          racks: [...model.racks.values()],
+        }),
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+      });
+      return { ok: true, diagnostics: result.diagnostics };
     },
 
     defaultLayerId() {
@@ -1133,6 +1216,68 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       commit(new UpdateLinkCommand(id, before, after));
     },
 
+    addInterface(deviceId, name) {
+      const d = model.devices.get(deviceId);
+      if (!d) return null;
+      const existing = d.interfaces ?? [];
+      const iface = createInterface(name ?? `eth${existing.length}`);
+      commit(
+        new UpdateDeviceCommand(
+          deviceId,
+          { interfaces: existing },
+          { interfaces: [...existing, iface] },
+        ),
+      );
+      return iface.id;
+    },
+
+    updateInterface(deviceId, ifaceId, partial) {
+      const d = model.devices.get(deviceId);
+      if (!d) return;
+      const existing = d.interfaces ?? [];
+      const next = existing.map((i) => (i.id === ifaceId ? { ...i, ...partial } : i));
+      commit(
+        new UpdateDeviceCommand(deviceId, { interfaces: existing }, { interfaces: next }),
+      );
+    },
+
+    deleteInterface(deviceId, ifaceId) {
+      const d = model.devices.get(deviceId);
+      if (!d) return;
+      const existing = d.interfaces ?? [];
+      const next = existing.filter((i) => i.id !== ifaceId);
+      if (next.length === existing.length) return;
+      const cmds: Command[] = [
+        new UpdateDeviceCommand(deviceId, { interfaces: existing }, { interfaces: next }),
+      ];
+      // Cascade: clear any link endpoint that referenced this interface.
+      for (const l of model.links.values()) {
+        const before: Partial<Link> = {};
+        const after: Partial<Link> = {};
+        if (l.sourceId === deviceId && l.sourceIfaceId === ifaceId) {
+          before.sourceIfaceId = l.sourceIfaceId;
+          before.sourceInterface = l.sourceInterface;
+          after.sourceIfaceId = undefined;
+          after.sourceInterface = undefined;
+        }
+        if (l.targetId === deviceId && l.targetIfaceId === ifaceId) {
+          before.targetIfaceId = l.targetIfaceId;
+          before.targetInterface = l.targetInterface;
+          after.targetIfaceId = undefined;
+          after.targetInterface = undefined;
+        }
+        if (Object.keys(after).length > 0) cmds.push(new UpdateLinkCommand(l.id, before, after));
+      }
+      history.dispatch(transaction('Delete interface', cmds), model);
+      history.commitCoalesceBoundary();
+      set({
+        rev: get().rev + 1,
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+      });
+    },
+
     renameProject(before, after) {
       commit(new RenameProjectCommand(before, after));
       set({ projectName: after });
@@ -1299,14 +1444,27 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     runValidation() {
       resetIssueIds();
+      const devices = [...model.devices.values()];
+      const links = [...model.links.values()];
       const issues = validate({
-        devices: [...model.devices.values()],
-        links: [...model.links.values()],
+        devices,
+        links,
         vlans: [...model.vlans.values()],
         subnets: [...model.subnets.values()],
         racks: [...model.racks.values()],
       });
-      set({ issues });
+      // Topology health rides the same debounce — all O(V+E), main-thread (eng-review lock).
+      const health = analyzeHealth(devices, links);
+      set({ issues, health });
+    },
+
+    checkRedundancy(sourceId, targetId) {
+      return edgeDisjointPaths(
+        [...model.devices.values()],
+        [...model.links.values()],
+        sourceId,
+        targetId,
+      );
     },
 
     loadDoc(doc) {

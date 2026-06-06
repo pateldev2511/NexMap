@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import { loadDocument } from '@/model/migrate';
+import { SCHEMA_VERSION } from '@/model/schema';
 import {
   canWriteBack,
   openWithPicker,
@@ -24,6 +25,9 @@ export interface Persistence {
   fileName: string | null;
   readOnly: boolean;
   error: string | null;
+  /** Informational notice (e.g. an opened file was upgraded to a newer schema). */
+  notice: string | null;
+  dismissNotice(): void;
   /** Draft found at launch, awaiting the recovery decision. */
   recoverable: DraftRecord | null;
   save(): Promise<void>;
@@ -53,7 +57,17 @@ export function usePersistence(): Persistence {
   const [fileName, setFileName] = useState<string | null>(null);
   const [readOnly, setReadOnly] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [recoverable, setRecoverable] = useState<DraftRecord | null>(null);
+
+  /** Inform the user when an opened file was upgraded to a newer schema (forward-only). */
+  function noticeIfMigrated(migratedFrom: number | undefined) {
+    if (migratedFrom == null) return;
+    setNotice(
+      `Upgraded this file from schema v${migratedFrom} to v${SCHEMA_VERSION}. ` +
+        `Older NexMap builds won't open it once you save — keep a copy of the original if you need it.`,
+    );
+  }
 
   const handleRef = useRef<FsFileHandle | null>(null);
   const genRef = useRef(0);
@@ -149,6 +163,7 @@ export function usePersistence(): Persistence {
         handleRef.current = null;
         setFileName(null);
         setRecoverable(null);
+        noticeIfMigrated(result.migratedFrom);
       } else {
         setError(result.message);
       }
@@ -166,6 +181,7 @@ export function usePersistence(): Persistence {
         handleRef.current = opened.handle;
         setFileName(opened.fileName);
         setRecoverable(null);
+        noticeIfMigrated(result.migratedFrom);
       } else {
         setError(result.message);
       }
@@ -194,6 +210,8 @@ export function usePersistence(): Persistence {
     fileName,
     readOnly,
     error,
+    notice,
+    dismissNotice: () => setNotice(null),
     recoverable,
     save,
     saveAs,

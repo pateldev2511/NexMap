@@ -285,3 +285,111 @@ toolbar modes, lasso, connector creation, export preview, import rollback, recov
 multi-tab read-only. Perf: 1k devices/5k links, large labels, parallel connectors,
 hidden layers, huge exports, validation debounce. Security: malicious SVG, CSV
 formula injection, prototype-pollution keys, external image refs, corrupt `.nexmap`.
+
+---
+
+## Canvas & UX Roadmap — local-first (CEO review 2026-06-05)
+
+Mode: SCOPE EXPANSION. Premise: NexMap's moat is "knows it's a network + validates
+itself + 100% local" — not draw.io feature-parity. Sequenced **moat-forward,
+clean-capture-first** (revised from the original capture-first order after an
+independent outside-voice challenge). Full reviewed plan + per-feature rigor:
+`~/.gstack/projects/NexMap/ceo-plans/2026-06-05-canvas-ux-local-roadmap.md`.
+
+**Hard constraint (all items): no login, no cloud, no network calls.**
+
+**Eng-review locks (2026-06-05, AUTHORITATIVE — supersede notes below where they conflict):**
+- Health runs **main-thread, debounced ~150ms** (extend `validate.ts`, O(V+E), sub-frame
+  to 5k nodes). Web Worker deferred to ONLY opt-in redundancy/max-flow, only if >16ms.
+- Interfaces **embedded under device** (`device.interfaces[]`); links ref `{deviceId,ifaceId}`.
+  Migration v1→2 adds empty array. NOT a top-level FK table.
+- CSP **build-time-injected** (strict prod `default-src 'self'`; dev relaxes ws:/inline for HMR).
+- Local-promise gate = **two layers**: CSP-present unit test + network-cut E2E (zero requests).
+- Test plan: `~/.gstack/projects/NexMap/pateldev-feat-iso-view-mode-editor-polish-eng-review-test-plan-20260605.md`
+
+### Stage 0 — Local-promise enforcement (prerequisite gate) — P1 ✅ SHIPPED 2026-06-05
+- [x] Strict `Content-Security-Policy` (`default-src 'self'`, `connect-src 'self'`,
+      remote `img`/`script`/`object` blocked) — build-time injected into prod
+      `index.html` only via Vite plugin. Source of truth: `src/lib/csp.ts`. Unit test:
+      `src/lib/csp.test.ts` (7 tests).
+- [x] Behavioural enforcement: `src/lib/netguard.ts` runtime tripwire wraps
+      fetch/XHR/WebSocket/EventSource/sendBeacon → throws `NetworkBlockedError` on any
+      non-local URL. Installed in PROD from `main.tsx`. Test: `netguard.test.ts` (10 tests).
+      **Note:** chose a *continuous* runtime tripwire over a one-shot Playwright E2E
+      (no ~150MB browser download; enforces every run, not just in CI). A browser-driven
+      network-cut E2E remains a nice-to-have follow-up if Playwright is ever added.
+
+### Stage 1 — Moat-forward foundation — P1 ✅ SHIPPED 2026-06-05
+- [x] **NexText (text-to-diagram), one-shot scaffold.** Pure `lib/nextext.ts`
+      (parse + build + serialize, totally non-throwing). Toolbar dialog → `applyNexText`
+      store action REPLACES the diagram in one undoable transaction, auto-laid-out,
+      re-validated; aborts on parse errors. Live-verified: 4 devices + 3 links + subnet
+      + vlan from text. Tests: nextext.test.ts (19) + store nextext.test.ts (5).
+- [x] **IPAM auto-suggest.** `lib/ipam.ts` nextFreeHost (lowest free, skips
+      net/bcast/gateway/assigned; RFC3021 /31,/32) + subnetUsage. Inspector "Suggest"
+      button on Management IP; utilization bar in IP Plan panel. Live-verified
+      (.2→.3 allocation skipping gateway; 2/254 bar). Tests: ipam.test.ts (15).
+- Fixed en route: topbar buttons crushed/overlapped when a 6th was added —
+      `.topbarBtn` now `flex:0 0 auto`, labels collapse to icons ≤1240px.
+
+### Stage 2 — Trustworthy intelligence + broad capture — P2 (partially shipped 2026-06-05)
+- [x] **Topology health checks.** `lib/health.ts`: SPOF (iterative articulation points,
+      stack-safe to 5k), fragmented-topology, conflicting parallel links, on-demand
+      redundancy = edge-disjoint paths between user-selected pairs (Menger/max-flow).
+      Soundness score + Health panel tab w/ jump-to-object + redundancy checker.
+      MAIN-THREAD, folded into the existing debounced runValidation (eng-review lock).
+      Live-verified (score 84, SW1+R1 SPOFs, R1→FW1 = 1 path). Tests: health.test.ts (15).
+- [x] **Import fidelity (mechanism).** Optional `Link.inferred` field (additive, no schema
+      bump); health emits a "scan-inferred" caveat when present so SPOF/redundancy aren't
+      over-trusted. Reachability importers set it. (Nmap currently synthesizes no edges,
+      so nothing to mark there yet — mechanism + caveat are in place and tested.)
+- [x] **Paste-to-canvas.** `io/import/clipboardImport.ts` + `usePasteToCanvas` hook:
+      clipboard CSV → devices/links/subnets/vlans via the SHARED csvImport model (one
+      parsing path); clipboard image → raster underlay (size-clamped, sanitized path).
+      Defers to internal device clipboard + form fields. Live-verified (CSV paste
+      4→6 devices, auto-selected). Tests: clipboardImport.test.ts (7).
+- [~] **Guided discovery-import wizard.** Substantially met by the existing ImportDialog
+      (file → auto-detected kind → field mapping → preview → transactional apply; NetBox =
+      file only) + the new paste path + a paste hint. An explicit step-indicator UI is
+      deferred as polish over the already-guided dialog (not worth a risky rewrite now).
+
+### Stage 3 — First-class interfaces — P2 ✅ SHIPPED 2026-06-05
+- [x] **Embedded interfaces** (`Device.interfaces[]`) per the eng-review lock; links
+      reference `{deviceId, ifaceId}` via `sourceIfaceId`/`targetIfaceId` (free-text
+      label kept in sync). `createInterface` factory; `createDevice` defaults `[]`.
+- [x] **Schema v1→v2 migration** — purely ADDITIVE (adds `interfaces:[]` per device);
+      forward-only; too-new guard now holds at v2. CRITICAL tests (IRON RULE):
+      v1 loads & gains arrays, non-destructive, idempotent-safe, v3 still refused.
+      Live-verified migration. Tests: migrate.test.ts (+4).
+- [x] **Store actions + cascade:** add/update/deleteInterface; deleting an interface
+      clears referencing link endpoints in one undoable transaction. Tests: interfaces.test.ts (4).
+- [x] **Port-level validation:** dangling interface reference + over-subscribed port.
+      Tests: validate.test.ts (+3).
+- [x] **Inspector UI:** device Interfaces section (add/rename/speed/delete, live-verified
+      eth0 add) + link endpoint interface pickers (select / +add, label kept in sync).
+- [x] **Migration upgrade notice.** `loadDocument` reports `migratedFrom`; open/openText
+      surface a dismissible NoticeToast ("upgraded to v2, older builds won't open it").
+      Tests: migrate.test.ts (+2).
+- [~] **Pre-migration backup file (deferred):** `<name>.backup.nexmap` on file-open migrate.
+      Needs a directory handle / File System Access (unavailable in some sandboxes), and
+      the migration is non-destructive anyway — low-stakes follow-up.
+
+### Stage 4 — Canvas craft (fast-follow polish) — P3 (mostly shipped 2026-06-05)
+- [x] **Smart equal-spacing snap while dragging.** `computeSpacingSnap` in align.ts:
+      extend-equal-sequence + center-between patterns per axis, 6/scale threshold, ≥3
+      reference boxes. Runs in the store drag path on axes alignment didn't claim
+      (wider neighbor query). Tests: align.test.ts (+6).
+- [x] **Mini-map / overview navigator.** `canvas/MiniMap.tsx`: scaled bird's-eye of all
+      devices (flat scene coords), live viewport rectangle (flat mode), click/drag to
+      recenter the camera (projection-aware jump). Live-verified (6 device rects, view
+      rect tracks projection, click-to-jump pans).
+- [x] **Connection ports + directional hover-connect.** Replaced the single right-edge
+      handle with 4 directional ports (top/right/bottom/left) on the hovered device, in
+      both flat and iso. Additive — reuses the existing, tested `startLinkFrom` connect
+      gesture, so no gesture-machine rewrite. Live-verified (4 ports render on hover).
+
+### Strategic note (deferred — distribution)
+Local-first amputates the SaaS growth loop. The `.nexmap` file is the growth engine.
+Consider a **self-contained HTML export** (diagram + read-only viewer in one file,
+opens anywhere, still 100% local) so files can be shared without installing NexMap.
+Schema migration (Stage 3) fragments the file ecosystem — weigh this before shipping it.

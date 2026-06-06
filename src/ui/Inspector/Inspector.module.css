@@ -83,3 +83,109 @@
   padding: 16px 12px;
   line-height: 1.5;
 }
+
+/* IPAM suggest control (Stage 1). */
+.ipRow {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.ipRow input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.suggestBtn {
+  flex: none;
+  border: 1px solid var(--chrome-border);
+  background: transparent;
+  color: var(--chrome-fg);
+  border-radius: 6px;
+  padding: 0 10px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.suggestBtn:hover:not(:disabled) {
+  background: var(--canvas-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.suggestBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* First-class interfaces (Stage 3). */
+.ifaceEmpty {
+  font-size: 11px;
+  color: var(--chrome-fg-muted);
+  line-height: 1.4;
+  margin-bottom: 4px;
+}
+
+.ifaceRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.ifaceRow input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ifaceSpeed {
+  flex: 0 0 64px !important;
+}
+
+.ifaceDel {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  background: transparent;
+  border: 1px solid var(--chrome-border);
+  border-radius: 6px;
+  color: var(--chrome-fg-muted);
+  cursor: pointer;
+}
+
+.ifaceDel:hover {
+  color: var(--sev-error);
+  border-color: var(--sev-error);
+}
+
+.ifaceDel svg {
+  width: 13px;
+  height: 13px;
+}
+
+.ifaceAdd {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  padding: 5px 10px;
+  background: transparent;
+  border: 1px dashed var(--chrome-border);
+  border-radius: 6px;
+  color: var(--chrome-fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ifaceAdd:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ifaceAdd svg {
+  width: 13px;
+  height: 13px;
+}

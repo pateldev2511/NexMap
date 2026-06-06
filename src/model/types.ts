@@ -55,6 +55,23 @@ export interface Layer {
   order: number;
 }
 
+/**
+ * A first-class network interface/port on a device (schema v2). Embedded under its
+ * device (`Device.interfaces`) so deletes cascade for free and there is no orphan-
+ * interface class of bug. Links reference an interface by `{deviceId, ifaceId}`.
+ */
+export interface Interface {
+  id: string;
+  /** Port name, e.g. "Gi0/1", "eth0", "Te1/1/1". */
+  name: string;
+  /** Free-text media/kind for v1 (ethernet, fiber, sfp+, …). */
+  kind?: string;
+  /** Link speed, e.g. "1G", "10G". */
+  speed?: string;
+  notes?: string;
+  extra?: ExtraFields;
+}
+
 export interface Device {
   id: string;
   kind: 'device';
@@ -84,6 +101,8 @@ export interface Device {
   z?: number;
   /** Devices sharing a groupId select and move together. */
   groupId?: string;
+  /** First-class interfaces/ports (schema v2). Empty array on migrated v1 devices. */
+  interfaces?: Interface[];
   extra?: ExtraFields;
 }
 
@@ -94,13 +113,26 @@ export interface Link {
   /** Device IDs. */
   sourceId: string;
   targetId: string;
-  /** Free-text endpoint labels; first-class interfaces are reserved for a later schema. */
+  /**
+   * Endpoint interface references (schema v2): the id of an Interface on the source/
+   * target device. The free-text *Interface labels below are kept in sync for display
+   * and export, and remain the fallback when no first-class interface is assigned.
+   */
+  sourceIfaceId?: string;
+  targetIfaceId?: string;
+  /** Free-text endpoint labels (kept in sync with the assigned interface's name). */
   sourceInterface?: string;
   targetInterface?: string;
   linkType?: string;
   bandwidth?: string;
   /** Trunk carries multiple VLANs; access carries one. */
   mode?: 'access' | 'trunk';
+  /**
+   * True when this edge was inferred from reachability (e.g. a scan) rather than a
+   * confirmed L2 adjacency. Topology-health reads it to caveat SPOF/redundancy results.
+   * Optional + additive — no schema bump (older builds simply ignore it).
+   */
+  inferred?: boolean;
   layerId: string;
   /** Intermediate reroute points (canvas coords); path runs source → waypoints → target. */
   waypoints?: { x: number; y: number }[];
