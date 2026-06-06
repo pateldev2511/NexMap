@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
 import type { DeviceType } from '@/model/types';
 import { IsoIcon } from '@/canvas/IsoIcon';
+import { FlatIcon } from '@/canvas/FlatIcon';
 import { deviceVisual } from '@/canvas/deviceVisuals';
+import { useProjectStore } from '@/store/projectStore';
 import { defaultDeviceName } from '@/model/schema';
 import { NexIcon } from '@/ui/icons/NexIcon';
 import styles from './Library.module.css';
@@ -53,7 +55,7 @@ const GROUPS: Group[] = [
   },
 ];
 
-function LibraryItem({ type }: { type: DeviceType }) {
+function LibraryItem({ type, iso }: { type: DeviceType; iso: boolean }) {
   const visual = deviceVisual(type);
   return (
     <div
@@ -66,8 +68,13 @@ function LibraryItem({ type }: { type: DeviceType }) {
       title={`Drag to add ${defaultDeviceName(type)}`}
     >
       <span className={styles.swatch}>
+        {/* Match the active canvas projection: flat tiles in 2D, 3D models in iso. */}
         <svg width="34" height="26" viewBox="0 0 34 26" aria-hidden="true">
-          <IsoIcon type={type} accent={visual.accent} cx={17} cy={11} size={19} />
+          {iso ? (
+            <IsoIcon type={type} accent={visual.accent} cx={17} cy={11} size={19} />
+          ) : (
+            <FlatIcon type={type} accent={visual.accent} cx={17} cy={13} size={18} />
+          )}
         </svg>
       </span>
       <span className={styles.itemLabel}>{defaultDeviceName(type)}</span>
@@ -76,6 +83,7 @@ function LibraryItem({ type }: { type: DeviceType }) {
 }
 
 export function Library() {
+  const iso = useProjectStore((s) => s.projection) === 'iso';
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState<Set<string>>(
     () => new Set(GROUPS.filter((g) => g.defaultOpen).map((g) => g.name)),
@@ -124,7 +132,7 @@ export function Library() {
               {isOpen && (
                 <div className={styles.grid}>
                   {g.types.map((t) => (
-                    <LibraryItem key={t} type={t} />
+                    <LibraryItem key={t} type={t} iso={iso} />
                   ))}
                 </div>
               )}

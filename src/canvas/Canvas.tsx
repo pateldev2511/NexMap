@@ -7,6 +7,7 @@ import { MiniMap } from './MiniMap';
 import { getConnectMode } from '@/lib/prefs';
 import { DeviceNode } from './DeviceNode';
 import { IsoDeviceNode } from './IsoDeviceNode';
+import { DEFAULT_LABEL_HEIGHT } from './nodeCard';
 import { IsoTextNode } from './IsoTextNode';
 import { ObjectNode } from './ObjectNode';
 import { CanvasToolbar } from './CanvasToolbar';
@@ -1057,6 +1058,17 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   const anyLinkSelected = [...selection].some((id) => !!store().getLink(id));
 
 
+  // One-shot tilt flourish when the projection (flat ↔ iso) flips.
+  const [flipping, setFlipping] = useState(false);
+  const prevProjection = useRef(projection);
+  useEffect(() => {
+    if (prevProjection.current === projection) return;
+    prevProjection.current = projection;
+    setFlipping(true);
+    const t = setTimeout(() => setFlipping(false), 300);
+    return () => clearTimeout(t);
+  }, [projection]);
+
   const svgClass = `${styles.svg} ${
     gesture.current.kind === 'pan'
       ? styles.panning
@@ -1065,7 +1077,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         : mode === 'connect' || mode === 'lasso'
           ? styles.connectMode
           : ''
-  }`;
+  }${flipping ? ' ' + styles.flip : ''}`;
   const gridStep = 16 * viewport.scale;
 
   return (
@@ -1114,9 +1126,16 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           >
             <path d="M0 0 L10 5 L0 10 z" fill="var(--chrome-fg-muted)" />
           </marker>
+          {/* ISO stage: a soft floor vignette so the iso view reads as a lit scene. */}
+          <radialGradient id="nexmap-iso-stage" cx="50%" cy="40%" r="80%">
+            <stop offset="0%" stopColor="#8aa0c8" stopOpacity={0} />
+            <stop offset="100%" stopColor="#1e293b" stopOpacity={0.17} />
+          </radialGradient>
         </defs>
-        {projection !== 'iso' && (
+        {projection !== 'iso' ? (
           <rect x={0} y={0} width="100%" height="100%" fill="url(#nexmap-grid)" />
+        ) : (
+          <rect x={0} y={0} width="100%" height="100%" fill="url(#nexmap-iso-stage)" />
         )}
 
         <g
@@ -1171,6 +1190,13 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
               : null;
             return (
               <g key={l.id}>
+                {projection === 'iso' && (
+                  <path
+                    className={styles.linkShadow}
+                    d={d}
+                    style={{ strokeWidth: stroke.width + 3 }}
+                  />
+                )}
                 <path
                   className={styles.linkHit}
                   d={d}
@@ -1661,12 +1687,16 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
               ? isoProjectPx(d.x + d.width / 2, d.y, GRID_SIZE, ISO_TILE)
               : { x: d.x + d.width / 2, y: d.y };
           const p = canvasToScreen(viewport, fp.x, fp.y);
+          // Lift the inline rename box up to where the floating info card sits, so
+          // double-clicking the card name pops the editor right at the card.
+          const lh = d.labelHeight ?? DEFAULT_LABEL_HEIGHT;
+          const top = p.y - lh * viewport.scale - 24;
           return (
             <input
               autoFocus
               className={styles.textEditor}
               defaultValue={d.name}
-              style={{ left: p.x - 70, top: p.y - 24, width: 140, textAlign: 'center' }}
+              style={{ left: p.x - 70, top, width: 140, textAlign: 'center' }}
               onFocus={(e) => e.currentTarget.select()}
               onBlur={(e) => commitDeviceName(editingDeviceId, e.target.value)}
               onKeyDown={(e) => {

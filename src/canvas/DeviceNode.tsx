@@ -2,7 +2,9 @@ import { memo } from 'react';
 import type { Device } from '@/model/types';
 import { NexIcon } from '@/ui/icons/NexIcon';
 import { deviceVisual, LOD_GLYPH_ONLY, LOD_LABEL_HIDE } from './deviceVisuals';
-import { IsoIcon } from './IsoIcon';
+import { FlatIcon } from './FlatIcon';
+import { NodeInfoCard } from './NodeInfoCard';
+import { clampIconScale, DEFAULT_LABEL_HEIGHT } from './nodeCard';
 import styles from './Canvas.module.css';
 
 interface DeviceNodeProps {
@@ -39,7 +41,8 @@ function DeviceNodeImpl({
   const { width, height } = device;
   const cx = width / 2;
   const cy = height / 2 - 1;
-  const iconSize = Math.max(22, Math.min(width * 0.72, height * 0.82));
+  const iconSize =
+    Math.max(22, Math.min(width * 0.72, height * 0.82)) * clampIconScale(device.iconScale);
 
   return (
     <g
@@ -51,15 +54,16 @@ function DeviceNodeImpl({
       data-id={device.id}
     >
       <rect className={styles.hitArea} width={width} height={height} rx={8} />
-      <ellipse
-        className={styles.deviceIconHalo}
-        cx={cx}
-        cy={cy + iconSize * 0.14}
-        rx={iconSize * 0.68}
-        ry={iconSize * 0.52}
+      <rect
+        className={styles.deviceTileHalo}
+        x={cx - iconSize / 2 - 3}
+        y={cy - iconSize / 2 - 3}
+        width={iconSize + 6}
+        height={iconSize + 6}
+        rx={iconSize * 0.24 + 3}
       />
       {detailed ? (
-        <IsoIcon
+        <FlatIcon
           type={device.type}
           accent={visual.accent}
           cx={cx}
@@ -72,14 +76,15 @@ function DeviceNodeImpl({
         </text>
       )}
       {showLabel && (
-        <text
-          className={styles.labelTop}
-          x={cx}
-          y={-6}
-          onDoubleClick={(e) => onLabelDoubleClick?.(e, device.id)}
-        >
-          {device.name}
-        </text>
+        <NodeInfoCard
+          name={device.name}
+          descriptionHtml={device.descriptionHtml}
+          cx={cx}
+          anchorY={cy - iconSize / 2}
+          labelHeight={device.labelHeight ?? DEFAULT_LABEL_HEIGHT}
+          selected={selected}
+          onDoubleClickName={(e) => onLabelDoubleClick?.(e, device.id)}
+        />
       )}
       {device.locked && detailed && (
         <NexIcon

@@ -17,6 +17,8 @@ import {
   type StrokeHealth,
 } from '@/canvas/connector';
 import { deviceIsoGroup } from '@/canvas/deviceIso';
+import { deviceIconFlatGroup } from '@/canvas/deviceVisuals';
+import { clampIconScale } from '@/canvas/nodeCard';
 import { isoProjectPx, DEFAULT_TILE } from '@/canvas/iso';
 import type { CanvasObject, Device, Link, TextObject } from '@/model/types';
 
@@ -190,9 +192,12 @@ export function buildSvg(
   // Devices.
   for (const d of devices) {
     parts.push(`<g data-id="${escapeXml(d.id)}" transform="translate(${d.x} ${d.y})">`);
-    const iconSize = Math.max(22, Math.min(d.width * 0.72, d.height * 0.82));
+    const iconSize =
+      Math.max(22, Math.min(d.width * 0.72, d.height * 0.82)) * clampIconScale(d.iconScale);
+    // Flat export uses the flat 2D tile icon, matching the flat canvas. (Iso
+    // export — buildSvgIso — keeps the 3D model.)
     parts.push(
-      deviceIsoGroup(d.type, d.width / 2, d.height / 2 - 1, iconSize),
+      deviceIconFlatGroup(d.type, d.width / 2, d.height / 2 - 1, iconSize),
     );
     if (opts.includeLabels) {
       parts.push(

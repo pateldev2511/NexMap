@@ -51,6 +51,31 @@ describe('buildSvg — connectors + annotation cards', () => {
   });
 });
 
+describe('buildSvg — projection icons', () => {
+  it('flat export uses the flat device-model art, not the 3D iso model', () => {
+    const a = createDevice('router', 0, 0, L, { name: 'R1' });
+    const svg = buildSvg([a], [], { background: '#fff', includeLabels: true });
+    expect(svg).toContain('data-flat-icon');
+  });
+
+  it('flat export scales the icon by device.iconScale', () => {
+    const base = createDevice('router', 0, 0, L);
+    const big = createDevice('router', 0, 0, L, { iconScale: 2 });
+    const svgBase = buildSvg([base], [], { background: '#fff', includeLabels: false });
+    const svgBig = buildSvg([big], [], { background: '#fff', includeLabels: false });
+    // The flat art is wrapped in a scale() transform driven by icon size.
+    const scale = (s: string) =>
+      Number(/data-flat-icon="1" transform="translate\([^)]*\) scale\(([\d.]+)\)"/.exec(s)?.[1]);
+    expect(scale(svgBig)).toBeGreaterThan(scale(svgBase));
+  });
+
+  it('iso export keeps the 3D model (no flat-icon marker)', () => {
+    const a = createDevice('router', 0, 0, L, { name: 'R1' });
+    const svg = buildSvg([a], [], { background: '#fff', includeLabels: true, projection: 'iso' });
+    expect(svg).not.toContain('data-flat-icon');
+  });
+});
+
 describe('buildSvg', () => {
   it('emits a sized SVG with devices and links', () => {
     const a = createDevice('router', 0, 0, L, { name: 'R1' });

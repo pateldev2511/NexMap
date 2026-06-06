@@ -95,6 +95,16 @@ export interface Device {
    * load — always run through sanitizeHtml() before rendering with dangerouslySetInnerHTML.
    */
   descriptionHtml?: string;
+  /**
+   * On-canvas icon size multiplier (schema v2 additive). 1 = default. Drives the
+   * rendered icon scale in both flat and iso projections. Absent = 1 (back-compat).
+   */
+  iconScale?: number;
+  /**
+   * Height in px the floating info card sits above the node, driving the dotted
+   * leader line (schema v2 additive). Absent = DEFAULT_LABEL_HEIGHT.
+   */
+  labelHeight?: number;
   fill?: string;
   /** Rack placement (Phase 4): rack id, lowest occupied RU (1-based), height in U. */
   rackId?: string;
