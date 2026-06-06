@@ -109,6 +109,18 @@ describe('migration v1 → v2 (first-class interfaces)', () => {
     }
   });
 
+  it('reports migratedFrom so the UI can warn about the upgrade', () => {
+    const result = loadDocument(JSON.stringify(v1Doc()));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.migratedFrom).toBe(1);
+  });
+
+  it('does not set migratedFrom when no migration was needed', () => {
+    const result = loadDocument(JSON.stringify(createEmptyDocument(NOW)));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.migratedFrom).toBeUndefined();
+  });
+
   it('still REFUSES a v3 document (forward guard holds at the new version)', () => {
     const doc = createEmptyDocument(NOW);
     doc.schemaVersion = 3;

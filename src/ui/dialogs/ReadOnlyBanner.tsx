@@ -22,3 +22,22 @@ export function ErrorToast({ message }: { message: string }) {
     </div>
   );
 }
+
+/** Informational notice (e.g. schema upgrade on open). Click to dismiss. */
+export function NoticeToast({
+  message,
+  onDismiss,
+}: {
+  message: string;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className={styles.notice} role="status" onClick={onDismiss}>
+      <NexIcon name="warning" />
+      <span>{message}</span>
+      <button className={styles.noticeClose} onClick={onDismiss} aria-label="Dismiss">
+        ✕
+      </button>
+    </div>
+  );
+}

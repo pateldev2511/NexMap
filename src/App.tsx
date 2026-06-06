@@ -14,7 +14,7 @@ import { ViewSwitcher } from './ui/ViewSwitcher';
 import { RackView } from './ui/RackView/RackView';
 import { SettingsDialog } from './ui/dialogs/SettingsDialog';
 import { applyReduceMotion, getReduceMotion } from './lib/prefs';
-import { ReadOnlyBanner, ErrorToast } from './ui/dialogs/ReadOnlyBanner';
+import { ReadOnlyBanner, ErrorToast, NoticeToast } from './ui/dialogs/ReadOnlyBanner';
 import { NexIcon } from './ui/icons/NexIcon';
 import { Canvas } from './canvas/Canvas';
 import { PerfHarness } from './perf/PerfHarness';
@@ -370,6 +370,9 @@ export function App() {
             />
           )}
           {persistence.error && <ErrorToast message={persistence.error} />}
+          {persistence.notice && (
+            <NoticeToast message={persistence.notice} onDismiss={persistence.dismissNotice} />
+          )}
           {nexText && <NexTextDialog onClose={() => setNexText(false)} />}
           {importing && <ImportDialog onClose={() => setImporting(false)} />}
           {exporting && <ExportDialog onClose={() => setExporting(false)} />}

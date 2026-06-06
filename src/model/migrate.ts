@@ -34,7 +34,7 @@ export const MIGRATIONS: Record<number, Migration> = {
 };
 
 export type LoadResult =
-  | { ok: true; doc: NexMapDocument }
+  | { ok: true; doc: NexMapDocument; migratedFrom?: number }
   | { ok: false; reason: 'corrupt' | 'too-new' | 'invalid'; message: string };
 
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
@@ -98,6 +98,7 @@ export function loadDocument(raw: string): LoadResult {
   }
 
   // Migrate forward one version at a time.
+  const startVersion = version;
   let v = version;
   while (v < SCHEMA_VERSION) {
     const migration = MIGRATIONS[v];
@@ -124,5 +125,9 @@ export function loadDocument(raw: string): LoadResult {
     };
   }
 
-  return { ok: true, doc: doc as unknown as NexMapDocument };
+  return {
+    ok: true,
+    doc: doc as unknown as NexMapDocument,
+    ...(startVersion < SCHEMA_VERSION ? { migratedFrom: startVersion } : {}),
+  };
 }
