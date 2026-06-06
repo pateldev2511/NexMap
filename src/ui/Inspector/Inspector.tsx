@@ -6,7 +6,16 @@ import { nextFreeHost } from '@/lib/ipam';
 import { defaultDeviceName } from '@/model/schema';
 import { VENDORS, MODELS, ROLES } from '@/lib/deviceCatalog';
 import { MIN_LINK_WIDTH, MAX_LINK_WIDTH, DEFAULT_LINK_WIDTH } from '@/canvas/connector';
+import {
+  MIN_ICON_SCALE,
+  MAX_ICON_SCALE,
+  DEFAULT_ICON_SCALE,
+  MIN_LABEL_HEIGHT,
+  MAX_LABEL_HEIGHT,
+  DEFAULT_LABEL_HEIGHT,
+} from '@/canvas/nodeCard';
 import { RichTextEditor } from './RichTextEditor';
+import { ComboBox } from './ComboBox';
 import styles from './Inspector.module.css';
 
 /**
@@ -118,46 +127,78 @@ function DeviceInspector({ device }: { device: Device }) {
           </select>
         </Field>
         <Field label="Vendor">
-          <input
-            list="nexmap-vendors"
+          <ComboBox
             value={device.vendor ?? ''}
+            options={VENDORS}
             placeholder="Pick or type a vendor"
-            onChange={(e) => set('vendor', e.target.value)}
-            onBlur={endEdit}
+            ariaLabel="Vendor"
+            onChange={(v) => set('vendor', v)}
+            onCommit={endEdit}
           />
-          <datalist id="nexmap-vendors">
-            {VENDORS.map((v) => (
-              <option key={v} value={v} />
-            ))}
-          </datalist>
         </Field>
         <Field label="Model">
-          <input
-            list="nexmap-models"
+          <ComboBox
             value={device.model ?? ''}
+            options={MODELS}
             placeholder="Pick or type a model"
-            onChange={(e) => set('model', e.target.value)}
-            onBlur={endEdit}
+            ariaLabel="Model"
+            onChange={(v) => set('model', v)}
+            onCommit={endEdit}
           />
-          <datalist id="nexmap-models">
-            {MODELS.map((m) => (
-              <option key={m} value={m} />
-            ))}
-          </datalist>
         </Field>
         <Field label="Role">
-          <input
-            list="nexmap-roles"
+          <ComboBox
             value={device.role ?? ''}
+            options={ROLES}
             placeholder="Pick or type a role"
-            onChange={(e) => set('role', e.target.value)}
-            onBlur={endEdit}
+            ariaLabel="Role"
+            onChange={(v) => set('role', v)}
+            onCommit={endEdit}
           />
-          <datalist id="nexmap-roles">
-            {ROLES.map((r) => (
-              <option key={r} value={r} />
-            ))}
-          </datalist>
+        </Field>
+      </div>
+
+      <div className={styles.group}>
+        <div className={styles.groupTitle}>Appearance</div>
+        <Field label="Icon size">
+          <div className={styles.ipRow}>
+            <input
+              type="range"
+              min={MIN_ICON_SCALE}
+              max={MAX_ICON_SCALE}
+              step={0.05}
+              value={device.iconScale ?? DEFAULT_ICON_SCALE}
+              onChange={(e) => set('iconScale', Number(e.target.value))}
+              onPointerUp={endEdit}
+              aria-label="Icon size"
+              style={{ flex: '1 1 auto' }}
+            />
+            <span
+              style={{ minWidth: 40, textAlign: 'right', fontSize: 11, color: 'var(--chrome-fg-muted)' }}
+            >
+              {Math.round((device.iconScale ?? DEFAULT_ICON_SCALE) * 100)}%
+            </span>
+          </div>
+        </Field>
+        <Field label="Label height">
+          <div className={styles.ipRow}>
+            <input
+              type="range"
+              min={MIN_LABEL_HEIGHT}
+              max={MAX_LABEL_HEIGHT}
+              step={2}
+              value={device.labelHeight ?? DEFAULT_LABEL_HEIGHT}
+              onChange={(e) => set('labelHeight', Number(e.target.value))}
+              onPointerUp={endEdit}
+              aria-label="Label height"
+              style={{ flex: '1 1 auto' }}
+            />
+            <span
+              style={{ minWidth: 40, textAlign: 'right', fontSize: 11, color: 'var(--chrome-fg-muted)' }}
+            >
+              {Math.round(device.labelHeight ?? DEFAULT_LABEL_HEIGHT)}px
+            </span>
+          </div>
         </Field>
       </div>
 
