@@ -17,23 +17,39 @@ pleasant enough to present.
 
 ## Demo
 
-The editor supports flat and isometric views over the same underlying model. The
-visual below is a generated documentation asset showing the current workflow:
-edit, switch projection, preview imports, validate, and export.
+The editor renders the same model in a flat 2D view and an isometric 3D view. The
+loop below is generated straight from NexMap's own export pipeline (a real starter
+template, no mockups) — flat device-model icons in 2D, true 3D models on an
+isometric stage. Regenerate it any time with `npm run gen:readme-media`.
 
-![NexMap demo animation](docs/assets/nexmap-demo.gif)
+![NexMap flat ↔ isometric demo](docs/assets/nexmap-demo.gif)
+
+| Flat (2D) | Isometric (3D) |
+| --- | --- |
+| ![Flat view](docs/assets/nexmap-screenshot.svg) | ![Isometric view](docs/assets/nexmap-iso.svg) |
 
 ## Current State
 
 NexMap already has the core of a usable local network designer:
 
-- **Canvas editing:** drag/drop device library, pan/zoom, marquee select, lasso,
-  smart snap/alignment guides, grouping, lock/unlock, z-order, copy/cut/paste,
-  keyboard nudge, context menus, resize handles for canvas objects, and undo/redo.
+- **Canvas editing:** drag/drop device library (icons track the active view), pan/zoom,
+  marquee select, lasso, smart snap/alignment guides, grouping, lock/unlock, z-order,
+  copy/cut/paste, keyboard nudge, context menus, resize handles, and undo/redo. Moving a
+  group carries its connectors rigidly (bends and all) when both endpoints move.
+- **Connectors:** semantic links (VLAN/trunk, LACP, circuit IDs, interfaces), drag-to-relink
+  endpoints, waypoints, straight/orthogonal routing, manual color, and a thickness slider.
 - **Flat + isometric rendering:** toggle between 2D and isometric view without
-  changing the canonical flat model. Isometric mode includes projected grid,
-  upright device tiles, upright labels, connectors, hit testing, editing, and
-  export support.
+  changing the canonical flat model. Flat mode uses detailed flat device-model
+  icons; isometric mode renders true 3D models on a lit stage with grounded
+  shadows and cable-on-floor connectors, and an animated tilt plays on switch.
+  Both projections cover grid, upright labels, hit testing, editing, and export.
+- **Component detail:** FossFLOW-style floating info cards above each node (name +
+  rich-text description), inline rename on canvas, vendor/model/role combo fields
+  with presets, and per-node icon-size / label-height controls.
+- **Starter templates:** 18 one-click templates on the start screen, grouped into
+  Home & small office (Wi-Fi, mesh, smart home, home office, gaming, home lab,
+  apartment) and Enterprise & data center (branch, three-tier campus, DMZ, data
+  center rack, WAN hub-and-spoke, HA core, hybrid cloud, wireless campus).
 - **Network model:** typed devices, links, text notes, shapes/zones, image/SVG
   underlays, VLANs, subnets, racks, layers, saved views, and `.nexmap` documents.
 - **Validation:** duplicate IP/name, invalid IP/CIDR, missing link endpoints,
@@ -118,6 +134,7 @@ src/
   persistence/ IndexedDB drafts, File System Access, Web Locks, recovery
   lib/          CSV, IP/CIDR, spatial index, layout, geometry helpers
   ui/           shell, sidebars, inspector, bottom panels, dialogs
+scripts/        documentation media generation (real renders via the export pipeline)
 docs/assets/    README visuals and generated documentation media
 ```
 
