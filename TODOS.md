@@ -420,8 +420,9 @@ not commodity styling. Run /plan-design-review before implementing (UI scope).
       for color; dash is independent. Reuses the existing health pass.
 
 ### Deferred
-- [ ] **Bandwidth/width legend overlay** (S) — on-canvas thickness→speed key, included in
-      exports. Useful, not load-bearing; fast-follow after width ships.
+- [x] **Bandwidth/width legend overlay** ✅ — `BandwidthLegend` on-canvas key (1G/10G/100G
+      via bandwidthToWidth), shown when a link carries bandwidth; matching SVG group in
+      flat + iso export. Tests + live-verified.
 - [ ] **Explicit LAG/bundle object** (M) — only if independent per-link members prove
       insufficient for modeling port-channels. Revisit; not needed for v1.
 
