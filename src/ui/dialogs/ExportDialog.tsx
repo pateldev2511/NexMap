@@ -14,6 +14,7 @@ const FORMATS: { key: ExportFormat; label: string }[] = [
   { key: 'png', label: 'PNG' },
   { key: 'jpg', label: 'JPG' },
   { key: 'svg', label: 'SVG' },
+  { key: 'html', label: 'HTML (viewer)' },
   { key: 'pdf', label: 'PDF' },
   { key: 'zip', label: 'ZIP package' },
   { key: 'csv-inventory', label: 'CSV · Inventory' },
@@ -287,7 +288,9 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
               ? `Exports the ${format === 'csv-inventory' ? 'device inventory' : 'link list'} as CSV.`
               : format === 'zip'
                 ? `Bundles .nexmap + PNG + SVG + PDF + CSVs + validation report (${countSummary}).`
-                : `Exports ${scope === 'selection' ? 'the selection' : 'the whole diagram'} (${countSummary}).`}
+                : format === 'html'
+                  ? `A single self-contained .html file with a pan/zoom viewer — opens in any browser, 100% local, no NexMap needed (${countSummary}).`
+                  : `Exports ${scope === 'selection' ? 'the selection' : 'the whole diagram'} (${countSummary}).`}
           </div>
           {msg && (
             <div

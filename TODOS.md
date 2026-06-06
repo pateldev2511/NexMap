@@ -388,8 +388,10 @@ independent outside-voice challenge). Full reviewed plan + per-feature rigor:
       both flat and iso. Additive — reuses the existing, tested `startLinkFrom` connect
       gesture, so no gesture-machine rewrite. Live-verified (4 ports render on hover).
 
-### Strategic note (deferred — distribution)
-Local-first amputates the SaaS growth loop. The `.nexmap` file is the growth engine.
-Consider a **self-contained HTML export** (diagram + read-only viewer in one file,
-opens anywhere, still 100% local) so files can be shared without installing NexMap.
-Schema migration (Stage 3) fragments the file ecosystem — weigh this before shipping it.
+### Distribution — the growth lever ✅ SHIPPED 2026-06-05
+Local-first amputates the SaaS growth loop, so the shareable file is the growth engine.
+- [x] **Self-contained HTML export.** `io/export/html.ts` wraps the rendered SVG in a
+      single standalone `.html` with a tiny inline pan/zoom viewer; the file carries its
+      own strict CSP (`default-src 'none'`) so it stays 100% local. Opens in any browser,
+      no NexMap install. Wired into runExport + the Export dialog ("HTML (viewer)").
+      Live-verified (exported a working doc). Tests: html.test.ts (6).
