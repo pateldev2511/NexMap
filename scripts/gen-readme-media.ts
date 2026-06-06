@@ -21,6 +21,7 @@ import { buildSvg } from '@/io/export/buildSvg';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ASSETS = resolve(HERE, '../docs/assets');
+const PUBLIC = resolve(HERE, '../public');
 const NOW = '2026-06-06T00:00:00.000Z';
 const BG = '#f8fafc';
 
@@ -101,6 +102,46 @@ for (const f of frames) {
 gif.finish();
 writeFileSync(resolve(ASSETS, 'nexmap-demo.gif'), Buffer.from(gif.bytes()));
 
+// --- Open Graph social card (1200×630): wordmark + tagline + a real render. ---
+const OG_W = 1200;
+const OG_H = 630;
+
+// Render the diagram to a PNG and embed it as a data URI on the right side.
+const diag = new Resvg(flatSvg, {
+  fitTo: { mode: 'width', value: 560 },
+  background: '#ffffff',
+}).render();
+const diagB64 = Buffer.from(diag.asPng()).toString('base64');
+const diagScale = Math.min(560 / diag.width, 500 / diag.height);
+const dW = diag.width * diagScale;
+const dH = diag.height * diagScale;
+const dX = 620 + (560 - dW) / 2;
+const dY = (OG_H - dH) / 2;
+
+const ogSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${OG_W}" height="${OG_H}" viewBox="0 0 ${OG_W} ${OG_H}" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <linearGradient id="og-bg" x1="0" y1="0" x2="0" y2="${OG_H}" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#eef2ff"/>
+    </linearGradient>
+  </defs>
+  <rect width="${OG_W}" height="${OG_H}" fill="url(#og-bg)"/>
+  <rect x="0" y="0" width="10" height="${OG_H}" fill="#2563eb"/>
+  <text x="72" y="180" font-size="96" font-weight="700"><tspan fill="#0f172a">Nex</tspan><tspan fill="#2563eb">Map</tspan></text>
+  <text x="76" y="244" font-size="30" font-weight="600" fill="#334155">Local-first network diagram designer</text>
+  <text x="76" y="298" font-size="23" fill="#64748b">Validate your topology while you draw it.</text>
+  <text x="76" y="338" font-size="23" fill="#64748b">No login. No cloud. Your data stays on your device.</text>
+  <rect x="72" y="498" width="214" height="52" rx="26" fill="#2563eb"/>
+  <text x="179" y="532" font-size="24" font-weight="700" fill="#ffffff" text-anchor="middle">nexmap.xyz</text>
+  <image x="${dX.toFixed(1)}" y="${dY.toFixed(1)}" width="${dW.toFixed(1)}" height="${dH.toFixed(1)}" href="data:image/png;base64,${diagB64}"/>
+</svg>`;
+
+const ogPng = new Resvg(ogSvg, {
+  background: '#ffffff',
+  font: { loadSystemFonts: true, defaultFontFamily: 'Helvetica' },
+}).render().asPng();
+writeFileSync(resolve(PUBLIC, 'og.png'), ogPng);
+
 console.log(
-  `Wrote nexmap-screenshot.svg, nexmap-iso.svg, nexmap-demo.gif (${FRAME_W}×${FRAME_H}, ${frames.length} frames) to docs/assets/`,
+  `Wrote nexmap-screenshot.svg, nexmap-iso.svg, nexmap-demo.gif (${FRAME_W}×${FRAME_H}) to docs/assets/ and og.png (${OG_W}×${OG_H}) to public/`,
 );
