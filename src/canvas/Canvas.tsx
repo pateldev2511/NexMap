@@ -4,6 +4,7 @@ import { NexIcon } from '@/ui/icons/NexIcon';
 import { useProjectStore, type AlignEdge, type ProjectStore } from '@/store/projectStore';
 import { CanvasSearch } from './CanvasSearch';
 import { MiniMap } from './MiniMap';
+import { BandwidthLegend } from './BandwidthLegend';
 import { getConnectMode } from '@/lib/prefs';
 import { DeviceNode } from './DeviceNode';
 import { IsoDeviceNode } from './IsoDeviceNode';
@@ -1041,6 +1042,9 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   // hover connect-ports yield to avoid overlapping click targets (eng-review lock).
   const anyLinkSelected = [...selection].some((id) => !!store().getLink(id));
 
+  // Show the bandwidth→thickness key only when a link actually carries a bandwidth.
+  const showBandwidthLegend = links.some((l) => !!l.bandwidth);
+
   const svgClass = `${styles.svg} ${
     gesture.current.kind === 'pan'
       ? styles.panning
@@ -1559,6 +1563,8 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           <NexIcon name="zoom-selection" />
         </button>
       </div>
+
+      {showBandwidthLegend && <BandwidthLegend />}
 
       <MiniMap
         viewRect={

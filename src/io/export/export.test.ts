@@ -24,6 +24,21 @@ describe('buildSvg — connectors + annotation cards', () => {
     expect(svg).not.toContain('stroke-width="1.5"'); // thicker than default
   });
 
+  it('includes a bandwidth legend only when a link carries bandwidth', () => {
+    const a = createDevice('router', 0, 0, L);
+    const b = createDevice('switch', 200, 0, L);
+    const withBw = buildSvg([a, b], [createLink(a.id, b.id, L, { bandwidth: '10G' })], {
+      background: '#fff',
+      includeLabels: true,
+    });
+    expect(withBw).toContain('BANDWIDTH');
+    const noBw = buildSvg([a, b], [createLink(a.id, b.id, L)], {
+      background: '#fff',
+      includeLabels: true,
+    });
+    expect(noBw).not.toContain('BANDWIDTH');
+  });
+
   it('renders a stacked annotation card and escapes heading/subheading', () => {
     const card = createTextObject(10, 10, L, {
       heading: '<b>Core</b>',

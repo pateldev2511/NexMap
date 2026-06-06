@@ -12,6 +12,7 @@ import {
   orthogonalIconPoints,
   pathD,
   deriveLinkStroke,
+  bandwidthToWidth,
   EXPORT_DEFAULT_STROKE,
 } from '@/canvas/connector';
 import { deviceIsoGroup } from '@/canvas/deviceIso';
@@ -77,6 +78,23 @@ function linkStrokeAttrs(l: Link): string {
   const s = deriveLinkStroke(l, null, true);
   const dash = s.dashed ? ' stroke-dasharray="6 4"' : '';
   return `stroke="${escapeXml(s.color ?? EXPORT_DEFAULT_STROKE)}" stroke-width="${s.width}"${dash}`;
+}
+
+/** Bandwidth→thickness key, anchored bottom-left, only when a link carries a bandwidth. */
+function bandwidthLegendSvg(links: Link[], x: number, yBottom: number): string {
+  if (!links.some((l) => l.bandwidth)) return '';
+  const samples = ['1G', '10G', '100G'];
+  const lh = 14;
+  let y = yBottom - samples.length * lh;
+  const parts = [`<text x="${x}" y="${y}" font-size="9" font-weight="700" fill="#64748b">BANDWIDTH</text>`];
+  for (const bw of samples) {
+    y += lh;
+    parts.push(
+      `<line x1="${x}" y1="${y - 3}" x2="${x + 26}" y2="${y - 3}" stroke="${EXPORT_DEFAULT_STROKE}" stroke-width="${bandwidthToWidth(bw)}" stroke-linecap="round"/>`,
+      `<text x="${x + 32}" y="${y}" font-size="9" fill="#64748b">${bw}</text>`,
+    );
+  }
+  return parts.join('');
 }
 
 /**
@@ -192,6 +210,7 @@ export function buildSvg(
     parts.push(`<g data-id="${escapeXml(o.id)}">${textObjectSvg(o, o.x + 4, o.y)}</g>`);
   }
 
+  parts.push(bandwidthLegendSvg(links, b.minX + 12, b.maxY - 8));
   parts.push(`</svg>`);
   return parts.join('');
 }
@@ -316,6 +335,7 @@ function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): 
     parts.push(textObjectSvg(o, p.x, p.y));
   }
 
+  parts.push(bandwidthLegendSvg(links, minX + 12, maxY - 8));
   parts.push(`</svg>`);
   return parts.join('');
 }
