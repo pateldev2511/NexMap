@@ -426,6 +426,12 @@ not commodity styling. Run /plan-design-review before implementing (UI scope).
 - [ ] **Explicit LAG/bundle object** (M) — only if independent per-link members prove
       insufficient for modeling port-channels. Revisit; not needed for v1.
 
+### Fast-follows shipped after the eng review
+- [x] **Bandwidth/width legend** (canvas + flat/iso export).
+- [x] **Health-tint in export** — runExport → buildSvg threads the health report so
+      exported PNG/SVG/HTML highlight SPOF/critical/conflict links; Export dialog toggle
+      "Highlight risks" (default on); manual colors still win.
+
 ### Rejected
 - Floating/dangling connector endpoints (breaks the validates-itself invariant).
 - Full inline WYSIWYG rich-text editor (off-moat; fights the SVG canvas).
