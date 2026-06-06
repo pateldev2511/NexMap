@@ -6,6 +6,8 @@ import { BottomPanel } from './ui/BottomPanel/BottomPanel';
 import { FirstRun } from './ui/firstrun/FirstRun';
 import { RecoveryDialog } from './ui/dialogs/RecoveryDialog';
 import { ImportDialog } from './ui/dialogs/ImportDialog';
+import { NexTextDialog } from './ui/dialogs/NexTextDialog';
+import { usePasteToCanvas } from './io/import/usePasteToCanvas';
 import { ExportDialog } from './ui/dialogs/ExportDialog';
 import { ShortcutsDialog } from './ui/dialogs/ShortcutsDialog';
 import { ViewSwitcher } from './ui/ViewSwitcher';
@@ -75,6 +77,7 @@ export function App() {
   const [view, setView] = useState<'editor' | 'perf'>('editor');
   const [firstRunDone, setFirstRunDone] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [nexText, setNexText] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [presentation, setPresentation] = useState(false);
@@ -91,6 +94,9 @@ export function App() {
 
   const persistence = usePersistence();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Paste-to-canvas: clipboard image → underlay, clipboard CSV → model objects.
+  usePasteToCanvas();
 
   // Apply the saved reduced-motion preference on launch.
   useEffect(() => {
@@ -156,6 +162,14 @@ export function App() {
       >
         <NexIcon name="save" />
         <span>Save</span>
+      </button>
+      <button
+        className={shell.topbarBtn}
+        onClick={() => setNexText(true)}
+        title="NexText — text to diagram"
+      >
+        <NexIcon name="text" />
+        <span>NexText</span>
       </button>
       <button
         className={shell.topbarBtn}
@@ -356,6 +370,7 @@ export function App() {
             />
           )}
           {persistence.error && <ErrorToast message={persistence.error} />}
+          {nexText && <NexTextDialog onClose={() => setNexText(false)} />}
           {importing && <ImportDialog onClose={() => setImporting(false)} />}
           {exporting && <ExportDialog onClose={() => setExporting(false)} />}
           {showHelp && <ShortcutsDialog onClose={() => setShowHelp(false)} />}

@@ -99,6 +99,16 @@
   display: flex;
   gap: 6px;
   min-width: 0;
+  justify-content: flex-end;
+}
+
+/* When the topbar gets tight, collapse action buttons to icons (tooltips remain)
+   so they never overlap. The "More" menu panel labels are unaffected. */
+@media (max-width: 1240px) {
+  .topbarActions > .topbarBtn span,
+  .topbarActions .moreMenu > summary span {
+    display: none;
+  }
 }
 
 .topbarBtn {
@@ -106,12 +116,14 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
+  /* Never shrink below content — shrinking made labels overlap and click targets
+     collide. Buttons keep their size; labels collapse to icons when space is tight. */
+  flex: 0 0 auto;
   background: transparent;
   border: 1px solid var(--chrome-border);
   color: var(--chrome-fg);
   border-radius: 6px;
   padding: 4px 10px;
-  min-width: 0;
   min-height: 28px;
   line-height: 1;
   white-space: nowrap;

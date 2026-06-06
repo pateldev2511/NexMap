@@ -3,6 +3,7 @@ import type { DeviceType } from '@/model/types';
 import { NexIcon } from '@/ui/icons/NexIcon';
 import { useProjectStore, type AlignEdge, type ProjectStore } from '@/store/projectStore';
 import { CanvasSearch } from './CanvasSearch';
+import { MiniMap } from './MiniMap';
 import { getConnectMode } from '@/lib/prefs';
 import { DeviceNode } from './DeviceNode';
 import { IsoDeviceNode } from './IsoDeviceNode';
@@ -1469,6 +1470,30 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           <NexIcon name="zoom-selection" />
         </button>
       </div>
+
+      <MiniMap
+        viewRect={
+          projection === 'flat' && size.w > 0
+            ? {
+                x: -viewport.tx / viewport.scale,
+                y: -viewport.ty / viewport.scale,
+                width: size.w / viewport.scale,
+                height: size.h / viewport.scale,
+              }
+            : null
+        }
+        onJump={(fx, fy) => {
+          const p =
+            projection === 'iso'
+              ? isoProjectPx(fx, fy, GRID_SIZE, ISO_TILE)
+              : { x: fx, y: fy };
+          setViewport((v) => ({
+            ...v,
+            tx: size.w / 2 - p.x * v.scale,
+            ty: size.h / 2 - p.y * v.scale,
+          }));
+        }}
+      />
 
       {readout && (
         <div className={styles.dragReadout} style={{ left: readout.sx, top: readout.sy }}>

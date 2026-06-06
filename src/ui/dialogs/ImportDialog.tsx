@@ -329,6 +329,8 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
               topology/NetBox JSON, or an image/SVG background underlay.
               <br />
               CSV headers are auto-detected; SVG underlays are sanitized on import.
+              <br />
+              Tip: you can also paste CSV or an image straight onto the canvas (Ctrl/Cmd+V).
             </div>
           )}
 
