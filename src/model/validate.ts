@@ -363,6 +363,54 @@ function checkOrphanedDevices(devices: Device[], links: Link[]): ValidationIssue
   return issues;
 }
 
+/**
+ * Rule: a link's interface reference must resolve to an interface on its endpoint
+ * device, and a physical interface shouldn't carry more than one link.
+ */
+function checkInterfaces(devices: Device[], links: Link[]): ValidationIssue[] {
+  const byDevice = new Map(devices.map((d) => [d.id, d]));
+  const issues: ValidationIssue[] = [];
+  // Count links per (device, interface) to find over-subscribed ports.
+  const usage = new Map<string, { count: number; deviceId: string; name: string }>();
+
+  const note = (deviceId: string, ifaceId: string | undefined, linkId: string) => {
+    if (!ifaceId) return;
+    const dev = byDevice.get(deviceId);
+    const iface = dev?.interfaces?.find((i) => i.id === ifaceId);
+    if (!iface) {
+      issues.push({
+        id: issueId(),
+        severity: 'warn',
+        code: 'dangling-interface',
+        message: `A link references an interface that no longer exists on ${dev?.name ?? deviceId}.`,
+        objectIds: [linkId, deviceId],
+      });
+      return;
+    }
+    const key = `${deviceId}|${ifaceId}`;
+    const u = usage.get(key) ?? { count: 0, deviceId, name: `${dev?.name ?? ''} ${iface.name}`.trim() };
+    u.count += 1;
+    usage.set(key, u);
+  };
+
+  for (const l of links) {
+    note(l.sourceId, l.sourceIfaceId, l.id);
+    note(l.targetId, l.targetIfaceId, l.id);
+  }
+  for (const u of usage.values()) {
+    if (u.count > 1) {
+      issues.push({
+        id: issueId(),
+        severity: 'warn',
+        code: 'oversubscribed-interface',
+        message: `Interface ${u.name} carries ${u.count} links — a physical port usually has one.`,
+        objectIds: [u.deviceId],
+      });
+    }
+  }
+  return issues;
+}
+
 /** Run all validations. Deterministic order: errors-worthy checks first. */
 export function validate({
   devices,
@@ -381,6 +429,7 @@ export function validate({
     ...checkIpOutsideSubnet(devices, subnets),
     ...checkRacks(devices, racks),
     ...checkTrunkAccess(links),
+    ...checkInterfaces(devices, links),
     ...checkDuplicateNames(devices),
     ...checkDeviceNames(devices),
     ...checkOrphanedDevices(devices, links),

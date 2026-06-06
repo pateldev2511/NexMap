@@ -17,6 +17,20 @@ type Migration = (doc: Record<string, unknown>) => Record<string, unknown>;
 /** Keyed by the FROM version. Add an entry whenever SCHEMA_VERSION increases. */
 export const MIGRATIONS: Record<number, Migration> = {
   // 0: (doc) => ({ ...doc, schemaVersion: 1, newField: [] }),  // example
+  //
+  // v1 → v2: first-class interfaces. Purely ADDITIVE — give every device an empty
+  // `interfaces` array (preserving any that already exist). No data is dropped, so this
+  // is a safe forward-only step; the version stamp + the too-new guard keep older builds
+  // from silently re-saving and losing the new field.
+  1: (doc) => ({
+    ...doc,
+    schemaVersion: 2,
+    devices: (Array.isArray(doc.devices) ? doc.devices : []).map((d) =>
+      typeof d === 'object' && d !== null
+        ? { interfaces: [], ...(d as Record<string, unknown>) }
+        : d,
+    ),
+  }),
 };
 
 export type LoadResult =

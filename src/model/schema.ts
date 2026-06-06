@@ -8,6 +8,7 @@ import type {
   Device,
   DeviceType,
   ImageObject,
+  Interface,
   Layer,
   Link,
   NexMapDocument,
@@ -21,7 +22,7 @@ import type {
 } from './types';
 
 /** Bump when the on-disk shape changes; add a migration in migrate.ts. */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 export const APP_VERSION = '0.1.0';
 
 export const DEFAULT_DEVICE_SIZE = { width: 56, height: 40 } as const;
@@ -89,8 +90,14 @@ export function createDevice(
     width: DEFAULT_DEVICE_SIZE.width,
     height: DEFAULT_DEVICE_SIZE.height,
     layerId,
+    interfaces: [],
     ...partial,
   };
+}
+
+/** Mint a first-class interface (schema v2). */
+export function createInterface(name: string, partial: Partial<Interface> = {}): Interface {
+  return { id: nanoid(), name, ...partial };
 }
 
 export function createLink(
