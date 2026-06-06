@@ -1,0 +1,4 @@
+# Cloudflare Pages SPA fallback: serve the app shell for client-side routes.
+# Static files (hashed assets, sw.js, manifest) are served directly; this only
+# applies when no file matches.
+/*    /index.html    200

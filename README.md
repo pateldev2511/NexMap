@@ -123,6 +123,26 @@ npm run build      # production build
 
 If port `5173` is busy, Vite will choose another local port.
 
+## Deploy (Cloudflare)
+
+NexMap builds to a static SPA, so it hosts as plain assets — there is no backend,
+no database, and no stored or synced project data on the server. It deploys to
+both Cloudflare Workers (Static Assets) and Cloudflare Pages.
+
+```bash
+npm run deploy:check     # build + wrangler dry-run (validate, no upload)
+npm run deploy:workers   # build + deploy to Cloudflare Workers  (*.workers.dev)
+npm run deploy:pages     # build + deploy to Cloudflare Pages     (*.pages.dev)
+```
+
+The first deploy prompts `wrangler login` (one-time OAuth). Config lives in
+`wrangler.toml` (assets-only, SPA fallback). SPA routing, caching, and security
+headers are set by `public/_redirects` and `public/_headers`, which Vite copies
+into `dist/`.
+
+For Pages via the dashboard instead of the CLI: build command `npm run build`,
+output directory `dist`.
+
 ## Project Layout
 
 ```text

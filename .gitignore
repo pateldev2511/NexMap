@@ -8,3 +8,5 @@ coverage
 *.log
 *.tsbuildinfo
 .gstack/
+.wrangler/
+.dev.vars

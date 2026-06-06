@@ -13,7 +13,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -b --noEmit",
-    "gen:readme-media": "vite-node scripts/gen-readme-media.ts"
+    "gen:readme-media": "vite-node scripts/gen-readme-media.ts",
+    "deploy:pages": "npm run build && wrangler pages deploy dist --project-name=nexmap",
+    "deploy:workers": "npm run build && wrangler deploy",
+    "deploy:check": "npm run build && wrangler deploy --dry-run"
   },
   "dependencies": {
     "dompurify": "^3.4.7",
@@ -44,6 +47,7 @@
     "typescript": "^5.6.2",
     "vite": "^5.4.8",
     "vite-node": "^2.1.9",
-    "vitest": "^2.1.2"
+    "vitest": "^2.1.2",
+    "wrangler": "^4.98.0"
   }
 }

@@ -1,0 +1,18 @@
+# Cloudflare Workers deployment (Static Assets).
+#
+# NexMap is a local-first SPA with NO backend — it never stores or syncs project
+# data server-side. So this is an assets-only Worker: Cloudflare just serves the
+# built `dist/` bundle. There is intentionally no `main` worker script and no
+# bindings (KV, D1, R2, etc.) — adding server state would break the no-cloud promise.
+#
+#   npm run deploy:workers      # build + wrangler deploy  (serves on *.workers.dev)
+#
+# Cloudflare Pages users don't need this file; see `npm run deploy:pages`.
+
+name = "nexmap"
+compatibility_date = "2024-11-01"
+
+[assets]
+directory = "./dist"
+# Serve index.html for unknown routes so the single-page app boots everywhere.
+not_found_handling = "single-page-application"
