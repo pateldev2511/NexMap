@@ -383,10 +383,10 @@ independent outside-voice challenge). Full reviewed plan + per-feature rigor:
       devices (flat scene coords), live viewport rectangle (flat mode), click/drag to
       recenter the camera (projection-aware jump). Live-verified (6 device rects, view
       rect tracks projection, click-to-jump pans).
-- [ ] **Connection ports + directional hover-connect** (replace single corner handle).
-      Deferred — the riskiest item (rewires the connect gesture state machine) for the
-      lowest marginal gain (connect already works via the corner handle). Pick up when
-      the connect UX is the focus.
+- [x] **Connection ports + directional hover-connect.** Replaced the single right-edge
+      handle with 4 directional ports (top/right/bottom/left) on the hovered device, in
+      both flat and iso. Additive — reuses the existing, tested `startLinkFrom` connect
+      gesture, so no gesture-machine rewrite. Live-verified (4 ports render on hover).
 
 ### Strategic note (deferred — distribution)
 Local-first amputates the SaaS growth loop. The `.nexmap` file is the growth engine.

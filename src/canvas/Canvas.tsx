@@ -1321,7 +1321,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
             ),
           )}
 
-          {/* Connect handle on the hovered device (flat mode; iso has its own). */}
+          {/* Directional connect ports on the hovered device (flat mode; iso has its own). */}
           {!readOnly &&
             projection !== 'iso' &&
             mode === 'select' &&
@@ -1329,16 +1329,25 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
             gesture.current.kind === 'none' &&
             (() => {
               const c = center(handleDevice);
-              const handle = iconEdgePoint(handleDevice, { x: c.x + 100, y: c.y });
-              return (
-                <circle
-                  className={styles.connectHandle}
-                  cx={handle.x}
-                  cy={handle.y}
-                  r={6 / viewport.scale}
-                  onPointerDown={(e) => startLinkFrom(e, handleDevice.id)}
-                />
-              );
+              const dirs = [
+                { x: c.x + 100, y: c.y },
+                { x: c.x - 100, y: c.y },
+                { x: c.x, y: c.y - 100 },
+                { x: c.x, y: c.y + 100 },
+              ];
+              return dirs.map((to, i) => {
+                const h = iconEdgePoint(handleDevice, to);
+                return (
+                  <circle
+                    key={i}
+                    className={styles.connectHandle}
+                    cx={h.x}
+                    cy={h.y}
+                    r={5 / viewport.scale}
+                    onPointerDown={(e) => startLinkFrom(e, handleDevice.id)}
+                  />
+                );
+              });
             })()}
         </g>
 
@@ -1381,17 +1390,26 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
               gesture.current.kind === 'none' &&
               (() => {
                 const c = center(handleDevice);
-                const edge = iconEdgePoint(handleDevice, { x: c.x + 100, y: c.y });
-                const corner = isoProjectPx(edge.x, edge.y, GRID_SIZE, ISO_TILE);
-                return (
-                  <circle
-                    className={styles.connectHandle}
-                    cx={corner.x}
-                    cy={corner.y}
-                    r={6 / viewport.scale}
-                    onPointerDown={(e) => startLinkFrom(e, handleDevice.id)}
-                  />
-                );
+                const dirs = [
+                  { x: c.x + 100, y: c.y },
+                  { x: c.x - 100, y: c.y },
+                  { x: c.x, y: c.y - 100 },
+                  { x: c.x, y: c.y + 100 },
+                ];
+                return dirs.map((to, i) => {
+                  const edge = iconEdgePoint(handleDevice, to);
+                  const p = isoProjectPx(edge.x, edge.y, GRID_SIZE, ISO_TILE);
+                  return (
+                    <circle
+                      key={i}
+                      className={styles.connectHandle}
+                      cx={p.x}
+                      cy={p.y}
+                      r={5 / viewport.scale}
+                      onPointerDown={(e) => startLinkFrom(e, handleDevice.id)}
+                    />
+                  );
+                });
               })()}
           </g>
         )}
