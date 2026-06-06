@@ -1,0 +1,27 @@
+.miniMap {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  touch-action: none;
+  z-index: 4;
+}
+
+.bg {
+  fill: var(--chrome-bg);
+}
+
+.node {
+  fill: var(--chrome-fg-muted);
+  opacity: 0.7;
+}
+
+.view {
+  fill: color-mix(in srgb, var(--accent) 14%, transparent);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  pointer-events: none;
+}
