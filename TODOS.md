@@ -367,11 +367,12 @@ independent outside-voice challenge). Full reviewed plan + per-feature rigor:
       Tests: validate.test.ts (+3).
 - [x] **Inspector UI:** device Interfaces section (add/rename/speed/delete, live-verified
       eth0 add) + link endpoint interface pickers (select / +add, label kept in sync).
-- [~] **Migration safety polish (deferred):** `<name>.backup.nexmap` on file-open migrate
-      + one-time "saved as v2, older builds won't open it" notice. Lower-stakes here
-      because the migration is non-destructive (additive only) and the too-new guard
-      already prevents older builds from clobbering v2 data. Worth adding for the
-      file-open path later.
+- [x] **Migration upgrade notice.** `loadDocument` reports `migratedFrom`; open/openText
+      surface a dismissible NoticeToast ("upgraded to v2, older builds won't open it").
+      Tests: migrate.test.ts (+2).
+- [~] **Pre-migration backup file (deferred):** `<name>.backup.nexmap` on file-open migrate.
+      Needs a directory handle / File System Access (unavailable in some sandboxes), and
+      the migration is non-destructive anyway — low-stakes follow-up.
 
 ### Stage 4 — Canvas craft (fast-follow polish) — P3 (mostly shipped 2026-06-05)
 - [x] **Smart equal-spacing snap while dragging.** `computeSpacingSnap` in align.ts:
