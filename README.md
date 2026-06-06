@@ -3,6 +3,9 @@
 **NexMap is a local-first network infrastructure designer that validates your
 diagram while you draw it.**
 
+**▶ Try it live: [nexmap.xyz](https://nexmap.xyz/)** — runs entirely in your
+browser, no login, nothing leaves your device.
+
 It runs in the browser, has no login, and keeps project data on the user's
 machine through IndexedDB and `.nexmap` files. The long-term goal is an open
 source alternative to heavyweight network diagramming tools: fast enough for
@@ -127,7 +130,8 @@ If port `5173` is busy, Vite will choose another local port.
 
 NexMap builds to a static SPA, so it hosts as plain assets — there is no backend,
 no database, and no stored or synced project data on the server. It deploys to
-both Cloudflare Workers (Static Assets) and Cloudflare Pages.
+both Cloudflare Workers (Static Assets) and Cloudflare Pages. The live instance
+runs at [nexmap.xyz](https://nexmap.xyz/).
 
 ```bash
 npm run deploy:check     # build + wrangler dry-run (validate, no upload)
@@ -136,9 +140,10 @@ npm run deploy:pages     # build + deploy to Cloudflare Pages     (*.pages.dev)
 ```
 
 The first deploy prompts `wrangler login` (one-time OAuth). Config lives in
-`wrangler.toml` (assets-only, SPA fallback). SPA routing, caching, and security
-headers are set by `public/_redirects` and `public/_headers`, which Vite copies
-into `dist/`.
+`wrangler.toml` (assets-only). The SPA fallback is handled by
+`not_found_handling = "single-page-application"` there — not by a `_redirects`
+rule, which Cloudflare's asset validator rejects as a loop. Caching and security
+headers come from `public/_headers`, which Vite copies into `dist/`.
 
 For Pages via the dashboard instead of the CLI: build command `npm run build`,
 output directory `dist`.
