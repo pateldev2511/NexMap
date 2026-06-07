@@ -27,6 +27,38 @@ describe('loadDocument', () => {
     }
   });
 
+  it('preserves reserved top-level arrays verbatim (forward-compat)', () => {
+    const doc = createEmptyDocument(NOW) as unknown as Record<string, unknown>;
+    doc.customFields = [{ id: 'cf1', whatever: 42 }];
+    const result = loadDocument(JSON.stringify(doc));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.doc.customFields).toEqual([{ id: 'cf1', whatever: 42 }]);
+    }
+  });
+
+  it('strips prototype-pollution keys from a hostile file (security)', () => {
+    const doc = createEmptyDocument(NOW) as unknown as Record<string, unknown>;
+    const hostile = JSON.stringify(doc).replace(
+      '"devices":[]',
+      '"devices":[{"id":"x","__proto__":{"polluted":true}}]',
+    );
+    const result = loadDocument(hostile);
+    // It loads (sanitized), and Object prototype is NOT polluted.
+    expect(result.ok).toBe(true);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it('stripDangerousKeys removes __proto__/constructor/prototype recursively', () => {
+    const cleaned = stripDangerousKeys({
+      a: 1,
+      __proto__: { x: 1 },
+      nested: { constructor: 2, ok: 3, prototype: 4 },
+    } as Record<string, unknown>);
+    expect(Object.keys(cleaned)).toEqual(['a', 'nested']);
+    expect(Object.keys(cleaned.nested as object)).toEqual(['ok']);
+  });
+
   it('REFUSES a newer-than-supported schema (data safety)', () => {
     const doc = createEmptyDocument(NOW);
     doc.schemaVersion = SCHEMA_VERSION + 1;
