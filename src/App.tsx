@@ -13,6 +13,8 @@ import { ShortcutsDialog } from './ui/dialogs/ShortcutsDialog';
 import { ViewSwitcher } from './ui/ViewSwitcher';
 import { RackView } from './ui/RackView/RackView';
 import { SettingsDialog } from './ui/dialogs/SettingsDialog';
+import { AboutDialog } from './ui/dialogs/AboutDialog';
+import { UpdateToast } from './ui/UpdateToast';
 import { applyReduceMotion, getReduceMotion } from './lib/prefs';
 import { ReadOnlyBanner, ErrorToast, NoticeToast } from './ui/dialogs/ReadOnlyBanner';
 import { NexIcon } from './ui/icons/NexIcon';
@@ -84,6 +86,7 @@ export function App() {
   const [showPages, setShowPages] = useState(false);
   const [rackView, setRackView] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
   const canUndo = useProjectStore((s) => s.canUndo);
   const canRedo = useProjectStore((s) => s.canRedo);
   const undo = useProjectStore((s) => s.undo);
@@ -251,6 +254,10 @@ export function App() {
             <NexIcon name="help" />
             <span>Keyboard shortcuts</span>
           </button>
+          <button className={shell.menuItem} onClick={() => setShowAbout(true)}>
+            <NexIcon name="help" />
+            <span>About &amp; privacy</span>
+          </button>
         </div>
       </details>
     </>
@@ -377,6 +384,7 @@ export function App() {
           {importing && <ImportDialog onClose={() => setImporting(false)} />}
           {exporting && <ExportDialog onClose={() => setExporting(false)} />}
           {showHelp && <ShortcutsDialog onClose={() => setShowHelp(false)} />}
+          {showAbout && <AboutDialog onClose={() => setShowAbout(false)} />}
           {showSettings && (
             <SettingsDialog
               theme={theme}
@@ -384,6 +392,7 @@ export function App() {
               onClose={() => setShowSettings(false)}
             />
           )}
+          <UpdateToast />
           <input
             ref={fileInputRef}
             type="file"

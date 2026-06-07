@@ -23,8 +23,23 @@ createRoot(rootEl).render(
 // must not be intercepted by a cached app shell.
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {
-      /* offline support unavailable — app still works online */
-    });
+    navigator.serviceWorker
+      .register('/sw.js')
+      .then((reg) => {
+        // When an updated worker installs while a previous one already controls
+        // the page, surface a "new version available" prompt (see UpdateToast).
+        reg.addEventListener('updatefound', () => {
+          const next = reg.installing;
+          if (!next) return;
+          next.addEventListener('statechange', () => {
+            if (next.state === 'installed' && navigator.serviceWorker.controller) {
+              window.dispatchEvent(new CustomEvent('nexmap:update-available'));
+            }
+          });
+        });
+      })
+      .catch(() => {
+        /* offline support unavailable — app still works online */
+      });
   });
 }
