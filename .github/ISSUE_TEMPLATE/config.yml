@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Try NexMap
+    url: https://nexmap.xyz/
+    about: The live app — runs entirely in your browser, no login.
+  - name: Security vulnerability
+    url: https://github.com/pateldev2511/NexMap/security/advisories/new
+    about: Report security issues privately, not as a public issue.

@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Lint, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # `npm ci` enforces an in-sync lock file — this is the exact check that
+      # gates the Cloudflare build, so catching it here keeps main deployable.
+      - name: Install (clean)
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Type-check + build
+        run: npm run build
+
+      # Validate the Cloudflare Workers config + assets without deploying.
+      # Informational: a CI-only wrangler quirk shouldn't block a green PR.
+      - name: Validate Cloudflare config
+        run: npx wrangler deploy --dry-run
+        continue-on-error: true

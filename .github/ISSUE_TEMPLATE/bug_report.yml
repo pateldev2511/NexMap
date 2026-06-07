@@ -1,0 +1,33 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! For security issues, do **not** use this form —
+        see [SECURITY.md](../blob/main/SECURITY.md).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what happened instead?
+      placeholder: Steps to reproduce, expected vs actual.
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      description: nexmap.xyz, a local build, or self-hosted?
+      placeholder: nexmap.xyz
+  - type: input
+    id: browser
+    attributes:
+      label: Browser / OS
+      placeholder: Chrome 126 / macOS 14
+  - type: textarea
+    id: file
+    attributes:
+      label: Sample (optional)
+      description: A minimal `.nexmap` file or import that triggers it (paste or attach). Your data stays local, so only share if you're comfortable.
