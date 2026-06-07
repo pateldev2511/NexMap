@@ -372,6 +372,7 @@ export interface ProjectStore {
   // --- SceneSource read API (renderer reads through these) ---
   visibleDevices(viewport: Box): Device[];
   visibleLinks(viewport: Box): Link[];
+  visibleObjects(viewport: Box): CanvasObject[];
   getDevice(id: string): Device | undefined;
   getLink(id: string): Link | undefined;
   devicesAll(): Device[];
@@ -1627,6 +1628,17 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       const out: Link[] = [];
       for (const l of model.links.values()) {
         if (visible.has(l.sourceId) || visible.has(l.targetId)) out.push(l);
+      }
+      return out;
+    },
+
+    visibleObjects(viewport) {
+      // Objects (shapes/zones/text/image underlays) share the spatial index with
+      // devices, so the same query culls off-screen ones on large diagrams.
+      const out: CanvasObject[] = [];
+      for (const id of index.query(viewport)) {
+        const o = model.objects.get(id);
+        if (o) out.push(o);
       }
       return out;
     },

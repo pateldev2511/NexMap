@@ -1016,7 +1016,9 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       projection === 'iso' && size.w > 0
         ? flatBoxFromScreenRect({ x: 0, y: 0, w: size.w, h: size.h }, toFlat)
         : visibleBox(viewport, size.w, size.h);
-    const m = projection === 'iso' ? 200 : 0;
+    // Margin keeps just-off-screen content mounted so panning doesn't pop nodes
+    // in at the edges. Iso needs more headroom (the projection skews bounds).
+    const m = projection === 'iso' ? 200 : 96;
     return { x: b.x - m, y: b.y - m, width: b.width + 2 * m, height: b.height + 2 * m };
   })();
   const vis = (layerId: string) => store().isLayerVisible(layerId);
@@ -1025,7 +1027,9 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   );
   // Stacking order: lower z renders first (underneath).
   devices.sort((a, b) => (a.z ?? 0) - (b.z ?? 0));
-  const allObjects = (size.w > 0 ? store().objectsAll() : []).filter((o) =>
+  // Cull objects (shapes/zones/text/underlays) to the viewport too — large
+  // diagrams with many annotations no longer render the off-screen ones.
+  const allObjects = (size.w > 0 ? store().visibleObjects(box) : []).filter((o) =>
     vis(o.layerId),
   );
   const byZ = (a: { z?: number }, b: { z?: number }) => (a.z ?? 0) - (b.z ?? 0);
