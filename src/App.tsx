@@ -15,6 +15,7 @@ import { RackView } from './ui/RackView/RackView';
 import { SettingsDialog } from './ui/dialogs/SettingsDialog';
 import { AboutDialog } from './ui/dialogs/AboutDialog';
 import { UpdateToast } from './ui/UpdateToast';
+import { CommandPalette, type PaletteCommand } from './ui/CommandPalette';
 import { applyReduceMotion, getReduceMotion } from './lib/prefs';
 import { ReadOnlyBanner, ErrorToast, NoticeToast } from './ui/dialogs/ReadOnlyBanner';
 import { NexIcon } from './ui/icons/NexIcon';
@@ -87,6 +88,7 @@ export function App() {
   const [rackView, setRackView] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
+  const [showPalette, setShowPalette] = useState(false);
   const canUndo = useProjectStore((s) => s.canUndo);
   const canRedo = useProjectStore((s) => s.canRedo);
   const undo = useProjectStore((s) => s.undo);
@@ -280,6 +282,9 @@ export function App() {
       } else if (k === 'e') {
         e.preventDefault();
         setExporting(true);
+      } else if (k === 'k') {
+        e.preventDefault();
+        setShowPalette((p) => !p);
       }
     };
     const onHelp = (e: KeyboardEvent) => {
@@ -393,6 +398,35 @@ export function App() {
             />
           )}
           <UpdateToast />
+          {showPalette &&
+            (() => {
+              const st = useProjectStore.getState;
+              const cmds: PaletteCommand[] = [
+                { id: 'new', label: 'New project', hint: '⌘N', run: handleNew },
+                { id: 'open', label: 'Open .nexmap…', hint: '⌘O', run: () => void handleOpen() },
+                { id: 'save', label: 'Save', hint: '⌘S', run: () => void persistence.save() },
+                { id: 'export', label: 'Export…', hint: '⌘E', run: () => setExporting(true) },
+                { id: 'import', label: 'Import…', run: () => setImporting(true) },
+                { id: 'nextext', label: 'NexText (describe in text)…', run: () => setNexText(true) },
+                { id: 'undo', label: 'Undo', hint: '⌘Z', run: doUndo },
+                { id: 'redo', label: 'Redo', hint: '⌘⇧Z', run: doRedo },
+                { id: 'layout', label: 'Auto-layout (tidy)', run: () => st().autoLayout() },
+                {
+                  id: 'projection',
+                  label: 'Toggle 2D / isometric view',
+                  run: () => st().setProjection(st().projection === 'iso' ? 'flat' : 'iso'),
+                },
+                { id: 'selectall', label: 'Select all', hint: '⌘A', run: () => st().selectAll() },
+                { id: 'deselect', label: 'Deselect', run: () => st().clearSelection() },
+                { id: 'present', label: 'Presentation mode', run: () => setPresentation(true) },
+                { id: 'theme', label: 'Toggle theme', run: toggleTheme },
+                { id: 'shortcuts', label: 'Keyboard shortcuts', hint: '?', run: () => setShowHelp(true) },
+                { id: 'about', label: 'About & privacy', run: () => setShowAbout(true) },
+              ];
+              return (
+                <CommandPalette commands={cmds} onClose={() => setShowPalette(false)} />
+              );
+            })()}
           <input
             ref={fileInputRef}
             type="file"
