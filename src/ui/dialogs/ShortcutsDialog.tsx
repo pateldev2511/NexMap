@@ -28,6 +28,8 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
     title: 'Canvas',
     items: [
       ['Ctrl/Cmd + K', 'Command palette'],
+      ['Tab', 'Focus next device'],
+      ['Enter / Space', 'Select focused device'],
       ['V', 'Select tool'],
       ['C', 'Connect tool'],
       ['Ctrl/Cmd + F', 'Find device'],

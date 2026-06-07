@@ -664,6 +664,9 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     [spaceHeld, store, localPoint, readOnly, toFlat],
   );
 
+  // Keyboard selection: Tab focuses a device node, Enter/Space selects it.
+  const onActivateNode = useCallback((id: string) => store().select([id]), [store]);
+
   const onPointerMove = useCallback(
     (e: React.PointerEvent) => {
       const g = gesture.current;
@@ -1398,6 +1401,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
                 validTarget={linkTarget === dev.id || pendingSource === dev.id}
                 hasIssue={errorIds.has(dev.id)}
                 onPointerDown={onDevicePointerDown}
+                onActivate={onActivateNode}
                 onLabelDoubleClick={(e, id) => {
                   e.stopPropagation();
                   if (!readOnly) setEditingDeviceId(id);
@@ -1490,6 +1494,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
                   validTarget={linkTarget === dev.id || pendingSource === dev.id}
                   hasIssue={errorIds.has(dev.id)}
                   onPointerDown={onDevicePointerDown}
+                  onActivate={onActivateNode}
                   onLabelDoubleClick={(e, id) => {
                     e.stopPropagation();
                     if (!readOnly) setEditingDeviceId(id);

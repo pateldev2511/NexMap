@@ -45,6 +45,23 @@
   cursor: move;
 }
 
+/* Keyboard focus ring for device nodes (Tab to a node, Enter/Space to select).
+   :focus-visible shows it only for keyboard users, not on mouse press. The halo
+   doubles as the focus indicator. */
+.node:focus,
+.isoNode:focus {
+  outline: none;
+}
+
+.node:focus-visible .deviceTileHalo,
+.node:focus-visible .deviceIconHalo,
+.isoNode:focus-visible .deviceIconHalo {
+  opacity: 1;
+  stroke: var(--accent);
+  stroke-width: 2.4;
+  stroke-dasharray: 3 2;
+}
+
 .hitArea,
 .isoHitArea {
   fill: transparent;

@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import type { Device } from '@/model/types';
 import { NexIcon } from '@/ui/icons/NexIcon';
+import { defaultDeviceName } from '@/model/schema';
 import { deviceVisual, LOD_GLYPH_ONLY, LOD_LABEL_HIDE } from './deviceVisuals';
 import { IsoIcon } from './IsoIcon';
 import { isoProjectPx, type IsoTile } from './iso';
@@ -18,6 +19,7 @@ interface IsoDeviceNodeProps {
   hasIssue?: boolean;
   onPointerDown: (e: React.PointerEvent, id: string) => void;
   onLabelDoubleClick?: (e: React.MouseEvent, id: string) => void;
+  onActivate?: (id: string) => void;
 }
 
 /**
@@ -35,8 +37,13 @@ function IsoDeviceNodeImpl({
   hasIssue,
   onPointerDown,
   onLabelDoubleClick,
+  onActivate,
 }: IsoDeviceNodeProps) {
   const visual = deviceVisual(device.type);
+  const typeName = defaultDeviceName(device.type);
+  const ariaLabel = `${device.name || typeName}, ${typeName}${
+    device.managementIp ? `, ${device.managementIp}` : ''
+  }${device.locked ? ', locked' : ''}`;
   const showLabel = scale >= LOD_LABEL_HIDE;
   const detailed = scale >= LOD_GLYPH_ONLY;
   const { x, y, width, height } = device;
@@ -61,6 +68,16 @@ function IsoDeviceNodeImpl({
         validTarget ? styles.validTarget : ''
       }`}
       onPointerDown={(e) => onPointerDown(e, device.id)}
+      tabIndex={0}
+      role="button"
+      aria-label={ariaLabel}
+      aria-pressed={selected}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onActivate?.(device.id);
+        }
+      }}
       data-id={device.id}
     >
       <polygon className={styles.isoHitArea} points={top} />

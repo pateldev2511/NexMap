@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import type { Device } from '@/model/types';
 import { NexIcon } from '@/ui/icons/NexIcon';
+import { defaultDeviceName } from '@/model/schema';
 import { deviceVisual, LOD_GLYPH_ONLY, LOD_LABEL_HIDE } from './deviceVisuals';
 import { FlatIcon } from './FlatIcon';
 import { NodeInfoCard } from './NodeInfoCard';
@@ -19,6 +20,8 @@ interface DeviceNodeProps {
   onPointerDown: (e: React.PointerEvent, id: string) => void;
   /** Double-click the on-top name label → edit it inline. */
   onLabelDoubleClick?: (e: React.MouseEvent, id: string) => void;
+  /** Keyboard select (Tab to the node, Enter/Space to select it). */
+  onActivate?: (id: string) => void;
 }
 
 /**
@@ -34,8 +37,13 @@ function DeviceNodeImpl({
   hasIssue,
   onPointerDown,
   onLabelDoubleClick,
+  onActivate,
 }: DeviceNodeProps) {
   const visual = deviceVisual(device.type);
+  const typeName = defaultDeviceName(device.type);
+  const ariaLabel = `${device.name || typeName}, ${typeName}${
+    device.managementIp ? `, ${device.managementIp}` : ''
+  }${device.locked ? ', locked' : ''}`;
   const showLabel = scale >= LOD_LABEL_HIDE;
   const detailed = scale >= LOD_GLYPH_ONLY;
   const { width, height } = device;
@@ -51,6 +59,16 @@ function DeviceNodeImpl({
       }`}
       transform={`translate(${device.x} ${device.y})`}
       onPointerDown={(e) => onPointerDown(e, device.id)}
+      tabIndex={0}
+      role="button"
+      aria-label={ariaLabel}
+      aria-pressed={selected}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onActivate?.(device.id);
+        }
+      }}
       data-id={device.id}
     >
       <rect className={styles.hitArea} width={width} height={height} rx={8} />

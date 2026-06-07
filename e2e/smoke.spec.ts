@@ -40,6 +40,19 @@ test('command palette opens with Ctrl/Cmd+K and filters', async ({ page }) => {
   await expect(palette.getByText('Toggle 2D / isometric view')).toBeVisible();
 });
 
+test('keyboard: a device node is focusable and selectable with Enter', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Branch office/ }).click();
+  const node = page.locator('g[data-id][role="button"]').first();
+  await expect(node).toBeVisible();
+  // It exposes an accessible name for screen readers.
+  await expect(node).toHaveAttribute('aria-label', /.+/);
+  await node.focus();
+  await page.keyboard.press('Enter');
+  // Exactly the focused device becomes selected (aria-pressed reflects it).
+  await expect(page.locator('g[data-id][aria-pressed="true"]')).toHaveCount(1);
+});
+
 test('toggles to the isometric view without error', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /Branch office/ }).click();
