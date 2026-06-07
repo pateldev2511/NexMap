@@ -416,6 +416,11 @@ export function App() {
                   label: 'Toggle 2D / isometric view',
                   run: () => st().setProjection(st().projection === 'iso' ? 'flat' : 'iso'),
                 },
+                {
+                  id: 'reroute',
+                  label: 'Route selected link(s) around obstacles',
+                  run: () => st().rerouteSelectedLinks(),
+                },
                 { id: 'selectall', label: 'Select all', hint: '⌘A', run: () => st().selectAll() },
                 { id: 'deselect', label: 'Deselect', run: () => st().clearSelection() },
                 { id: 'present', label: 'Presentation mode', run: () => setPresentation(true) },

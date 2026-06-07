@@ -42,6 +42,7 @@ import { validate, resetIssueIds } from '@/model/validate';
 import { SpatialIndex, type Box } from '@/lib/spatial-index';
 import { computeAlignSnap, computeSpacingSnap, type AlignGuide } from '@/canvas/align';
 import { autoLayoutPositions } from '@/lib/layout';
+import { avoidRoute } from '@/lib/routing';
 import { pointInPolygon, type Point } from '@/lib/geometry';
 import { parseNexText, buildModel, type Diagnostic as NexDiagnostic } from '@/lib/nextext';
 import { analyzeHealth, edgeDisjointPaths, type HealthReport } from '@/lib/health';
@@ -306,6 +307,8 @@ export interface ProjectStore {
   applyView(id: string): void;
   updateDevice(id: string, before: Partial<Device>, after: Partial<Device>): void;
   updateLink(id: string, before: Partial<Link>, after: Partial<Link>): void;
+  /** Re-route selected links around other devices (A* obstacle avoidance → waypoints). */
+  rerouteSelectedLinks(): void;
   /**
    * Re-wire one endpoint of a link to a different device (drag-to-relink). Clears that
    * endpoint's interface ref. Rejects a self-loop (new device == the other endpoint).
@@ -1300,6 +1303,43 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     updateLink(id, before, after) {
       commit(new UpdateLinkCommand(id, before, after));
+    },
+
+    rerouteSelectedLinks() {
+      const sel = get().selection;
+      const boxes = [...model.devices.values()].map((d) => ({ id: d.id, box: deviceBox(d) }));
+      const cmds: Command[] = [];
+      for (const id of sel) {
+        const l = model.links.get(id);
+        if (!l) continue;
+        const a = model.devices.get(l.sourceId);
+        const b = model.devices.get(l.targetId);
+        if (!a || !b) continue;
+        const ca = { x: a.x + a.width / 2, y: a.y + a.height / 2 };
+        const cb = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+        const obstacles = boxes
+          .filter((o) => o.id !== l.sourceId && o.id !== l.targetId)
+          .map((o) => o.box);
+        const route = avoidRoute(ca, cb, obstacles);
+        const wp = route && route.length > 2 ? route.slice(1, -1) : [];
+        const before = l.waypoints ?? [];
+        cmds.push(
+          new UpdateLinkCommand(
+            id,
+            { waypoints: before, routing: l.routing },
+            { waypoints: wp, routing: 'orthogonal' },
+          ),
+        );
+      }
+      if (cmds.length === 0) return;
+      history.dispatch(transaction('Reroute', cmds), model);
+      history.commitCoalesceBoundary();
+      set({
+        rev: get().rev + 1,
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+      });
     },
 
     relinkEndpoint(linkId, endpoint, newDeviceId) {

@@ -500,6 +500,16 @@ function LinkInspector({ link }: { link: Link }) {
             <option value="orthogonal">Orthogonal (elbow)</option>
           </select>
         </Field>
+        <Field label="Auto-route">
+          <button
+            type="button"
+            className={styles.suggestBtn}
+            onClick={() => useProjectStore.getState().rerouteSelectedLinks()}
+            title="Route this connector around other devices"
+          >
+            Route around obstacles
+          </button>
+        </Field>
         <Field label="Color">
           <div className={styles.ipRow}>
             <input
