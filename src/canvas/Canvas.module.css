@@ -310,9 +310,12 @@
   }
 }
 
-.svg.flip {
-  animation: nexViewFlip 280ms ease-out;
-  transform-origin: center 62%;
+/* The view-flip tilt is motion; honor users who ask for less of it. */
+@media (prefers-reduced-motion: no-preference) {
+  .svg.flip {
+    animation: nexViewFlip 280ms ease-out;
+    transform-origin: center 62%;
+  }
 }
 
 /* ISO connector cable: a soft grounded under-shadow beneath the link, so edges

@@ -16,6 +16,7 @@ import { SettingsDialog } from './ui/dialogs/SettingsDialog';
 import { AboutDialog } from './ui/dialogs/AboutDialog';
 import { UpdateToast } from './ui/UpdateToast';
 import { CommandPalette, type PaletteCommand } from './ui/CommandPalette';
+import { ValidationAnnouncer } from './ui/ValidationAnnouncer';
 import { applyReduceMotion, getReduceMotion } from './lib/prefs';
 import { ReadOnlyBanner, ErrorToast, NoticeToast } from './ui/dialogs/ReadOnlyBanner';
 import { NexIcon } from './ui/icons/NexIcon';
@@ -398,6 +399,7 @@ export function App() {
             />
           )}
           <UpdateToast />
+          <ValidationAnnouncer />
           {showPalette &&
             (() => {
               const st = useProjectStore.getState;
