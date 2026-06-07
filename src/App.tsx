@@ -14,6 +14,7 @@ import { ViewSwitcher } from './ui/ViewSwitcher';
 import { RackView } from './ui/RackView/RackView';
 import { SettingsDialog } from './ui/dialogs/SettingsDialog';
 import { AboutDialog } from './ui/dialogs/AboutDialog';
+import { OutlineDialog } from './ui/dialogs/OutlineDialog';
 import { UpdateToast } from './ui/UpdateToast';
 import { CommandPalette, type PaletteCommand } from './ui/CommandPalette';
 import { ValidationAnnouncer } from './ui/ValidationAnnouncer';
@@ -90,6 +91,7 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
+  const [showOutline, setShowOutline] = useState(false);
   const canUndo = useProjectStore((s) => s.canUndo);
   const canRedo = useProjectStore((s) => s.canRedo);
   const undo = useProjectStore((s) => s.undo);
@@ -253,6 +255,10 @@ export function App() {
             <NexIcon name="settings" />
             <span>Settings</span>
           </button>
+          <button className={shell.menuItem} onClick={() => setShowOutline(true)}>
+            <NexIcon name="library" />
+            <span>Topology outline</span>
+          </button>
           <button className={shell.menuItem} onClick={() => setShowHelp(true)}>
             <NexIcon name="help" />
             <span>Keyboard shortcuts</span>
@@ -391,6 +397,7 @@ export function App() {
           {exporting && <ExportDialog onClose={() => setExporting(false)} />}
           {showHelp && <ShortcutsDialog onClose={() => setShowHelp(false)} />}
           {showAbout && <AboutDialog onClose={() => setShowAbout(false)} />}
+          {showOutline && <OutlineDialog onClose={() => setShowOutline(false)} />}
           {showSettings && (
             <SettingsDialog
               theme={theme}
@@ -428,6 +435,7 @@ export function App() {
                 { id: 'present', label: 'Presentation mode', run: () => setPresentation(true) },
                 { id: 'theme', label: 'Toggle theme', run: toggleTheme },
                 { id: 'shortcuts', label: 'Keyboard shortcuts', hint: '?', run: () => setShowHelp(true) },
+                { id: 'outline', label: 'Topology outline (accessible list)', run: () => setShowOutline(true) },
                 { id: 'about', label: 'About & privacy', run: () => setShowAbout(true) },
               ];
               return (
