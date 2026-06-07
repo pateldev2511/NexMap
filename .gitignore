@@ -10,3 +10,7 @@ coverage
 .gstack/
 .wrangler/
 .dev.vars
+test-results/
+playwright-report/
+blob-report/
+.playwright/

@@ -13,6 +13,8 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "test": "vitest run",
     "test:watch": "vitest",
+    "e2e": "playwright test",
+    "e2e:install": "playwright install chromium",
     "typecheck": "tsc -b --noEmit",
     "gen:readme-media": "vite-node scripts/gen-readme-media.ts",
     "deploy:pages": "npm run build && wrangler pages deploy dist --project-name=nexmap",
@@ -29,6 +31,7 @@
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@resvg/resvg-js": "^2.6.2",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.5.0",
