@@ -179,18 +179,24 @@ function buildIso(type: DeviceType): string {
       return p;
     }
     case 'switch': {
-      // Flat 1U rack box with a row of ports + link LEDs on the front face.
-      const W = 16,
+      // 1U managed switch: a dense row of recessed RJ45 jacks with link LEDs on
+      // the front face, two SFP uplinks, and status LEDs on top.
+      const W = 17,
         D = 9,
-        H = 3;
+        H = 2.8;
       let p = box(-W / 2, -D / 2, W, D, H, c);
-      const ports = 6;
+      const cavity = mixHex(c, '#000000', 0.45);
+      const ports = 10;
       for (let i = 0; i < ports; i++) {
-        const gy = -D / 2 + 1.6 + (i * (D - 3.2)) / (ports - 1);
-        p += rightPad(W / 2, gy, H * 0.42, 0.7, DETAIL);
-        p += circle(pt(W / 2, gy, H * 0.78), 0.32, i % 2 ? '#fbbf24' : '#4ade80');
+        const gy = -D / 2 + 1.4 + (i * (D - 2.8)) / (ports - 1);
+        p += rightPad(W / 2, gy, H * 0.4, 0.42, cavity); // recessed jack
+        p += circle(pt(W / 2, gy, H * 0.82), 0.25, i % 2 ? '#fbbf24' : '#4ade80'); // link LED
       }
-      p += circle(pt(-W / 2 + 1.6, -D / 2 + 1.4, H), 0.5, '#4ade80'); // top LED
+      // Two SFP uplink cages near the front edge.
+      p += rightPad(W / 2, D / 2 - 1.4, H * 0.5, 0.7, DETAIL);
+      // Status LEDs on the top-front.
+      p += circle(pt(-W / 2 + 1.6, -D / 2 + 1.4, H), 0.5, '#4ade80');
+      p += circle(pt(-W / 2 + 3.1, -D / 2 + 1.4, H), 0.45, '#fbbf24');
       return p;
     }
     case 'patch-panel': {
@@ -233,48 +239,99 @@ function buildIso(type: DeviceType): string {
       }
       return p;
     }
-    case 'firewall':
-    case 'security-group': {
-      // Brick "wall" block — box with a staggered brick pattern on both faces.
+    case 'firewall': {
+      // Brick wall with flames licking over the top — the literal "fire-wall".
       const W = 14,
-        D = 9,
-        H = 9;
+        D = 8,
+        H = 8;
       let p = box(-W / 2, -D / 2, W, D, H, c);
-      const mortar = mixHex(c, '#ffffff', 0.28);
-      // horizontal courses on right face
-      for (let r = 1; r <= 3; r++) {
-        const z = (H * r) / 4;
-        p += rightSlot(W / 2, -D / 2, D / 2, z, mortar, 0.5);
+      const mortar = mixHex(c, '#ffffff', 0.3);
+      for (let row = 1; row <= 3; row++) p += rightSlot(W / 2, -D / 2, D / 2, (H * row) / 4, mortar, 0.5);
+      for (let row = 0; row < 4; row++) {
+        const z0 = (H * row) / 4;
+        const z1 = (H * (row + 1)) / 4;
+        const off = row % 2 ? 0 : D / 4;
+        p += line(pt(W / 2, -D / 4 + off, z0), pt(W / 2, -D / 4 + off, z1), mortar, 0.5);
       }
-      // staggered vertical joints on right face
-      for (let r = 0; r < 4; r++) {
-        const z0 = (H * r) / 4;
-        const z1 = (H * (r + 1)) / 4;
-        const offset = r % 2 ? 0 : D / 4;
-        p += line(pt(W / 2, -D / 4 + offset, z0), pt(W / 2, -D / 4 + offset, z1), mortar, 0.5);
-        p += line(pt(W / 2, D / 4 + offset - D / 2, z0), pt(W / 2, D / 4 + offset, z1), mortar, 0.5);
-      }
-      if (type === 'security-group') {
-        // small lock emblem on top
-        p += circle(pt(0, 0, H), 1.4, mixHex(c, '#ffffff', 0.55));
-      }
+      // Flame tongues rising from the top of the wall (orange body + yellow tip).
+      const tc = pt(0, 0, H);
+      const flame = (dx: number, h: number, fill: string): string =>
+        `<path d="M${rnd(tc[0] + dx - 1.4)},${rnd(tc[1] + 0.8)} C${rnd(tc[0] + dx - 1.8)},${rnd(tc[1] - h * 0.4)} ${rnd(tc[0] + dx - 0.4)},${rnd(tc[1] - h * 0.6)} ${rnd(tc[0] + dx)},${rnd(tc[1] - h)} C${rnd(tc[0] + dx + 0.8)},${rnd(tc[1] - h * 0.55)} ${rnd(tc[0] + dx + 1.6)},${rnd(tc[1] - h * 0.25)} ${rnd(tc[0] + dx + 1.2)},${rnd(tc[1] + 0.8)} Q${rnd(tc[0] + dx)},${rnd(tc[1] + 2)} ${rnd(tc[0] + dx - 1.4)},${rnd(tc[1] + 0.8)} Z" fill="${fill}"/>`;
+      p += flame(-3.2, 6.5, '#ea580c') + flame(3.2, 6, '#ea580c') + flame(0, 8.5, '#f97316');
+      p += flame(-3.2, 4, '#fbbf24') + flame(0, 5.6, '#fde047') + flame(3.2, 3.6, '#fbbf24');
       return p;
     }
-    case 'cloud':
-    case 'cloud-subnet':
-    case 'vpc': {
+    case 'security-group': {
+      // Upright security shield with a lock/keyhole emblem.
+      let p = ellipse([1, 11.5], 8, 2, '#020617').replace(
+        'fill="#020617"',
+        'fill="#020617" opacity="0.12"',
+      );
+      const shield = 'M0,-11 L8.6,-7.4 V0.4 C8.6,6.6 4.2,10.2 0,12.2 C-4.2,10.2 -8.6,6.6 -8.6,0.4 V-7.4 Z';
+      p += `<path d="${shield}" fill="${c}" stroke="${mixHex(c, '#000000', 0.36)}" stroke-width="0.7" stroke-linejoin="round"/>`;
+      p += `<path d="M0,-11 L8.6,-7.4 V0.4 C8.6,6.6 4.2,10.2 0,12.2 Z" fill="${mixHex(c, '#000000', 0.16)}"/>`; // lit/shade split
+      // Lock emblem.
+      const em = mixHex(c, '#ffffff', 0.85);
+      p += `<rect x="-3" y="0.4" width="6" height="5" rx="1" fill="${em}"/>`;
+      p += `<path d="M-2 0.4V-1.4a2 2 0 0 1 4 0V0.4" fill="none" stroke="${em}" stroke-width="1.1"/>`;
+      p += `<circle cx="0" cy="2.6" r="0.9" fill="${mixHex(c, '#000000', 0.3)}"/>`;
+      return p;
+    }
+    case 'cloud': {
       // A puffy 3-D cloud (front-facing blob with top highlight + base shadow).
       const top = mixHex(c, '#ffffff', 0.42);
       const base = mixHex(c, '#ffffff', 0.04);
       const d =
         'M-11,4 a4.5,4.5 0 0 1 1.2,-8.6 a6,6 0 0 1 11.4,-2.2 a5,5 0 0 1 8.7,3.4 a4.2,4.2 0 0 1 -1.1,8.2 Z';
-      let p = ellipse([1, 6], 11, 2.4, '#020617'); // soft ground shadow
-      p = p.replace('fill="#020617"', 'fill="#020617" opacity="0.12"');
+      let p = ellipse([1, 6], 11, 2.4, '#020617').replace(
+        'fill="#020617"',
+        'fill="#020617" opacity="0.12"',
+      );
       p += `<path d="${d}" fill="${base}" stroke="${mixHex(c, '#000', 0.28)}" stroke-width="0.7" stroke-linejoin="round"/>`;
       p += `<path d="M-9,-3.6 a6,6 0 0 1 11.4,-2.2 a5,5 0 0 1 7,1.8 a14,5 0 0 1 -25.4,0.4 Z" fill="${top}" opacity="0.9"/>`;
-      if (type === 'vpc' || type === 'cloud-subnet') {
-        // dashed region marker beneath
-        p += `<path d="M-10,8.5 h20" stroke="${mixHex(c, '#000', 0.25)}" stroke-width="0.7" stroke-dasharray="2 1.6" fill="none"/>`;
+      return p;
+    }
+    case 'vpc': {
+      // Private cloud region: a low platform with a dashed boundary, and a small
+      // cloud floating over it (the whole VPC).
+      const W = 19,
+        D = 15,
+        H = 2;
+      let p = box(-W / 2, -D / 2, W, D, H, mixHex(c, '#ffffff', 0.06));
+      const A = pt(-W / 2 + 1.6, -D / 2 + 1.6, H);
+      const B = pt(W / 2 - 1.6, -D / 2 + 1.6, H);
+      const C = pt(W / 2 - 1.6, D / 2 - 1.6, H);
+      const Dt = pt(-W / 2 + 1.6, D / 2 - 1.6, H);
+      p += `<polygon points="${[A, B, C, Dt].map((q) => q.join(',')).join(' ')}" fill="none" stroke="${mixHex(c, '#000000', 0.3)}" stroke-width="0.7" stroke-dasharray="2.4 1.8"/>`;
+      // Cloud floating above the region.
+      const tc = pt(0, 0, H);
+      const cx0 = tc[0];
+      const cy0 = tc[1] - 7;
+      const cloud = `M${cx0 - 7},${cy0 + 2.5} a3,3 0 0 1 .8,-5.8 a4,4 0 0 1 7.6,-1.4 a3.4,3.4 0 0 1 5.8,2.2 a2.8,2.8 0 0 1 -.7,5 Z`;
+      p += `<path d="${cloud}" fill="${mixHex(c, '#ffffff', 0.16)}" stroke="${mixHex(c, '#000000', 0.25)}" stroke-width="0.6" stroke-linejoin="round"/>`;
+      p += `<path d="M${cx0 - 6},${cy0 - 0.4} a4,4 0 0 1 7.6,-1.4 a3.4,3.4 0 0 1 4.6,1.2 a9,3 0 0 1 -16.2,.2 Z" fill="${mixHex(c, '#ffffff', 0.45)}" opacity="0.9"/>`;
+      return p;
+    }
+    case 'cloud-subnet': {
+      // A subdivided region: a platform split into quadrants, each holding a
+      // small node — visibly different from the single VPC cloud.
+      const W = 19,
+        D = 15,
+        H = 2.2;
+      let p = box(-W / 2, -D / 2, W, D, H, mixHex(c, '#ffffff', 0.08));
+      const divC = mixHex(c, '#000000', 0.26);
+      p += line(pt(0, -D / 2 + 1.2, H), pt(0, D / 2 - 1.2, H), divC, 0.8);
+      p += line(pt(-W / 2 + 1.2, 0, H), pt(W / 2 - 1.2, 0, H), divC, 0.8);
+      const node = mixHex(c, '#ffffff', 0.22);
+      const qx = W / 4 - 1.4;
+      const qy = D / 4 - 1.4;
+      for (const [sx, sy] of [
+        [-1, -1],
+        [1, -1],
+        [-1, 1],
+        [1, 1],
+      ] as const) {
+        p += box(sx * qx - 1.4, sy * qy - 1.4, 2.8, 2.8, 2.4, node, 0.6, H);
       }
       return p;
     }
@@ -392,22 +449,29 @@ function buildIso(type: DeviceType): string {
       return p;
     }
     case 'vm': {
-      // Host machine with a smaller "guest" VM stacked on top (virtualization),
-      // and a little OS window on the guest's face.
+      // A guest machine floating above its host (with a cast shadow) — the gap
+      // reads as "virtual", not bolted-on hardware. The host carries a "V" badge.
       const W = 13,
         D = 13,
-        H = 6;
+        H = 5;
       let p = box(-W / 2, -D / 2, W, D, H, c);
-      const guest = mixHex(c, '#ffffff', 0.28);
-      const gw = 7,
-        gd = 7,
-        gh = 6;
-      p += box(-gw / 2, -gd / 2, gw, gd, gh, guest, 0.7, H); // nested guest on top
-      // Small window/screen on the guest's front (right) face.
-      const zc = H + gh * 0.5;
-      p += rightPad(gw / 2, 0, zc, 1.7, mixHex(c, '#020617', 0.55));
-      p += rightSlot(gw / 2, -1.3, 1.3, zc + 1.1, DETAIL, 0.6); // title bar
-      p += circle(pt(gw / 2, 1.0, zc + 1.1), 0.3, '#4ade80'); // running LED
+      // Shadow the floating guest casts on the host's top face.
+      const sc = pt(0, 0, H);
+      p += `<ellipse cx="${sc[0]}" cy="${sc[1]}" rx="4.6" ry="2.3" fill="#020617" opacity="0.16"/>`;
+      // "V" badge on the host front face.
+      p += `<path d="M${pt(W / 2, -2, H * 0.7).join(',')} L${pt(W / 2, 0, H * 0.3).join(',')} L${pt(W / 2, 2, H * 0.7).join(',')}" fill="none" stroke="${mixHex(c, '#ffffff', 0.6)}" stroke-width="1.1" stroke-linejoin="round" stroke-linecap="round"/>`;
+      // Floating guest VM, lighter, lifted off the host with a clear gap.
+      const guest = mixHex(c, '#ffffff', 0.32);
+      const gw = 8,
+        gd = 8,
+        gh = 7,
+        lift = H + 2.8;
+      p += box(-gw / 2, -gd / 2, gw, gd, gh, guest, 0.7, lift);
+      // OS window on the guest's front face (title bar + running LED).
+      const zc = lift + gh * 0.52;
+      p += rightPad(gw / 2, 0, zc, 1.9, mixHex(c, '#020617', 0.5));
+      p += rightSlot(gw / 2, -1.5, 1.5, zc + 1.3, DETAIL, 0.6);
+      p += circle(pt(gw / 2, 1.2, zc + 1.3), 0.32, '#4ade80');
       return p;
     }
     case 'camera': {
