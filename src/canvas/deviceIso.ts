@@ -73,15 +73,16 @@ function box(
   H: number,
   c: string,
   sw = 0.7,
+  z0 = 0,
 ): string {
   const s = shades(c);
-  const A = pt(x0, y0, H);
-  const B = pt(x0 + W, y0, H);
-  const C = pt(x0 + W, y0 + D, H);
-  const Dt = pt(x0, y0 + D, H);
-  const Bb = pt(x0 + W, y0, 0);
-  const Cb = pt(x0 + W, y0 + D, 0);
-  const Db = pt(x0, y0 + D, 0);
+  const A = pt(x0, y0, z0 + H);
+  const B = pt(x0 + W, y0, z0 + H);
+  const C = pt(x0 + W, y0 + D, z0 + H);
+  const Dt = pt(x0, y0 + D, z0 + H);
+  const Bb = pt(x0 + W, y0, z0);
+  const Cb = pt(x0 + W, y0 + D, z0);
+  const Db = pt(x0, y0 + D, z0);
   const mid = (p: P2, q: P2): P2 => [rnd((p[0] + q[0]) / 2), rnd((p[1] + q[1]) / 2)];
   const ctr: P2 = [rnd((A[0] + C[0]) / 2), rnd((A[1] + C[1]) / 2)];
   return (
@@ -177,22 +178,42 @@ function buildIso(type: DeviceType): string {
         p += rightSlot(W / 2, -D / 2 + 2, D / 2 - 2, H * (0.3 + i * 0.22), dark, 0.5);
       return p;
     }
-    case 'switch':
-    case 'patch-panel': {
-      // Flat 1U rack box with a row of ports on the front-right face.
+    case 'switch': {
+      // Flat 1U rack box with a row of ports + link LEDs on the front face.
       const W = 16,
         D = 9,
         H = 3;
       let p = box(-W / 2, -D / 2, W, D, H, c);
-      const ports = type === 'switch' ? 6 : 8;
+      const ports = 6;
       for (let i = 0; i < ports; i++) {
         const gy = -D / 2 + 1.6 + (i * (D - 3.2)) / (ports - 1);
         p += rightPad(W / 2, gy, H * 0.42, 0.7, DETAIL);
-        // Per-port link LED above each jack (alternating green/amber).
-        if (type === 'switch')
-          p += circle(pt(W / 2, gy, H * 0.78), 0.32, i % 2 ? '#fbbf24' : '#4ade80');
+        p += circle(pt(W / 2, gy, H * 0.78), 0.32, i % 2 ? '#fbbf24' : '#4ade80');
       }
       p += circle(pt(-W / 2 + 1.6, -D / 2 + 1.4, H), 0.5, '#4ade80'); // top LED
+      return p;
+    }
+    case 'patch-panel': {
+      // 1U passive faceplate: two dense rows of keystone jacks, a white label
+      // strip, and rack-mount ears with screws. No LEDs — it's not powered.
+      const W = 17,
+        D = 7,
+        H = 3.6;
+      let p = box(-W / 2, -D / 2, W, D, H, c);
+      const cavity = mixHex(c, '#000000', 0.42);
+      const cols = 6;
+      for (let r = 0; r < 2; r++) {
+        const z = H * (0.3 + r * 0.36);
+        for (let i = 0; i < cols; i++) {
+          const gy = -D / 2 + 1.5 + (i * (D - 3)) / (cols - 1);
+          p += rightPad(W / 2, gy, z, 0.5, cavity); // keystone jack cavity
+        }
+      }
+      // White numbering/label strip across the top of the faceplate.
+      p += rightSlot(W / 2, -D / 2 + 1, D / 2 - 1, H * 0.84, DETAIL, 1.3);
+      // Rack-mount ear screws at each end.
+      p += circle(pt(W / 2, -D / 2 + 0.6, H * 0.5), 0.3, DETAIL);
+      p += circle(pt(W / 2, D / 2 - 0.6, H * 0.5), 0.3, DETAIL);
       return p;
     }
     case 'server':
@@ -278,18 +299,62 @@ function buildIso(type: DeviceType): string {
       p += circle([apex[0], apex[1] - 1.5], 0.9, arcC);
       return p;
     }
-    case 'end-user':
-    case 'printer': {
+    case 'end-user': {
       // Monitor: a thin screen box on a small stand (front-right face = screen).
       const W = 14,
         D = 3.5,
         H = 9;
       let p = box(-W / 2, -D / 2, W, D, H, c);
-      // screen inset on right face
-      p += rightPad(W / 2, 0, H * 0.5, 2.4, mixHex(c, '#020617', 0.55));
-      // stand
-      p += box(-2, -1, 4, 2, -3.2, mixHex(c, '#000', 0.15));
-      if (type === 'printer') p += rightSlot(W / 2, -W / 4, W / 4, H * 0.85, DETAIL, 0.8);
+      p += rightPad(W / 2, 0, H * 0.5, 2.4, mixHex(c, '#020617', 0.55)); // screen
+      p += box(-2, -1, 4, 2, -3.2, mixHex(c, '#000', 0.15)); // stand
+      return p;
+    }
+    case 'printer': {
+      // Multifunction printer: body, paper tray + stack on top, a control panel,
+      // and a printed sheet emerging from the front output slot.
+      const W = 12,
+        D = 11,
+        H = 7;
+      const paper = '#f8fafc';
+      let p = box(-W / 2, -D / 2, W, D, H, c);
+      // Paper input tray (thin raised box on the top-back) + leaning paper stack.
+      p += box(-W / 2 + 1.5, -D / 2 + 0.6, W - 3, 2.2, 1.8, mixHex(c, '#000000', 0.12), 0.6, H);
+      p += poly(
+        [
+          pt(-W / 2 + 2.5, -D / 2 + 1.4, H + 1.8),
+          pt(W / 2 - 2.5, -D / 2 + 1.4, H + 1.8),
+          pt(W / 2 - 2.5, -D / 2 + 2, H + 4.6),
+          pt(-W / 2 + 2.5, -D / 2 + 2, H + 4.6),
+        ],
+        paper,
+        mixHex(c, '#000000', 0.18),
+        0.4,
+      );
+      // Control panel screen on the top-front + status LED.
+      p += poly(
+        [
+          pt(-W / 2 + 2, D / 2 - 3, H),
+          pt(-W / 2 + 5.5, D / 2 - 3, H),
+          pt(-W / 2 + 5.5, D / 2 - 1.2, H),
+          pt(-W / 2 + 2, D / 2 - 1.2, H),
+        ],
+        mixHex(c, '#020617', 0.5),
+      );
+      p += circle(pt(-W / 2 + 7, D / 2 - 2, H), 0.4, '#4ade80');
+      // Output slot on the front (right) face + the sheet coming out.
+      p += rightSlot(W / 2, -W * 0.28, W * 0.28, H * 0.5, mixHex(c, '#000000', 0.4), 1.4);
+      p += poly(
+        [
+          pt(W / 2, -3, H * 0.5),
+          pt(W / 2, 3, H * 0.5),
+          pt(W / 2 + 3.6, 3, H * 0.42),
+          pt(W / 2 + 3.6, -3, H * 0.42),
+        ],
+        paper,
+        mixHex(c, '#000000', 0.14),
+        0.4,
+      );
+      p += line(pt(W / 2 + 1.4, -1.8, H * 0.47), pt(W / 2 + 1.4, 1.6, H * 0.47), mixHex(c, '#000000', 0.22), 0.4);
       return p;
     }
     case 'load-balancer':
@@ -314,33 +379,50 @@ function buildIso(type: DeviceType): string {
       for (let i = 0; i < 3; i++) p += circle(pt(-W / 2 + 2 + i * 1.6, D / 2 - 1.3, H), 0.5, LED);
       return p;
     }
-    case 'vm':
     case 'container': {
-      // Cube with a nested inset (VM) or corrugation (container) on the right face.
+      // Cube with vertical corrugation lines on the right face (shipping container).
       const W = 11,
         D = 11,
         H = 11;
       let p = box(-W / 2, -D / 2, W, D, H, c);
-      if (type === 'vm') {
-        // play triangle on right face
-        const a = pt(W / 2, -1.6, H * 0.62);
-        const b = pt(W / 2, 1.6, H * 0.5);
-        const cc = pt(W / 2, -1.6, H * 0.38);
-        p += poly([a, b, cc], DETAIL);
-      } else {
-        for (let i = 0; i < 4; i++) {
-          const gy = -D / 2 + 1.4 + (i * (D - 2.8)) / 3;
-          p += line(pt(W / 2, gy, 1), pt(W / 2, gy, H - 1), mixHex(c, '#000', 0.18), 0.6);
-        }
+      for (let i = 0; i < 4; i++) {
+        const gy = -D / 2 + 1.4 + (i * (D - 2.8)) / 3;
+        p += line(pt(W / 2, gy, 1), pt(W / 2, gy, H - 1), mixHex(c, '#000000', 0.18), 0.6);
       }
       return p;
     }
+    case 'vm': {
+      // Host machine with a smaller "guest" VM stacked on top (virtualization),
+      // and a little OS window on the guest's face.
+      const W = 13,
+        D = 13,
+        H = 6;
+      let p = box(-W / 2, -D / 2, W, D, H, c);
+      const guest = mixHex(c, '#ffffff', 0.28);
+      const gw = 7,
+        gd = 7,
+        gh = 6;
+      p += box(-gw / 2, -gd / 2, gw, gd, gh, guest, 0.7, H); // nested guest on top
+      // Small window/screen on the guest's front (right) face.
+      const zc = H + gh * 0.5;
+      p += rightPad(gw / 2, 0, zc, 1.7, mixHex(c, '#020617', 0.55));
+      p += rightSlot(gw / 2, -1.3, 1.3, zc + 1.1, DETAIL, 0.6); // title bar
+      p += circle(pt(gw / 2, 1.0, zc + 1.1), 0.3, '#4ade80'); // running LED
+      return p;
+    }
     case 'camera': {
-      // Lens cylinder on a small mount.
-      let p = box(-1.5, -1.5, 3, 3, 3, mixHex(c, '#000', 0.1));
-      p += cyl(0, 0, 4.5, 3, 6, c, 0);
-      p += circle(pt(0, 0, 9), 2.1, mixHex(c, '#020617', 0.5));
-      p += circle(pt(-0.6, -0.6, 9), 0.8, '#bae6fd');
+      // Dome security camera: a mount plate, a glossy dark dome, a recessed lens.
+      let p = cyl(0, 0, 5.6, 0, 1.4, mixHex(c, '#ffffff', 0.12), 0); // mount base
+      const b = pt(0, 0, 1.4);
+      const domeC = mixHex(c, '#020617', 0.3);
+      // Dome: tall rounded top arc + shallow front base arc.
+      p += `<path d="M${b[0] - 6.6},${b[1]} a6.6,7.6 0 0 1 13.2,0 a6.6,3.4 0 0 1 -13.2,0 Z" fill="${domeC}" stroke="${mixHex(c, '#000000', 0.4)}" stroke-width="0.6"/>`;
+      // Glossy highlight sweep on the dome.
+      p += `<ellipse cx="${rnd(b[0] - 2.2)}" cy="${rnd(b[1] - 4)}" rx="2.6" ry="1.7" fill="#ffffff" opacity="0.22" transform="rotate(-22 ${rnd(b[0] - 2.2)} ${rnd(b[1] - 4)})"/>`;
+      // Recessed lens with a blue glint, and a recording LED.
+      p += circle([rnd(b[0] + 1.4), rnd(b[1] - 1.8)], 1.7, '#020617');
+      p += circle([rnd(b[0] + 0.9), rnd(b[1] - 2.4)], 0.6, '#bae6fd');
+      p += circle([rnd(b[0] + 4.4), rnd(b[1] - 0.8)], 0.5, '#f87171');
       return p;
     }
     case 'isp': {
