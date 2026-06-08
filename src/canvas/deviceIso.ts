@@ -32,13 +32,19 @@ interface Shades {
   left: string;
   right: string;
   edge: string;
+  /** Near-white rim along lit top edges (crisp specular silhouette). */
+  rim: string;
+  /** Soft sheen pooled in the back-light corner of the top face. */
+  topHi: string;
 }
 function shades(c: string): Shades {
   return {
-    top: mixHex(c, '#ffffff', 0.36),
-    left: mixHex(c, '#ffffff', 0.06),
-    right: mixHex(c, '#000000', 0.3),
-    edge: mixHex(c, '#000000', 0.5),
+    top: mixHex(c, '#ffffff', 0.4),
+    left: mixHex(c, '#ffffff', 0.11),
+    right: mixHex(c, '#000000', 0.34),
+    edge: mixHex(c, '#000000', 0.52),
+    rim: mixHex(c, '#ffffff', 0.72),
+    topHi: mixHex(c, '#ffffff', 0.58),
   };
 }
 
@@ -76,10 +82,17 @@ function box(
   const Bb = pt(x0 + W, y0, 0);
   const Cb = pt(x0 + W, y0 + D, 0);
   const Db = pt(x0, y0 + D, 0);
+  const mid = (p: P2, q: P2): P2 => [rnd((p[0] + q[0]) / 2), rnd((p[1] + q[1]) / 2)];
+  const ctr: P2 = [rnd((A[0] + C[0]) / 2), rnd((A[1] + C[1]) / 2)];
   return (
     poly([B, C, Cb, Bb], s.right, s.edge, sw) + // right (gx = x0+W)
     poly([Dt, C, Cb, Db], s.left, s.edge, sw) + // left (gy = y0+D)
-    poly([A, B, C, Dt], s.top, s.edge, sw) // top
+    poly([A, B, C, Dt], s.top, s.edge, sw) + // top
+    // Soft sheen in the back (A) corner of the top face.
+    `<polygon points="${join([A, mid(A, B), ctr, mid(A, Dt)])}" fill="${s.topHi}" opacity="0.4"/>` +
+    // Crisp rim light along the two lit top edges.
+    line(A, B, s.rim, 0.7) +
+    line(A, Dt, s.rim, 0.7)
   );
 }
 
@@ -122,7 +135,11 @@ function cyl(
     ringMarkup += `<path d="M${rc[0] - rx},${rc[1]} A${rnd(rx)},${rnd(ry)} 0 0 0 ${rc[0] + rx},${rc[1]}" fill="none" stroke="${s.edge}" stroke-width="0.5" opacity="0.7"/>`;
   }
   const topFace = ellipse(top, rx, ry, s.top, s.edge, 0.6);
-  return body + ringMarkup + topFace;
+  // Soft specular highlight on the top, offset toward the light (back-left).
+  const hi = `<ellipse cx="${rnd(top[0] - rx * 0.3)}" cy="${rnd(top[1] - ry * 0.28)}" rx="${rnd(rx * 0.5)}" ry="${rnd(ry * 0.5)}" fill="${s.topHi}" opacity="0.5"/>`;
+  // Vertical sheen streak down the lit side of the body.
+  const streak = `<path d="M${rnd(top[0] - rx * 0.62)},${rnd(top[1] + ry * 0.4)} L${rnd(bot[0] - rx * 0.62)},${rnd(bot[1])}" stroke="${s.rim}" stroke-width="${rnd(rx * 0.18)}" stroke-linecap="round" fill="none" opacity="0.35"/>`;
+  return body + streak + ringMarkup + topFace + hi;
 }
 
 /** Antenna: a thin rod rising from (gx,gy) on the top face, tilted slightly back. */
@@ -170,7 +187,10 @@ function buildIso(type: DeviceType): string {
       const ports = type === 'switch' ? 6 : 8;
       for (let i = 0; i < ports; i++) {
         const gy = -D / 2 + 1.6 + (i * (D - 3.2)) / (ports - 1);
-        p += rightPad(W / 2, gy, H * 0.5, 0.7, DETAIL);
+        p += rightPad(W / 2, gy, H * 0.42, 0.7, DETAIL);
+        // Per-port link LED above each jack (alternating green/amber).
+        if (type === 'switch')
+          p += circle(pt(W / 2, gy, H * 0.78), 0.32, i % 2 ? '#fbbf24' : '#4ade80');
       }
       p += circle(pt(-W / 2 + 1.6, -D / 2 + 1.4, H), 0.5, '#4ade80'); // top LED
       return p;
@@ -186,6 +206,8 @@ function buildIso(type: DeviceType): string {
       for (let i = 0; i < bays; i++) {
         const z = H - 1.6 - i * (H / (bays + 0.5));
         p += rightSlot(W / 2, -D / 2 + 1.4, D / 2 - 1.4, z, dark, 0.7);
+        // Drive-bay handle (small light pad) on the left of each bay.
+        p += rightPad(W / 2, -D / 2 + 2.2, z, 0.45, DETAIL);
         p += circle(pt(W / 2, D / 2 - 1.2, z), 0.45, i % 2 ? LED : '#4ade80');
       }
       return p;
