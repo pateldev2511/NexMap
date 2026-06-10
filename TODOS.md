@@ -445,3 +445,11 @@ not commodity styling. Run /plan-design-review before implementing (UI scope).
 - [ ] **E7 — Power/weight/thermal budget** (P3). Sum per-device draw/weight vs rack
       capacity, warn on overload. Blocked on adding optional watts/kg/BTU fields to the
       device model first (reserve them when shaping schema v3). Effort: human ~2d / CC ~30m.
+
+## Deferred from rack-designer ship review (2026-06-10)
+- [ ] **Validate rack-cable endpoints exist** (P2). `connectRackCable` (projectStore.ts)
+      only checks self-cable and already-cabled; it does not verify each `{deviceId, ifaceId}`
+      resolves to a real `device.interfaces[].id`. The UI dialog constrains this, but the
+      public store method can mint a cable to a non-existent port. Add an existence check
+      (return null otherwise) and update the rackActions tests that currently cable to
+      fictional `p1`/`nic0` ids. Found by pre-landing review, confidence 6/10. Effort: CC ~15m.
