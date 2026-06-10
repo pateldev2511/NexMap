@@ -19,11 +19,15 @@ import type {
   Layer,
   NexMapDocument,
   Rack,
+  RackCable,
+  RackCableEnd,
   Subnet,
   ValidationIssue,
   View,
   Vlan,
 } from '@/model/types';
+import { canFit, type FitResult, type Slot } from '@/rack/rackModel';
+import { checkConnect, pruneCablesForInterfaces } from '@/rack/rackCables';
 import {
   createDevice,
   createEmptyDocument,
@@ -32,6 +36,7 @@ import {
   createImageObject,
   createLayer,
   createRack,
+  createRackCable,
   createShapeObject,
   createSubnet,
   createTextObject,
@@ -52,11 +57,13 @@ import {
   AddLayerCommand,
   AddLinkCommand,
   AddObjectCommand,
+  AddRackCableCommand,
   AddRackCommand,
   AddSubnetCommand,
   AddVlanCommand,
   DeleteCommand,
   DeleteLayerCommand,
+  DeleteRackCableCommand,
   DeleteRackCommand,
   DeleteSubnetCommand,
   DeleteVlanCommand,
@@ -67,6 +74,7 @@ import {
   UpdateLayerCommand,
   UpdateLinkCommand,
   UpdateObjectCommand,
+  UpdateRackCableCommand,
   UpdateRackCommand,
   UpdateSubnetCommand,
   UpdateVlanCommand,
@@ -393,6 +401,24 @@ export interface ProjectStore {
   updateRack(id: string, before: Partial<Rack>, after: Partial<Rack>): void;
   deleteRack(id: string): void;
   racksAll(): Rack[];
+  // Rack designer (schema v3) — placement + physical cabling.
+  /** Validate + write a device's rack slot atomically. Returns the fit result. */
+  placeInRack(deviceId: string, rackId: string, slot: Slot): FitResult;
+  /** Clear a device's rack placement (move to the unplaced tray). */
+  unmountFromRack(deviceId: string): void;
+  /** Add a physical cable; returns its id, or null if the connection is invalid. */
+  connectRackCable(
+    aEnd: RackCableEnd,
+    bEnd: RackCableEnd,
+    color: string,
+    label?: string,
+  ): string | null;
+  updateRackCable(id: string, before: Partial<RackCable>, after: Partial<RackCable>): void;
+  disconnectRackCable(id: string): void;
+  rackCablesAll(): RackCable[];
+  getRackCable(id: string): RackCable | undefined;
+  /** After a device's interfaces change (E5 re-population), prune now-orphaned cables. */
+  pruneInterfaceCables(deviceId: string, validIfaceIds: string[]): void;
   hitTest(x: number, y: number): string[];
   queryBox(box: Box): string[];
   contentBounds(): Box;
@@ -1748,6 +1774,82 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     },
     racksAll() {
       return [...model.racks.values()];
+    },
+
+    // ─── Rack designer (schema v3) ───────────────────────────────────────────
+    placeInRack(deviceId, rackId, slot) {
+      const device = model.devices.get(deviceId);
+      const rack = model.racks.get(rackId);
+      if (!device || !rack) return { ok: false, reason: 'invalid' };
+      const occupants = [...model.devices.values()].filter((d) => d.rackId === rackId);
+      const fit = canFit(rack, occupants, slot, deviceId);
+      if (!fit.ok) return fit;
+      const before: Partial<Device> = {
+        rackId: device.rackId,
+        ru: device.ru,
+        ruSpan: device.ruSpan,
+        mount: device.mount,
+        side: device.side,
+        bay: device.bay,
+      };
+      const after: Partial<Device> = {
+        rackId,
+        ru: slot.ru,
+        ruSpan: slot.ruSpan,
+        mount: slot.mount,
+        side: slot.side,
+        bay: slot.bay,
+      };
+      commit(new UpdateDeviceCommand(deviceId, before, after));
+      history.commitCoalesceBoundary();
+      return { ok: true };
+    },
+    unmountFromRack(deviceId) {
+      const d = model.devices.get(deviceId);
+      if (!d || d.rackId == null) return;
+      commit(
+        new UpdateDeviceCommand(
+          deviceId,
+          { rackId: d.rackId, ru: d.ru, ruSpan: d.ruSpan, mount: d.mount, side: d.side, bay: d.bay },
+          { rackId: undefined, ru: undefined, ruSpan: undefined, mount: undefined, side: undefined, bay: undefined },
+        ),
+      );
+      history.commitCoalesceBoundary();
+    },
+    connectRackCable(aEnd, bEnd, color, label) {
+      const existing = [...model.rackCables.values()];
+      if (!checkConnect(existing, aEnd, bEnd).ok) return null;
+      const cable = createRackCable(aEnd, bEnd, color, label ? { label } : {});
+      commit(new AddRackCableCommand(cable));
+      history.commitCoalesceBoundary();
+      return cable.id;
+    },
+    updateRackCable(id, before, after) {
+      commit(new UpdateRackCableCommand(id, before, after));
+    },
+    disconnectRackCable(id) {
+      commit(new DeleteRackCableCommand(id));
+      history.commitCoalesceBoundary();
+    },
+    rackCablesAll() {
+      return [...model.rackCables.values()];
+    },
+    getRackCable(id) {
+      return model.rackCables.get(id);
+    },
+    pruneInterfaceCables(deviceId, validIfaceIds) {
+      const existing = [...model.rackCables.values()];
+      const pruned = pruneCablesForInterfaces(existing, deviceId, validIfaceIds);
+      const removed = existing.filter((c) => !pruned.some((p) => p.id === c.id));
+      if (removed.length === 0) return;
+      // One undoable transaction so a port-set change + its cable cleanup undo together.
+      commit(
+        transaction(
+          'Prune orphaned cables',
+          removed.map((c) => new DeleteRackCableCommand(c.id)),
+        ),
+      );
+      history.commitCoalesceBoundary();
     },
 
     hitTest(x, y) {

@@ -31,6 +31,24 @@ export const MIGRATIONS: Record<number, Migration> = {
         : d,
     ),
   }),
+  // v2 → v3: rack designer. Purely ADDITIVE.
+  //  - Add the `rackCables` collection (empty).
+  //  - Give racked devices the default slot qualifiers (mount/side/bay). `ru`/`ruSpan`
+  //    stay CANONICAL for vertical position; these only add the front face + full bay,
+  //    so existing v2 racked devices keep their exact U positions.
+  // Older builds refuse a v3 file (too-new guard) rather than re-save and drop rackCables.
+  2: (doc) => ({
+    ...doc,
+    schemaVersion: 3,
+    rackCables: Array.isArray(doc.rackCables) ? doc.rackCables : [],
+    devices: (Array.isArray(doc.devices) ? doc.devices : []).map((d) => {
+      if (typeof d !== 'object' || d === null) return d;
+      const dev = d as Record<string, unknown>;
+      // Only racked devices get slot qualifiers; free-canvas devices are untouched.
+      if (dev.rackId == null) return dev;
+      return { mount: 'rack', side: 'front', bay: 'full', ...dev };
+    }),
+  }),
 };
 
 export type LoadResult =

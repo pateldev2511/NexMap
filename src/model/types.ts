@@ -110,6 +110,16 @@ export interface Device {
   rackId?: string;
   ru?: number;
   ruSpan?: number;
+  /**
+   * Rack slot qualifiers (schema v3, additive). `ru`/`ruSpan` remain the CANONICAL
+   * vertical position; these only add the mount face, half-width bay, and mount kind.
+   * Absent → rack-mounted, front, full-width (back-compat for v2 racked devices).
+   *  - mount 'rail' = 0U side channel (PDU / vertical cable manager); does NOT consume U.
+   *  - bay 'left'/'right' = two half-width devices share one U; 'full' spans the whole bay.
+   */
+  mount?: 'rack' | 'rail';
+  side?: 'front' | 'rear';
+  bay?: 'full' | 'left' | 'right';
   /** Locked devices can't be moved or deleted until unlocked. */
   locked?: boolean;
   /** Stacking order; higher renders on top. Default 0. */
@@ -258,6 +268,36 @@ export interface Rack {
   ruHeight: number;
   site?: string;
   notes?: string;
+  /** Rack form factor (schema v3, additive). Absent → four-post 19". */
+  postType?: 'two-post' | 'four-post' | 'wall';
+  widthIn?: 19 | 23;
+  /** Id of the rackTypes preset this rack was created from (schema v3). */
+  presetId?: string;
+  extra?: ExtraFields;
+}
+
+/** One end of a rack cable: a physical port on a device (schema v3). */
+export interface RackCableEnd {
+  deviceId: string;
+  ifaceId: string;
+}
+
+/**
+ * A physical patch cable between two device ports (schema v3). Kept in its OWN
+ * `rackCables[]` collection, NOT in `links[]`, so the physical layer never pollutes
+ * the logical topology (validation, health, NexText, topology render are untouched).
+ * Endpoints reference embedded `Device.interfaces` by id; deleting/regenerating a
+ * device or its interfaces cascade-prunes the cables that referenced them.
+ */
+export interface RackCable {
+  id: string;
+  aEnd: RackCableEnd;
+  bEnd: RackCableEnd;
+  /** Literal hex (e.g. "#22d3ee"); reuses the existing Link color control. */
+  color: string;
+  label?: string;
+  /** Optional, user-entered run length in feet (v1: no auto-compute). */
+  lengthFt?: number;
   extra?: ExtraFields;
 }
 
@@ -286,6 +326,8 @@ export interface NexMapDocument {
   vlans: Vlan[];
   subnets: Subnet[];
   racks: Rack[];
+  /** Physical rack cables (schema v3). Separate from logical `links[]`. */
+  rackCables: RackCable[];
   views: View[];
   // Forward-declared, unused yet — preserved verbatim on load→save.
   interfaces: unknown[];

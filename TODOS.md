@@ -435,3 +435,13 @@ not commodity styling. Run /plan-design-review before implementing (UI scope).
 ### Rejected
 - Floating/dangling connector endpoints (breaks the validates-itself invariant).
 - Full inline WYSIWYG rich-text editor (off-moat; fights the SVG canvas).
+
+## Deferred from rack-designer CEO review (2026-06-07)
+- [ ] **E6 — Multi-rack row view + cross-rack cabling** (P2). Horizontal multi-rack
+      canvas, drag devices between racks, cables spanning racks. Data model already
+      supports it: cable endpoints are `{deviceId, ifaceId}` referencing any device, so
+      this is a pure additive VIEW layer — no schema migration, no rework. Build after the
+      single-rack designer is solid. Effort: human ~4d / CC ~1h.
+- [ ] **E7 — Power/weight/thermal budget** (P3). Sum per-device draw/weight vs rack
+      capacity, warn on overload. Blocked on adding optional watts/kg/BTU fields to the
+      device model first (reserve them when shaping schema v3). Effort: human ~2d / CC ~30m.

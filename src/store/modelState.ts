@@ -17,6 +17,7 @@ import type {
   NexMapDocument,
   ProjectMeta,
   Rack,
+  RackCable,
   Subnet,
   View,
   Vlan,
@@ -32,6 +33,8 @@ export interface ModelState {
   vlans: Map<string, Vlan>;
   subnets: Map<string, Subnet>;
   racks: Map<string, Rack>;
+  /** Physical rack cables (schema v3), keyed by id. Separate from logical `links`. */
+  rackCables: Map<string, RackCable>;
   views: Map<string, View>;
   /** deviceId → set of link IDs touching it. */
   adjacency: Map<string, Set<string>>;
@@ -51,6 +54,7 @@ export function fromDocument(doc: NexMapDocument): ModelState {
     vlans: new Map((doc.vlans ?? []).map((v) => [v.id, v])),
     subnets: new Map((doc.subnets ?? []).map((s) => [s.id, s])),
     racks: new Map((doc.racks ?? []).map((r) => [r.id, r])),
+    rackCables: new Map((doc.rackCables ?? []).map((c) => [c.id, c])),
     views: new Map((doc.views ?? []).map((v) => [v.id, v])),
     adjacency: new Map(),
   };
@@ -72,6 +76,7 @@ export function toDocument(state: ModelState, base: NexMapDocument): NexMapDocum
     vlans: [...state.vlans.values()],
     subnets: [...state.subnets.values()],
     racks: [...state.racks.values()],
+    rackCables: [...state.rackCables.values()],
     views: [...state.views.values()],
   };
 }
