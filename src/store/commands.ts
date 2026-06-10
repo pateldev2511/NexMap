@@ -15,6 +15,7 @@ import type {
   Layer,
   Link,
   Rack,
+  RackCable,
   Subnet,
   Vlan,
 } from '@/model/types';
@@ -170,6 +171,8 @@ export class DeleteCommand implements Command {
   private removedDevices: Device[] = [];
   private removedLinks: Link[] = [];
   private removedObjects: CanvasObject[] = [];
+  /** Physical rack cables cascade-removed with their deleted devices (schema v3). */
+  private removedCables: RackCable[] = [];
   constructor(
     private readonly deviceIds: string[],
     private readonly explicitLinkIds: string[] = [],
@@ -184,6 +187,12 @@ export class DeleteCommand implements Command {
     this.removedLinks = [...linkIds].map((id) => s.links.get(id)).filter(isLink);
     this.removedDevices = this.deviceIds.map((id) => s.devices.get(id)).filter(isDevice);
     this.removedObjects = this.objectIds.map((id) => s.objects.get(id)).filter(isObject);
+    // Cascade-prune rack cables touching any deleted device (no dangling endpoints).
+    const deviceIdSet = new Set(this.removedDevices.map((d) => d.id));
+    this.removedCables = [...s.rackCables.values()].filter((c) =>
+      deviceIdSet.has(c.aEnd.deviceId) || deviceIdSet.has(c.bEnd.deviceId),
+    );
+    for (const cable of this.removedCables) s.rackCables.delete(cable.id);
     for (const link of this.removedLinks) removeLink(s, link.id);
     for (const device of this.removedDevices) removeDevice(s, device.id);
     for (const obj of this.removedObjects) s.objects.delete(obj.id);
@@ -192,6 +201,7 @@ export class DeleteCommand implements Command {
     for (const device of this.removedDevices) addDevice(s, device);
     for (const link of this.removedLinks) addLink(s, link);
     for (const obj of this.removedObjects) s.objects.set(obj.id, obj);
+    for (const cable of this.removedCables) s.rackCables.set(cable.id, cable);
   }
 }
 
@@ -499,6 +509,61 @@ export class DeleteRackCommand implements Command {
   }
   undo(s: ModelState) {
     if (this.removed) s.racks.set(this.id, this.removed);
+  }
+}
+
+// ─── Rack cables (schema v3) ─────────────────────────────────────────────────
+// Physical patch cables live in their own collection, mutated directly on the
+// rackCables Map (like objects/vlans), separate from the logical link graph.
+
+export class AddRackCableCommand implements Command {
+  readonly label = 'Connect ports';
+  constructor(private readonly cable: RackCable) {}
+  apply(s: ModelState) {
+    s.rackCables.set(this.cable.id, this.cable);
+  }
+  undo(s: ModelState) {
+    s.rackCables.delete(this.cable.id);
+  }
+}
+
+export class UpdateRackCableCommand implements Command {
+  readonly label = 'Edit cable';
+  constructor(
+    private readonly id: string,
+    private readonly before: Partial<RackCable>,
+    private readonly after: Partial<RackCable>,
+  ) {}
+  apply(s: ModelState) {
+    const c = s.rackCables.get(this.id);
+    if (c) s.rackCables.set(this.id, { ...c, ...this.after });
+  }
+  undo(s: ModelState) {
+    const c = s.rackCables.get(this.id);
+    if (c) s.rackCables.set(this.id, { ...c, ...this.before });
+  }
+  mergeWith(next: Command): Command | null {
+    if (
+      next instanceof UpdateRackCableCommand &&
+      next.id === this.id &&
+      sameKeys(this.after, next.after)
+    ) {
+      return new UpdateRackCableCommand(this.id, this.before, next.after);
+    }
+    return null;
+  }
+}
+
+export class DeleteRackCableCommand implements Command {
+  readonly label = 'Remove cable';
+  private removed?: RackCable;
+  constructor(private readonly id: string) {}
+  apply(s: ModelState) {
+    this.removed = s.rackCables.get(this.id);
+    s.rackCables.delete(this.id);
+  }
+  undo(s: ModelState) {
+    if (this.removed) s.rackCables.set(this.id, this.removed);
   }
 }
 

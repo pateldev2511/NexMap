@@ -19,6 +19,12 @@ interface AppShellProps {
   projectName?: string;
   /** Optional node rendered in place of the static project name (e.g. editable title). */
   titleNode?: ReactNode;
+  /**
+   * Full-bleed canvas: hide the left/right network panels + their toggles so a
+   * self-contained editor (e.g. the Rack Designer, which has its own library +
+   * sidebar) gets the entire canvas region. Bottom panel is also suppressed.
+   */
+  fullBleed?: boolean;
 }
 
 /**
@@ -35,6 +41,7 @@ export function AppShell({
   status,
   projectName = 'Untitled NexMap Project',
   titleNode,
+  fullBleed = false,
 }: AppShellProps) {
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
@@ -55,10 +62,13 @@ export function AppShell({
     return () => mq.removeEventListener('change', sync);
   }, []);
 
+  const collapseLeft = fullBleed || !leftOpen;
+  const collapseRight = fullBleed || !rightOpen;
+
   return (
     <div
-      className={`${styles.shell} ${leftOpen ? '' : styles.leftClosed} ${
-        rightOpen ? '' : styles.rightClosed
+      className={`${styles.shell} ${collapseLeft ? styles.leftClosed : ''} ${
+        collapseRight ? styles.rightClosed : ''
       }`}
     >
       <header className={styles.topbar}>
@@ -66,43 +76,49 @@ export function AppShell({
           Nex<span>Map</span>
         </div>
         {titleNode ?? <div className={styles.projectName}>{projectName}</div>}
-        <div className={styles.panelToggles}>
-          <button
-            className={styles.topbarBtn}
-            onClick={() => setLeftOpen((v) => !v)}
-            aria-pressed={leftOpen}
-            title={leftOpen ? 'Hide library panel' : 'Show library panel'}
-          >
-            <NexIcon name="library" />
-            <span>Library</span>
-          </button>
-          <button
-            className={styles.topbarBtn}
-            onClick={() => setRightOpen((v) => !v)}
-            aria-pressed={rightOpen}
-            title={rightOpen ? 'Hide inspector panel' : 'Show inspector panel'}
-          >
-            <NexIcon name="inspector" />
-            <span>Inspector</span>
-          </button>
-        </div>
+        {!fullBleed && (
+          <div className={styles.panelToggles}>
+            <button
+              className={styles.topbarBtn}
+              onClick={() => setLeftOpen((v) => !v)}
+              aria-pressed={leftOpen}
+              title={leftOpen ? 'Hide library panel' : 'Show library panel'}
+            >
+              <NexIcon name="library" />
+              <span>Library</span>
+            </button>
+            <button
+              className={styles.topbarBtn}
+              onClick={() => setRightOpen((v) => !v)}
+              aria-pressed={rightOpen}
+              title={rightOpen ? 'Hide inspector panel' : 'Show inspector panel'}
+            >
+              <NexIcon name="inspector" />
+              <span>Inspector</span>
+            </button>
+          </div>
+        )}
         <div className={styles.topbarSpacer} />
         <div className={styles.topbarActions}>{actions}</div>
       </header>
 
-      <aside className={styles.left} aria-label="Object library">
-        {left ?? <div className={styles.panelHeader}>Library</div>}
-      </aside>
+      {!fullBleed && (
+        <aside className={styles.left} aria-label="Object library">
+          {left ?? <div className={styles.panelHeader}>Library</div>}
+        </aside>
+      )}
 
       <main className={styles.canvas} aria-label="Design canvas">
         <ErrorBoundary>{canvas}</ErrorBoundary>
       </main>
 
-      <aside className={styles.right} aria-label="Properties inspector">
-        {right ?? <div className={styles.panelHeader}>Inspector</div>}
-      </aside>
+      {!fullBleed && (
+        <aside className={styles.right} aria-label="Properties inspector">
+          {right ?? <div className={styles.panelHeader}>Inspector</div>}
+        </aside>
+      )}
 
-      {bottom && <div className={styles.bottom}>{bottom}</div>}
+      {!fullBleed && bottom && <div className={styles.bottom}>{bottom}</div>}
 
       <footer className={styles.status}>{status}</footer>
     </div>

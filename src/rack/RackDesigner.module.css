@@ -1,0 +1,400 @@
+/* Rack designer (schema v3). Themed entirely via the app's global.css tokens, so
+   light + dark come for free. The "B+ console" accent reuses --accent. */
+
+.root {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 210px 1fr 300px;
+  grid-template-rows: 46px 1fr;
+  background: var(--canvas-bg);
+  overflow: hidden;
+}
+
+.toolbar {
+  grid-column: 1 / 4;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  background: var(--chrome-bg);
+  border-bottom: 1px solid var(--chrome-border);
+}
+.toolbar .title {
+  font-weight: 600;
+  font-size: 13px;
+}
+.toolbar select,
+.toolbar .btn {
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--chrome-fg);
+  background: var(--canvas-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 7px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.toolbar .btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+.toolbar .spacer {
+  flex: 1;
+}
+.toolbar .stat {
+  font: 12px var(--font-mono);
+  color: var(--chrome-fg-muted);
+}
+.seg {
+  display: flex;
+  border: 1px solid var(--chrome-border);
+  border-radius: 7px;
+  overflow: hidden;
+}
+.seg button {
+  border: 0;
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 12px;
+  background: var(--canvas-bg);
+  color: var(--chrome-fg-muted);
+  cursor: pointer;
+}
+.seg button.on {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  margin-left: 5px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+.seg button.on .badge {
+  background: rgba(255, 255, 255, 0.28);
+  color: var(--accent-fg);
+}
+
+/* general button (used in sidebar too, not just toolbar) */
+.btn {
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--chrome-fg);
+  background: var(--canvas-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 7px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.btn:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--chrome-border));
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+.libSearch {
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 7px 9px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  background: var(--canvas-bg);
+  color: var(--chrome-fg);
+  font: inherit;
+  font-size: 12.5px;
+}
+.nameInput {
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 7px;
+  background: var(--canvas-bg);
+  color: var(--chrome-fg);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+.rowBtns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* left library rail */
+.lib {
+  background: var(--chrome-bg);
+  border-right: 1px solid var(--chrome-border);
+  overflow: auto;
+  padding: 11px;
+}
+.lib h4 {
+  margin: 15px 0 7px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--chrome-fg-muted);
+}
+.lib h4:first-child {
+  margin-top: 0;
+}
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--chrome-border);
+  border-radius: 9px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  background: var(--canvas-bg);
+  color: var(--chrome-fg);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.chip:hover,
+.chip.armed {
+  border-color: var(--accent);
+}
+.chip.armed {
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.chip .glyph {
+  width: 28px;
+  height: 14px;
+  border-radius: 3px;
+  background: linear-gradient(#3a4250, #20262e);
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 1px;
+  padding: 2px;
+  flex: none;
+}
+.chip .glyph i {
+  background: #0a0e12;
+  border-radius: 0.5px;
+}
+.chip .u {
+  margin-left: auto;
+  font: 11px var(--font-mono);
+  color: var(--chrome-fg-muted);
+}
+
+/* center stage */
+.stage {
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+  padding: 26px;
+}
+.stage.placing {
+  cursor: crosshair;
+}
+.hint {
+  align-self: center;
+  max-width: 360px;
+  text-align: center;
+  color: var(--chrome-fg-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.hint .cta {
+  margin-top: 12px;
+}
+
+/* right sidebar */
+.side {
+  background: var(--chrome-bg);
+  border-left: 1px solid var(--chrome-border);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+.sec {
+  padding: 13px 15px;
+  border-bottom: 1px solid var(--chrome-border);
+}
+.sec h3 {
+  margin: 0 0 9px;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--chrome-fg-muted);
+}
+.kv {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12.5px;
+  padding: 3px 0;
+}
+.kv span {
+  color: var(--chrome-fg-muted);
+}
+.cable {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  padding: 6px 6px;
+  margin: 0 -6px;
+  border-radius: 7px;
+  border-bottom: 1px solid var(--chrome-border);
+  cursor: pointer;
+}
+.cable:hover {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.cableOn {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+}
+.cable .sw {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  flex: none;
+}
+.cable .ep {
+  font: 11px var(--font-mono);
+}
+.cable .lbl {
+  margin-left: auto;
+  color: var(--chrome-fg-muted);
+}
+.cable .x {
+  border: 0;
+  background: transparent;
+  color: var(--chrome-fg-muted);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 2px;
+}
+.connectBtn {
+  margin-top: 10px;
+  width: 100%;
+  border: 1.5px dashed var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--accent);
+  border-radius: 9px;
+  padding: 9px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* SVG rack interaction */
+.svg {
+  display: block;
+}
+@keyframes rackPulse {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+.pulse {
+  animation: rackPulse 0.9s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pulse {
+    animation: none;
+    opacity: 0.4;
+  }
+}
+.devhit {
+  cursor: grab;
+}
+.devhit:active {
+  cursor: grabbing;
+}
+
+/* dialog */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 14, 20, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.dialog {
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 12px;
+  width: 460px;
+  max-width: 92vw;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+}
+.dialog .dhead {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--chrome-border);
+  font-weight: 600;
+}
+.dialog .dbody {
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+.field {
+  display: grid;
+  gap: 4px;
+}
+.field label {
+  font-size: 11px;
+  color: var(--chrome-fg-muted);
+}
+.field select,
+.field input {
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 9px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 7px;
+  background: var(--canvas-bg);
+  color: var(--chrome-fg);
+}
+.swatches {
+  display: flex;
+  gap: 6px;
+}
+.swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+.swatch.on {
+  border-color: var(--chrome-fg);
+}
+.dfoot {
+  padding: 12px 16px;
+  border-top: 1px solid var(--chrome-border);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.err {
+  color: #dc2626;
+  font-size: 12px;
+}

@@ -8,6 +8,14 @@ minor/patch semantics are not yet enforced.
 
 ### Added
 
+- **Rack Designer** — a separate designer screen, chosen at launch (Network vs
+  Rack). Drag switches, servers, firewalls, patch panels, PDUs and more into a
+  cabinet at any U; front/rear faces; full- and half-bay placement; 0U rail gear.
+  Port-to-port cabling with color-coded, labeled connectors and an installer
+  cable-schedule. Export the elevation to PNG/PDF and the schedule to CSV.
+  Auto-numbered device names, inline rename, keyboard nudge/delete, and an
+  invalid-drop rejection hint. Everything runs locally — no login, no server.
+  `.nexmap` schema migrated v2 → v3 (additive, round-trip-safe).
 - Flat 2D device-model icons (detailed, per-type) distinct from the 3D
   isometric models; the library palette and flat-mode export track the active
   projection.

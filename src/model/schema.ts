@@ -14,6 +14,7 @@ import type {
   NexMapDocument,
   ProjectMeta,
   Rack,
+  RackCable,
   ShapeObject,
   Subnet,
   TextObject,
@@ -22,7 +23,7 @@ import type {
 } from './types';
 
 /** Bump when the on-disk shape changes; add a migration in migrate.ts. */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 export const APP_VERSION = '0.1.0';
 
 export const DEFAULT_DEVICE_SIZE = { width: 56, height: 40 } as const;
@@ -193,6 +194,16 @@ export function createRack(
   return { id: nanoid(), name, ruHeight, ...partial };
 }
 
+/** Mint a physical rack cable between two device ports (schema v3). */
+export function createRackCable(
+  aEnd: RackCable['aEnd'],
+  bEnd: RackCable['bEnd'],
+  color: string,
+  partial: Partial<RackCable> = {},
+): RackCable {
+  return { id: nanoid(), aEnd, bEnd, color, ...partial };
+}
+
 export function createView(name: string, partial: Partial<View> = {}): View {
   return { id: nanoid(), name, hiddenLayers: [], ...partial };
 }
@@ -240,6 +251,7 @@ export function createEmptyDocument(now: string): NexMapDocument {
     vlans: [],
     subnets: [],
     racks: [],
+    rackCables: [],
     assets: [],
     customFields: [],
   };

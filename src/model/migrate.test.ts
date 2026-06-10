@@ -115,7 +115,9 @@ describe('migration v1 → v2 (first-class interfaces)', () => {
     const result = loadDocument(JSON.stringify(v1Doc()));
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.doc.schemaVersion).toBe(2);
+      // loadDocument always migrates to the current version (v1 → v2 → v3); the
+      // interfaces assertion below proves the v1 → v2 step ran along the way.
+      expect(result.doc.schemaVersion).toBe(SCHEMA_VERSION);
       expect(result.doc.devices.every((d) => Array.isArray(d.interfaces))).toBe(true);
       expect(result.doc.devices[0]!.interfaces).toEqual([]);
     }
@@ -153,12 +155,12 @@ describe('migration v1 → v2 (first-class interfaces)', () => {
     if (result.ok) expect(result.migratedFrom).toBeUndefined();
   });
 
-  it('still REFUSES a v3 document (forward guard holds at the new version)', () => {
+  it('loads a v3 document (now the current schema version)', () => {
     const doc = createEmptyDocument(NOW);
-    doc.schemaVersion = 3;
+    expect(doc.schemaVersion).toBe(3);
     const result = loadDocument(JSON.stringify(doc));
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toBe('too-new');
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.doc.rackCables).toEqual([]);
   });
 });
 

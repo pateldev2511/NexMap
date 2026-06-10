@@ -435,3 +435,21 @@ not commodity styling. Run /plan-design-review before implementing (UI scope).
 ### Rejected
 - Floating/dangling connector endpoints (breaks the validates-itself invariant).
 - Full inline WYSIWYG rich-text editor (off-moat; fights the SVG canvas).
+
+## Deferred from rack-designer CEO review (2026-06-07)
+- [ ] **E6 — Multi-rack row view + cross-rack cabling** (P2). Horizontal multi-rack
+      canvas, drag devices between racks, cables spanning racks. Data model already
+      supports it: cable endpoints are `{deviceId, ifaceId}` referencing any device, so
+      this is a pure additive VIEW layer — no schema migration, no rework. Build after the
+      single-rack designer is solid. Effort: human ~4d / CC ~1h.
+- [ ] **E7 — Power/weight/thermal budget** (P3). Sum per-device draw/weight vs rack
+      capacity, warn on overload. Blocked on adding optional watts/kg/BTU fields to the
+      device model first (reserve them when shaping schema v3). Effort: human ~2d / CC ~30m.
+
+## Deferred from rack-designer ship review (2026-06-10)
+- [ ] **Validate rack-cable endpoints exist** (P2). `connectRackCable` (projectStore.ts)
+      only checks self-cable and already-cabled; it does not verify each `{deviceId, ifaceId}`
+      resolves to a real `device.interfaces[].id`. The UI dialog constrains this, but the
+      public store method can mint a cable to a non-existent port. Add an existence check
+      (return null otherwise) and update the rackActions tests that currently cable to
+      fictional `p1`/`nic0` ids. Found by pre-landing review, confidence 6/10. Effort: CC ~15m.

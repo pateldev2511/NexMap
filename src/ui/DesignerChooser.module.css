@@ -1,0 +1,100 @@
+.root {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  background: var(--canvas-bg);
+  padding: 32px;
+}
+.brand {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--chrome-fg);
+}
+.brand span {
+  color: var(--accent);
+}
+.tagline {
+  margin-top: -16px;
+  color: var(--chrome-fg-muted);
+  font-size: 14px;
+}
+.cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 280px));
+  gap: 18px;
+}
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: left;
+  padding: 22px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 16px;
+  background: var(--chrome-bg);
+  color: var(--chrome-fg);
+  cursor: pointer;
+  transition:
+    border-color 0.12s,
+    transform 0.12s,
+    box-shadow 0.12s;
+}
+.card:hover,
+.card:focus-visible {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 30px rgba(20, 30, 50, 0.14);
+  outline: none;
+}
+.icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+}
+.icon.net {
+  background: linear-gradient(135deg, #60a5fa, #2563eb);
+}
+.icon.rack {
+  background: linear-gradient(135deg, #22d3ee, #0891b2);
+}
+.icon svg {
+  width: 26px;
+  height: 26px;
+}
+.card h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.card p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--chrome-fg-muted);
+}
+.card .go {
+  margin-top: auto;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.foot {
+  font-size: 12px;
+  color: var(--chrome-fg-muted);
+}
+.foot button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}

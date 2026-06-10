@@ -1,0 +1,322 @@
+import { useRef, useState } from 'react';
+import type { Device, Rack, RackCable } from '@/model/types';
+import {
+  cabinetSize,
+  bayOrigin,
+  deviceRect,
+  uLabelCenterY,
+  uToY,
+  portLayout,
+  BAY_W,
+  RAIL_PX,
+  U_PX,
+  type Rect,
+} from './rackLayout';
+
+/** A rejected drop: the slot the user aimed at + why + the nearest U that WOULD fit. */
+export interface RejectInfo {
+  u: number;
+  span: number;
+  reason: string;
+  pulseU: number | null;
+}
+import { panelKindFor } from './panelKind';
+import { slotOf } from './rackModel';
+import styles from './RackDesigner.module.css';
+
+/**
+ * Live SVG rack editor (eng-review A2: the interactive renderer). Shares geometry with
+ * the export builder via rackLayout; uses themeable CSS-var colors + selection state.
+ * Export forks the markup (literal hex) — this one optimizes for interaction.
+ */
+export function RackCanvas({
+  rack,
+  devices,
+  cables,
+  selectedId,
+  selectedCableId,
+  side,
+  armed,
+  reject,
+  onPlaceAt,
+  onDropPreset,
+  onSelect,
+  onSelectCable,
+  onMoveTo,
+}: {
+  rack: Rack;
+  devices: Device[];
+  cables: RackCable[];
+  selectedId: string | null;
+  /** Highlighted cable (from the schedule or a click), or null. */
+  selectedCableId: string | null;
+  /** Which mounting face to show. Devices on the other face are hidden. */
+  side: 'front' | 'rear';
+  /** True when a library preset is armed for placement (changes cursor + preview). */
+  armed: boolean;
+  /** Last rejected drop to flash (red slot + reason + pulse), or null. */
+  reject: RejectInfo | null;
+  onPlaceAt: (u: number) => void;
+  /** A library chip was dragged + dropped onto a U (key = preset key). */
+  onDropPreset: (key: string, u: number) => void;
+  onSelect: (id: string | null) => void;
+  onSelectCable: (id: string | null) => void;
+  onMoveTo: (id: string, u: number) => void;
+}) {
+  const { width, height } = cabinetSize(rack);
+  const origin = bayOrigin();
+  const bayH = rack.ruHeight * U_PX;
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [hoverU, setHoverU] = useState<number | null>(null);
+  const [dragU, setDragU] = useState<number | null>(null); // external drag-from-library
+  const drag = useRef<{ id: string; startY: number; startRu: number } | null>(null);
+
+  const mounted = devices.filter((d) => d.rackId === rack.id && d.ru != null);
+  const portCenters = new Map<string, { x: number; y: number }>(); // `${devId}:${ifaceId}`
+
+  // Map a client Y to a 1-based U (U1 at bottom).
+  const yToU = (clientY: number): number => {
+    const svg = svgRef.current;
+    if (!svg) return 1;
+    const rect = svg.getBoundingClientRect();
+    const scale = height / rect.height;
+    const localY = (clientY - rect.top) * scale - origin.y;
+    const fromTop = Math.floor(localY / U_PX);
+    return Math.max(1, Math.min(rack.ruHeight, rack.ruHeight - fromTop));
+  };
+
+  const onBayMove = (e: React.PointerEvent) => {
+    if (drag.current) {
+      onSelectNudge(e);
+      return;
+    }
+    if (armed) setHoverU(yToU(e.clientY));
+  };
+  const onSelectNudge = (e: React.PointerEvent) => {
+    if (!drag.current) return;
+    setHoverU(yToU(e.clientY));
+  };
+  const onBayClick = (e: React.MouseEvent) => {
+    // Compute the U directly from the click, not from hover state — so a tap or a
+    // click-without-prior-move still lands reliably.
+    if (armed) onPlaceAt(yToU(e.clientY));
+    else onSelectCable(null); // click empty space → clear the highlighted cable
+  };
+
+  const onDevDown = (e: React.PointerEvent, d: Device) => {
+    if (armed) return; // placing — let the bay handle the click
+    e.stopPropagation();
+    (e.currentTarget as Element).setPointerCapture(e.pointerId);
+    onSelect(d.id);
+    drag.current = { id: d.id, startY: e.clientY, startRu: d.ru ?? 1 };
+    setHoverU(d.ru ?? 1);
+  };
+  const onDevUp = () => {
+    if (drag.current && hoverU != null) {
+      onMoveTo(drag.current.id, hoverU);
+    }
+    drag.current = null;
+    setHoverU(null);
+  };
+
+  const cssVar = (name: string): string => `var(${name})`;
+
+  /** Live device panel as SVG JSX (themeable). */
+  const renderPanel = (d: Device) => {
+    const r = deviceRect(rack, d);
+    const panel: Rect = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
+    const kind = panelKindFor(d.type);
+    const ports = (d.interfaces ?? []).map((i) => ({ id: i.id, name: i.name }));
+    const isSel = d.id === selectedId;
+
+    const jacks = kind === 'switch' || kind === 'patch' || kind === 'firewall'
+      ? portLayout(panel, ports)
+      : [];
+    for (const j of jacks) {
+      portCenters.set(`${d.id}:${j.ifaceId}`, { x: j.x + j.w / 2, y: j.y + j.h / 2 });
+    }
+
+    return (
+      <g
+        key={d.id}
+        className={styles.devhit}
+        onPointerDown={(e) => onDevDown(e, d)}
+        onPointerUp={onDevUp}
+        role="button"
+        tabIndex={0}
+        aria-label={`${d.name}, U${d.ru}${(d.ruSpan ?? 1) > 1 ? `–U${(d.ru ?? 0) + (d.ruSpan ?? 1) - 1}` : ''}`}
+      >
+        <rect
+          x={panel.x} y={panel.y} width={panel.w} height={panel.h} rx={3}
+          style={{ fill: 'var(--rack-chassis, #2b323b)', stroke: isSel ? cssVar('--accent') : 'var(--rack-chassis-bd, #10131b)', strokeWidth: isSel ? 2 : 1 }}
+        />
+        <text x={panel.x + 8} y={panel.y + panel.h / 2 + 4} fontFamily="var(--font-mono)" fontSize={11} style={{ fill: '#e7ecf2' }}>
+          {d.name}
+        </text>
+        {jacks.map((j) => (
+          <rect key={j.ifaceId} x={j.x} y={j.y} width={j.w} height={j.h} rx={1.5}
+            style={{ fill: '#0a1018', stroke: '#46525f', strokeWidth: 0.75 }} />
+        ))}
+        {kind === 'server' && Array.from({ length: 6 }, (_, i) => {
+          const bw = 12, gap = 4, total = 6 * bw + 5 * gap;
+          const sx = panel.x + panel.w - 10 - total + i * (bw + gap);
+          return <rect key={i} x={sx} y={panel.y + 5} width={bw} height={panel.h - 10} rx={1.5}
+            style={{ fill: '#3a424c', stroke: '#10131b', strokeWidth: 0.75 }} />;
+        })}
+        {(kind === 'switch' || kind === 'server' || kind === 'firewall') && (
+          <circle cx={panel.x + panel.w - 6} cy={panel.y + 6} r={2.5} style={{ fill: '#34d399' }} />
+        )}
+      </g>
+    );
+  };
+
+  const panels = mounted.filter((d) => slotOf(d).side === side).map(renderPanel);
+
+  return (
+    <svg
+      ref={svgRef}
+      data-testid="rack-canvas"
+      className={styles.svg}
+      width={width}
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      onPointerMove={onBayMove}
+      onClick={onBayClick}
+      onPointerUp={onDevUp}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes('text/rack-preset')) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        setDragU(yToU(e.clientY));
+      }}
+      onDragLeave={() => setDragU(null)}
+      onDrop={(e) => {
+        const key = e.dataTransfer.getData('text/rack-preset');
+        setDragU(null);
+        if (!key) return;
+        e.preventDefault();
+        onDropPreset(key, yToU(e.clientY));
+      }}
+    >
+      {/* cabinet frame + corner screws */}
+      <rect x={1} y={1} width={width - 2} height={height - 2} rx={12}
+        style={{ fill: 'var(--chrome-bg)', stroke: 'var(--chrome-border)', strokeWidth: 2 }} />
+      {[[8, 8], [width - 8, 8], [8, height - 8], [width - 8, height - 8]].map(([cx, cy], i) => (
+        <circle key={i} cx={cx} cy={cy} r={4} style={{ fill: 'var(--canvas-grid)', stroke: 'var(--chrome-border)' }} />
+      ))}
+      <text x={origin.x} y={origin.y - 3} fontFamily="var(--font-ui)" fontSize={13} fontWeight={700} style={{ fill: 'var(--chrome-fg)' }}>
+        {rack.name} · {rack.ruHeight}U · {side}
+      </text>
+
+      {/* bay + rails */}
+      <rect x={origin.x} y={origin.y} width={BAY_W} height={bayH} rx={4} style={{ fill: 'var(--canvas-grid)' }} />
+      {[origin.x + 1, origin.x + BAY_W - RAIL_PX - 1].map((rx, i) => (
+        <rect key={i} x={rx} y={origin.y + 4} width={RAIL_PX} height={bayH - 8} rx={2} style={{ fill: 'var(--chrome-border)' }} />
+      ))}
+
+      {/* U-number gutter */}
+      {Array.from({ length: rack.ruHeight }, (_, i) => {
+        const u = i + 1;
+        return (
+          <text key={u} x={origin.x - 6} y={origin.y + uLabelCenterY(rack, u) + 3} textAnchor="end"
+            fontFamily="var(--font-mono)" fontSize={9} style={{ fill: 'var(--accent)' }}>{u}</text>
+        );
+      })}
+
+      {/* devices */}
+      {panels}
+
+      {/* empty-face hint — so flipping to a bare face never reads as "gear vanished".
+          Anchored near the TOP of the bay (not its vertical center) so it stays visible
+          without scrolling a tall 42U cabinet. */}
+      {panels.length === 0 && !armed && dragU == null && (
+        <text
+          x={origin.x + BAY_W / 2} y={origin.y + 110} textAnchor="middle"
+          fontFamily="var(--font-ui)" fontSize={13} style={{ fill: 'var(--chrome-fg-muted)' }}
+        >
+          Nothing on the {side} face yet — drag gear from the left
+        </text>
+      )}
+
+      {/* cables: haloed, bowed, selectable curves. Each cable bows by a different
+          amount so parallel runs separate; a contrasting halo keeps crossings legible;
+          selecting one (here or in the schedule) highlights it and dims the rest. */}
+      {cables.map((c, i) => {
+        const a = portCenters.get(`${c.aEnd.deviceId}:${c.aEnd.ifaceId}`);
+        const b = portCenters.get(`${c.bEnd.deviceId}:${c.bEnd.ifaceId}`);
+        if (!a || !b) return null;
+        const sel = c.id === selectedCableId;
+        const anySel = selectedCableId != null;
+        // Bow the control point sideways by a per-cable amount → parallels fan apart.
+        const bow = ((i % 6) - 2.5) * 18;
+        const mx = (a.x + b.x) / 2 + bow;
+        const my = (a.y + b.y) / 2;
+        const dPath = `M ${a.x.toFixed(1)} ${a.y.toFixed(1)} Q ${mx.toFixed(1)} ${my.toFixed(1)} ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
+        const op = anySel ? (sel ? 1 : 0.16) : 0.92;
+        const w = sel ? 4 : 2.5;
+        return (
+          <g
+            key={c.id}
+            style={{ cursor: 'pointer' }}
+            onClick={(e) => { e.stopPropagation(); onSelectCable(sel ? null : c.id); }}
+          >
+            {/* halo under the colored stroke for separation at crossings */}
+            <path d={dPath} fill="none" stroke="var(--chrome-bg)" strokeWidth={w + 3} strokeLinecap="round" opacity={op} />
+            <path d={dPath} fill="none" stroke={c.color} strokeWidth={w} strokeLinecap="round" opacity={op} />
+            <circle cx={a.x} cy={a.y} r={sel ? 4 : 3} fill={c.color} opacity={op} stroke="var(--chrome-bg)" strokeWidth={1} />
+            <circle cx={b.x} cy={b.y} r={sel ? 4 : 3} fill={c.color} opacity={op} stroke="var(--chrome-bg)" strokeWidth={1} />
+            {sel && c.label && (
+              <text
+                x={mx} y={my - 5} textAnchor="middle"
+                fontFamily="var(--font-mono)" fontSize={10}
+                stroke="var(--chrome-bg)" strokeWidth={3} paintOrder="stroke"
+                style={{ fill: 'var(--chrome-fg)' }}
+              >
+                {c.label}
+              </text>
+            )}
+          </g>
+        );
+      })}
+
+      {/* drop / move preview — click-arm, device-drag, OR drag-from-library */}
+      {(() => {
+        const previewU = dragU ?? (armed || drag.current ? hoverU : null);
+        if (previewU == null) return null;
+        return (
+          <rect
+            x={origin.x + RAIL_PX} y={origin.y + (rack.ruHeight - previewU) * U_PX}
+            width={BAY_W - RAIL_PX * 2} height={U_PX}
+            rx={3} fill="color-mix(in srgb, var(--accent) 12%, transparent)"
+            stroke="var(--accent)" strokeWidth={2} strokeDasharray="5 3" pointerEvents="none"
+          />
+        );
+      })()}
+
+      {/* rejected-drop feedback: red slot + reason, and a pulse at the nearest free U */}
+      {reject && (
+        <g pointerEvents="none">
+          <rect
+            x={origin.x + RAIL_PX} y={origin.y + uToY(rack, reject.u, reject.span)}
+            width={BAY_W - RAIL_PX * 2} height={reject.span * U_PX}
+            rx={3} fill="rgba(220,38,38,0.12)" stroke="#dc2626" strokeWidth={2}
+          />
+          <text
+            x={origin.x + RAIL_PX + 8} y={origin.y + uToY(rack, reject.u, reject.span) + reject.span * U_PX / 2 + 4}
+            fontFamily="var(--font-mono)" fontSize={11} style={{ fill: '#dc2626' }}
+          >
+            {reject.reason}
+          </text>
+          {reject.pulseU != null && (
+            <rect
+              className={styles.pulse}
+              x={origin.x + RAIL_PX} y={origin.y + uToY(rack, reject.pulseU, reject.span)}
+              width={BAY_W - RAIL_PX * 2} height={reject.span * U_PX}
+              rx={3} fill="var(--accent)" stroke="var(--accent)" strokeWidth={2}
+            />
+          )}
+        </g>
+      )}
+    </svg>
+  );
+}

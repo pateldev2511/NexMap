@@ -11,7 +11,8 @@ import { usePasteToCanvas } from './io/import/usePasteToCanvas';
 import { ExportDialog } from './ui/dialogs/ExportDialog';
 import { ShortcutsDialog } from './ui/dialogs/ShortcutsDialog';
 import { ViewSwitcher } from './ui/ViewSwitcher';
-import { RackView } from './ui/RackView/RackView';
+import { RackDesigner } from './rack/RackDesigner';
+import { DesignerChooser, type DesignerMode } from './ui/DesignerChooser';
 import { SettingsDialog } from './ui/dialogs/SettingsDialog';
 import { AboutDialog } from './ui/dialogs/AboutDialog';
 import { OutlineDialog } from './ui/dialogs/OutlineDialog';
@@ -87,7 +88,10 @@ export function App() {
   const [showHelp, setShowHelp] = useState(false);
   const [presentation, setPresentation] = useState(false);
   const [showPages, setShowPages] = useState(false);
-  const [rackView, setRackView] = useState(false);
+  const [mode, setMode] = useState<DesignerMode | null>(() => {
+    const m = localStorage.getItem('nexmap.mode');
+    return m === 'rack' || m === 'network' ? m : null;
+  });
   const [showSettings, setShowSettings] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
@@ -140,6 +144,21 @@ export function App() {
     setFirstRunDone(true);
   }
 
+  function pickMode(m: DesignerMode) {
+    setMode(m);
+    localStorage.setItem('nexmap.mode', m);
+    // Rack jumps straight into its own empty state; network shows the template start screen.
+    setFirstRunDone(m === 'rack');
+  }
+
+  function switchDesigner() {
+    if (dirty && !confirm('Discard unsaved changes and switch designer?')) return;
+    newProject(new Date().toISOString());
+    localStorage.removeItem('nexmap.mode');
+    setMode(null);
+    setFirstRunDone(false);
+  }
+
   async function handleOpen() {
     if (canOpenPicker) await persistence.open();
     else fileInputRef.current?.click();
@@ -171,31 +190,35 @@ export function App() {
         <NexIcon name="save" />
         <span>Save</span>
       </button>
-      <button
-        className={shell.topbarBtn}
-        onClick={() => setNexText(true)}
-        title="NexText — text to diagram"
-      >
-        <NexIcon name="text" />
-        <span>NexText</span>
-      </button>
-      <button
-        className={shell.topbarBtn}
-        onClick={() => setImporting(true)}
-        title="Import CSV"
-      >
-        <NexIcon name="import" />
-        <span>Import</span>
-      </button>
-      <button
-        className={shell.topbarBtn}
-        onClick={() => setExporting(true)}
-        title="Export (Ctrl+E)"
-      >
-        <NexIcon name="export" />
-        <span>Export</span>
-      </button>
-      <ViewSwitcher />
+      {mode === 'network' && (
+        <>
+          <button
+            className={shell.topbarBtn}
+            onClick={() => setNexText(true)}
+            title="NexText — text to diagram"
+          >
+            <NexIcon name="text" />
+            <span>NexText</span>
+          </button>
+          <button
+            className={shell.topbarBtn}
+            onClick={() => setImporting(true)}
+            title="Import CSV"
+          >
+            <NexIcon name="import" />
+            <span>Import</span>
+          </button>
+          <button
+            className={shell.topbarBtn}
+            onClick={() => setExporting(true)}
+            title="Export (Ctrl+E)"
+          >
+            <NexIcon name="export" />
+            <span>Export</span>
+          </button>
+          <ViewSwitcher />
+        </>
+      )}
       <button
         className={shell.topbarBtn}
         onClick={doUndo}
@@ -214,38 +237,50 @@ export function App() {
       >
         <NexIcon name="redo" />
       </button>
+      <button
+        className={shell.topbarBtn}
+        onClick={switchDesigner}
+        title="Switch between the Network and Rack designers"
+      >
+        <NexIcon name={mode === 'rack' ? 'rack' : 'connect'} />
+        <span>{mode === 'rack' ? 'Rack designer' : 'Network designer'}</span>
+      </button>
       <details className={shell.moreMenu}>
         <summary className={shell.topbarBtn} title="More actions">
           <NexIcon name="settings" />
           <span>More</span>
         </summary>
         <div className={shell.menuPanel}>
-          <button
-            className={shell.menuItem}
-            onClick={() => setShowPages((p) => !p)}
-            aria-pressed={showPages}
-          >
-            <NexIcon name="pages" />
-            <span>{showPages ? 'Hide pages' : 'Show pages'}</span>
-          </button>
-          <button
-            className={shell.menuItem}
-            onClick={() => setRackView((r) => !r)}
-            aria-pressed={rackView}
-          >
+          {mode === 'network' && (
+            <>
+              <button
+                className={shell.menuItem}
+                onClick={() => setShowPages((p) => !p)}
+                aria-pressed={showPages}
+              >
+                <NexIcon name="pages" />
+                <span>{showPages ? 'Hide pages' : 'Show pages'}</span>
+              </button>
+              <button className={shell.menuItem} onClick={() => setPresentation(true)}>
+                <NexIcon name="presentation" />
+                <span>Presentation</span>
+              </button>
+              <button
+                className={shell.menuItem}
+                onClick={() => setView((v) => (v === 'editor' ? 'perf' : 'editor'))}
+              >
+                <NexIcon name="inspector" />
+                <span>{view === 'editor' ? 'Performance harness' : 'Editor'}</span>
+              </button>
+              <button className={shell.menuItem} onClick={() => setShowOutline(true)}>
+                <NexIcon name="library" />
+                <span>Topology outline</span>
+              </button>
+            </>
+          )}
+          <button className={shell.menuItem} onClick={switchDesigner}>
             <NexIcon name="rack" />
-            <span>{rackView ? 'Canvas view' : 'Rack view'}</span>
-          </button>
-          <button className={shell.menuItem} onClick={() => setPresentation(true)}>
-            <NexIcon name="presentation" />
-            <span>Presentation</span>
-          </button>
-          <button
-            className={shell.menuItem}
-            onClick={() => setView((v) => (v === 'editor' ? 'perf' : 'editor'))}
-          >
-            <NexIcon name="inspector" />
-            <span>{view === 'editor' ? 'Performance harness' : 'Editor'}</span>
+            <span>Switch designer…</span>
           </button>
           <button className={shell.menuItem} onClick={toggleTheme}>
             <NexIcon name="theme" />
@@ -254,10 +289,6 @@ export function App() {
           <button className={shell.menuItem} onClick={() => setShowSettings(true)}>
             <NexIcon name="settings" />
             <span>Settings</span>
-          </button>
-          <button className={shell.menuItem} onClick={() => setShowOutline(true)}>
-            <NexIcon name="library" />
-            <span>Topology outline</span>
           </button>
           <button className={shell.menuItem} onClick={() => setShowHelp(true)}>
             <NexIcon name="help" />
@@ -358,18 +389,26 @@ export function App() {
   }
 
   const showRecovery = !firstRunDone && persistence.recoverable !== null;
-  const showFirstRun = !firstRunDone && persistence.recoverable === null;
+  const showFirstRun =
+    !firstRunDone && persistence.recoverable === null && mode === 'network';
+
+  // Entry chooser: ask which designer when none is active and nothing to recover.
+  if (mode === null && persistence.recoverable === null) {
+    return <DesignerChooser onPick={pickMode} onOpen={() => void handleOpen()} />;
+  }
+  const isRack = mode === 'rack';
 
   return (
     <AppShell
       actions={actions}
       titleNode={<EditableTitle />}
-      left={<LeftPanel />}
-      right={<Inspector />}
+      fullBleed={isRack}
+      left={isRack ? undefined : <LeftPanel />}
+      right={isRack ? undefined : <Inspector />}
       canvas={
         <>
           {persistence.readOnly && <ReadOnlyBanner />}
-          {rackView ? <RackView /> : <Canvas showPages={showPages} />}
+          {isRack ? <RackDesigner /> : <Canvas showPages={showPages} />}
           {showFirstRun && (
             <FirstRun
               onDone={() => setFirstRunDone(true)}
@@ -410,15 +449,23 @@ export function App() {
           {showPalette &&
             (() => {
               const st = useProjectStore.getState;
-              const cmds: PaletteCommand[] = [
+              // Commands relevant in both designers.
+              const generic: PaletteCommand[] = [
                 { id: 'new', label: 'New project', hint: '⌘N', run: handleNew },
                 { id: 'open', label: 'Open .nexmap…', hint: '⌘O', run: () => void handleOpen() },
                 { id: 'save', label: 'Save', hint: '⌘S', run: () => void persistence.save() },
+                { id: 'undo', label: 'Undo', hint: '⌘Z', run: doUndo },
+                { id: 'redo', label: 'Redo', hint: '⌘⇧Z', run: doRedo },
+                { id: 'switch', label: 'Switch designer…', run: switchDesigner },
+                { id: 'theme', label: 'Toggle theme', run: toggleTheme },
+                { id: 'shortcuts', label: 'Keyboard shortcuts', hint: '?', run: () => setShowHelp(true) },
+                { id: 'about', label: 'About & privacy', run: () => setShowAbout(true) },
+              ];
+              // Topology-only commands — hidden in the Rack designer.
+              const networkOnly: PaletteCommand[] = [
                 { id: 'export', label: 'Export…', hint: '⌘E', run: () => setExporting(true) },
                 { id: 'import', label: 'Import…', run: () => setImporting(true) },
                 { id: 'nextext', label: 'NexText (describe in text)…', run: () => setNexText(true) },
-                { id: 'undo', label: 'Undo', hint: '⌘Z', run: doUndo },
-                { id: 'redo', label: 'Redo', hint: '⌘⇧Z', run: doRedo },
                 { id: 'layout', label: 'Auto-layout (tidy)', run: () => st().autoLayout() },
                 {
                   id: 'projection',
@@ -433,11 +480,10 @@ export function App() {
                 { id: 'selectall', label: 'Select all', hint: '⌘A', run: () => st().selectAll() },
                 { id: 'deselect', label: 'Deselect', run: () => st().clearSelection() },
                 { id: 'present', label: 'Presentation mode', run: () => setPresentation(true) },
-                { id: 'theme', label: 'Toggle theme', run: toggleTheme },
-                { id: 'shortcuts', label: 'Keyboard shortcuts', hint: '?', run: () => setShowHelp(true) },
                 { id: 'outline', label: 'Topology outline (accessible list)', run: () => setShowOutline(true) },
-                { id: 'about', label: 'About & privacy', run: () => setShowAbout(true) },
               ];
+              const cmds: PaletteCommand[] =
+                mode === 'rack' ? generic : [...generic.slice(0, 5), ...networkOnly, ...generic.slice(5)];
               return (
                 <CommandPalette commands={cmds} onClose={() => setShowPalette(false)} />
               );
@@ -455,13 +501,19 @@ export function App() {
           />
         </>
       }
-      bottom={<BottomPanel />}
-      status={<StatusBar persistence={persistence} />}
+      bottom={isRack ? undefined : <BottomPanel />}
+      status={<StatusBar persistence={persistence} mode={mode} />}
     />
   );
 }
 
-function StatusBar({ persistence }: { persistence: ReturnType<typeof usePersistence> }) {
+function StatusBar({
+  persistence,
+  mode,
+}: {
+  persistence: ReturnType<typeof usePersistence>;
+  mode: DesignerMode | null;
+}) {
   const label =
     persistence.status === 'saving'
       ? 'Saving…'
@@ -477,7 +529,8 @@ function StatusBar({ persistence }: { persistence: ReturnType<typeof usePersiste
       <span>{persistence.fileName ?? 'Not saved to a file yet'}</span>
       <span>{label}</span>
       <span style={{ marginLeft: 'auto' }} />
-      <ValidationSummary />
+      {/* Validation is a network-topology concern; the rack designer has none. */}
+      {mode === 'rack' ? <span>Rack designer</span> : <ValidationSummary />}
     </>
   );
 }
