@@ -1440,6 +1440,15 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         }
         if (Object.keys(after).length > 0) cmds.push(new UpdateLinkCommand(l.id, before, after));
       }
+      // Cascade: drop any rack cable whose endpoint referenced this interface. Folded
+      // into the SAME transaction as the port removal so deleting a cabled port and
+      // cleaning up its cable undo together — otherwise the cable orphans (stale ifaceId
+      // that survives save/load, vanishes from the render, but lingers in the CSV export).
+      const validIfaceIds = next.map((i) => i.id);
+      const keptCables = pruneCablesForInterfaces([...model.rackCables.values()], deviceId, validIfaceIds);
+      for (const c of model.rackCables.values()) {
+        if (!keptCables.some((k) => k.id === c.id)) cmds.push(new DeleteRackCableCommand(c.id));
+      }
       history.dispatch(transaction('Delete interface', cmds), model);
       history.commitCoalesceBoundary();
       set({

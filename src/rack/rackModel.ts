@@ -177,11 +177,3 @@ export function nearestFreeU(
   }
   return null;
 }
-
-/**
- * Slot for a legacy (v2) racked device, used by the migration AND as the runtime
- * back-compat read. `ru`/`ruSpan` stay canonical; the qualifiers default.
- */
-export function deriveSlotFromLegacy(d: Device): Slot {
-  return slotOf(d);
-}

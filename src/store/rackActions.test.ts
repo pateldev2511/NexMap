@@ -137,3 +137,40 @@ describe('CRITICAL cascade — prune on interface re-population (E5)', () => {
     expect(s().rackCablesAll()).toHaveLength(1);
   });
 });
+
+// Regression: deleting a single interface via the Inspector path (deleteInterface) must
+// cascade to rack cables in the SAME undoable transaction. Without the wiring the cable
+// orphaned — stale ifaceId surviving save/load and leaking into the CSV export. Uses real
+// interface ids (addInterface) so deleteInterface actually removes a port.
+describe('CRITICAL cascade — deleteInterface removes the port AND its cable, atomically', () => {
+  const hasIface = (id: string, ifaceId: string) =>
+    (s().getDevice(id)?.interfaces ?? []).some((i) => i.id === ifaceId);
+
+  it('drops a cable when its port is deleted, and undo restores both together', () => {
+    const a = s().addDeviceAt('switch', 0, 0);
+    const b = s().addDeviceAt('server', 0, 0);
+    const pa = s().addInterface(a, 'Gi1/0/1')!;
+    const pb = s().addInterface(b, 'vmnic0')!;
+    s().connectRackCable({ deviceId: a, ifaceId: pa }, { deviceId: b, ifaceId: pb }, '#fff');
+    expect(s().rackCablesAll()).toHaveLength(1);
+
+    s().deleteInterface(a, pa);
+    expect(hasIface(a, pa)).toBe(false);
+    expect(s().rackCablesAll()).toHaveLength(0); // cable cascaded out, not orphaned
+
+    s().undo();
+    expect(hasIface(a, pa)).toBe(true);
+    expect(s().rackCablesAll()).toHaveLength(1); // port + cable came back in one undo
+  });
+
+  it('leaves cables on other ports untouched', () => {
+    const a = s().addDeviceAt('switch', 0, 0);
+    const b = s().addDeviceAt('server', 0, 0);
+    const pa1 = s().addInterface(a, 'Gi1/0/1')!;
+    const pa2 = s().addInterface(a, 'Gi1/0/2')!;
+    const pb = s().addInterface(b, 'vmnic0')!;
+    s().connectRackCable({ deviceId: a, ifaceId: pa2 }, { deviceId: b, ifaceId: pb }, '#fff');
+    s().deleteInterface(a, pa1); // delete a DIFFERENT, uncabled port
+    expect(s().rackCablesAll()).toHaveLength(1);
+  });
+});
