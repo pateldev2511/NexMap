@@ -22,18 +22,33 @@ export function ConnectPortsDialog({
   onClose: () => void;
 }) {
   const s = useProjectStore.getState;
+  // Cross-rack capable: every mounted device with ports, from ANY rack. The dialog groups
+  // them by rack so a cable can span cabinets.
+  const racks = s().racksAll();
+  const rackName = useMemo(() => new Map(racks.map((r) => [r.id, r.name])), [racks]);
   const devices = useMemo(
-    () => s().devicesAll().filter((d) => d.rackId === rackId && (d.interfaces?.length ?? 0) > 0),
-    [rackId, s],
+    () => s().devicesAll().filter((d) => d.rackId != null && (d.interfaces?.length ?? 0) > 0),
+    [s],
   );
+  // devices grouped by rack, current rack first, for the <optgroup> layout.
+  const byRack = useMemo(() => {
+    const groups = new Map<string, Device[]>();
+    for (const d of devices) {
+      const k = d.rackId!;
+      (groups.get(k) ?? groups.set(k, []).get(k)!).push(d);
+    }
+    return [...groups.entries()].sort(([a], [b]) => (a === rackId ? -1 : b === rackId ? 1 : 0));
+  }, [devices, rackId]);
   const cables = s().rackCablesAll();
 
-  const [aDev, setADev] = useState(devices[0]?.id ?? '');
+  const inCurrent = devices.filter((d) => d.rackId === rackId);
+  const [aDev, setADev] = useState(inCurrent[0]?.id ?? devices[0]?.id ?? '');
   const [aPort, setAPort] = useState('');
-  const [bDev, setBDev] = useState(devices[1]?.id ?? devices[0]?.id ?? '');
+  const [bDev, setBDev] = useState(inCurrent[1]?.id ?? devices[1]?.id ?? devices[0]?.id ?? '');
   const [bPort, setBPort] = useState('');
   const [color, setColor] = useState<string>(CABLE_COLORS[0]);
   const [label, setLabel] = useState('');
+  const [lengthFt, setLengthFt] = useState('');
   const [err, setErr] = useState('');
 
   const portsOf = (devId: string): { id: string; name: string; used: boolean }[] => {
@@ -61,6 +76,10 @@ export function ConnectPortsDialog({
       setErr('That connection is invalid (same port, or a port is already cabled).');
       return;
     }
+    const len = Number(lengthFt);
+    if (lengthFt.trim() && Number.isFinite(len) && len > 0) {
+      s().updateRackCable(id, { lengthFt: undefined }, { lengthFt: len });
+    }
     onClose();
   };
 
@@ -80,8 +99,12 @@ export function ConnectPortsDialog({
     <div className={styles.field}>
       <label>{title}</label>
       <select value={dev} onChange={(e) => { setDev(e.target.value); setPort(''); }}>
-        {devices.map((d) => (
-          <option key={d.id} value={d.id}>{d.name}</option>
+        {byRack.map(([rid, ds]) => (
+          <optgroup key={rid} label={rackName.get(rid) ?? 'Rack'}>
+            {ds.map((d) => (
+              <option key={d.id} value={d.id}>{d.name}</option>
+            ))}
+          </optgroup>
         ))}
       </select>
       <select value={port} onChange={(e) => setPort(e.target.value)}>
@@ -124,6 +147,10 @@ export function ConnectPortsDialog({
               <div className={styles.field}>
                 <label>Label (optional)</label>
                 <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. uplink" />
+              </div>
+              <div className={styles.field}>
+                <label>Length in ft (optional — recommended for cross-rack runs)</label>
+                <input value={lengthFt} onChange={(e) => setLengthFt(e.target.value)} inputMode="numeric" placeholder="e.g. 10" />
               </div>
               {err && <div className={styles.err}>{err}</div>}
             </>
