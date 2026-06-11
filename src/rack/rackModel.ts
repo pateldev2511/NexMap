@@ -45,6 +45,17 @@ export type FitResult =
   | { ok: false; reason: 'out-of-bounds' | 'occupied' | 'bay-conflict' | 'invalid' };
 
 /** Read a device's slot, applying v2 back-compat defaults (rack/front/full). */
+/**
+ * Racks in left-to-right row order. The optional `order` field wins; racks without it
+ * fall back to their current array index, so a partially-ordered set stays stable. Pure.
+ */
+export function orderRacks(racks: Rack[]): Rack[] {
+  return racks
+    .map((r, i) => ({ r, k: r.order ?? i }))
+    .sort((a, b) => a.k - b.k)
+    .map((x) => x.r);
+}
+
 export function slotOf(d: Device): Slot {
   return {
     ru: d.ru ?? 1,

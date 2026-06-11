@@ -9,9 +9,29 @@ import {
   canFit,
   firstFreeU,
   nearestFreeU,
+  orderRacks,
   type Slot,
 } from './rackModel';
 import type { Device, Rack } from '@/model/types';
+
+const rk = (id: string, order?: number): Rack => ({ id, name: id, ruHeight: 42, order });
+
+describe('orderRacks — row order', () => {
+  it('falls back to insertion order when no order field is set', () => {
+    expect(orderRacks([rk('a'), rk('b'), rk('c')]).map((r) => r.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('honors explicit order, and keeps unordered racks stable around them', () => {
+    // swap b and c by giving them explicit orders (the reorder gesture's effect)
+    expect(orderRacks([rk('a'), rk('b', 2), rk('c', 1)]).map((r) => r.id)).toEqual(['a', 'c', 'b']);
+  });
+
+  it('does not mutate the input array', () => {
+    const input = [rk('a', 1), rk('b', 0)];
+    orderRacks(input);
+    expect(input.map((r) => r.id)).toEqual(['a', 'b']);
+  });
+});
 
 const rack = (over: Partial<Rack> = {}): Rack => ({
   id: 'r1',

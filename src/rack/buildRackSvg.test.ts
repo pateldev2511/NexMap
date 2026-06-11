@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { buildRackSvg, cableScheduleRows, cableScheduleCsv } from './buildRackSvg';
+import {
+  buildRackSvg,
+  buildRackRowSvg,
+  buildConnectionsTableSvg,
+  composeExport,
+  cableScheduleRows,
+  cableScheduleCsv,
+} from './buildRackSvg';
 import type { Device, Rack, RackCable } from '@/model/types';
 
 const rack: Rack = { id: 'r1', name: 'MDF "Main"', ruHeight: 42 };
@@ -69,5 +76,80 @@ describe('cable schedule (E3)', () => {
     const lines = csv.split('\n');
     expect(lines[0]).toBe('Color,Label,From,To,Length (ft)');
     expect(lines[1]).toBe('"#22d3ee","uplink","core-sw:Gi1/0/1","esxi-01:vmnic0",""');
+  });
+});
+
+describe('buildRackRowSvg — multiple racks in one canvas', () => {
+  const rackB: Rack = { id: 'r2', name: 'IDF-2', ruHeight: 24 };
+  const swB: Device = {
+    id: 'swB', kind: 'device', type: 'switch', name: 'edge-sw', x: 0, y: 0, width: 56, height: 40, layerId: 'L',
+    rackId: 'r2', ru: 20, ruSpan: 1, mount: 'rack', side: 'front', bay: 'full',
+    interfaces: [{ id: 'q1', name: 'Gi0/1' }],
+  };
+  const crossRackCable: RackCable = {
+    id: 'x1', aEnd: { deviceId: 'sw', ifaceId: 'p2' }, bEnd: { deviceId: 'swB', ifaceId: 'q1' }, color: '#f59e0b', label: 'inter-rack uplink',
+  };
+
+  it('renders two cabinet frames with integer canvas dims and no CSS vars', () => {
+    const svg = buildRackRowSvg([rack, rackB], [sw, srv, swB], []);
+    expect(svg.startsWith('<svg')).toBe(true);
+    const m = svg.match(/width="(\d+)" height="(\d+)"/);
+    expect(m).toBeTruthy();
+    expect(Number.isInteger(Number(m![1]))).toBe(true);
+    // two rack titles, two bays
+    expect(svg).toContain('MDF &quot;Main&quot; · 42U');
+    expect(svg).toContain('IDF-2 · 24U');
+    expect(svg).not.toContain('var(');
+    // wider than a single 42U cabinet (two cabinets + gutter)
+    const single = buildRackSvg(rack, [sw, srv], []);
+    const w1 = Number(single.match(/width="(\d+)"/)![1]);
+    expect(Number(m![1])).toBeGreaterThan(w1);
+  });
+
+  it('draws a cross-rack cable as a curved path between cabinets', () => {
+    const svg = buildRackRowSvg([rack, rackB], [sw, srv, swB], [crossRackCable]);
+    expect(svg).toContain('#f59e0b'); // the cross-rack cable color, literal
+    expect(svg).toMatch(/<path[^>]*stroke="#f59e0b"/);
+  });
+
+  it('single-rack wrapper is identical to a one-element row', () => {
+    const viaWrapper = buildRackSvg(rack, [sw, srv], [cable], { background: '#fff' });
+    const viaRow = buildRackRowSvg([rack], [sw, srv], [cable], { background: '#fff' });
+    expect(viaWrapper).toBe(viaRow);
+  });
+});
+
+describe('buildConnectionsTableSvg + composeExport (E2 export modes)', () => {
+  const rows = cableScheduleRows([sw, srv], [cable]);
+
+  it('renders a header and one row per cable, export-safe (no var, escaped, integer dims)', () => {
+    const svg = buildConnectionsTableSvg(rows, { background: '#ffffff', title: 'Connections' });
+    expect(svg.startsWith('<svg')).toBe(true);
+    expect(svg).not.toContain('var(');
+    expect(svg).toContain('>From<');
+    expect(svg).toContain('core-sw:Gi1/0/1');
+    expect(svg).toContain('#22d3ee'); // color swatch fill
+    const m = svg.match(/width="(\d+)" height="(\d+)"/);
+    expect(Number.isInteger(Number(m![1]))).toBe(true);
+  });
+
+  it('renders a valid header-only table for zero cables', () => {
+    const svg = buildConnectionsTableSvg([], {});
+    expect(svg.startsWith('<svg')).toBe(true);
+    expect(svg).toContain('>From<');
+  });
+
+  it('composeExport: diagram | table-only | diagram+table', () => {
+    const rackSvg = buildRackSvg(rack, [sw, srv], [cable]);
+    const tableSvg = buildConnectionsTableSvg(rows, {});
+    expect(composeExport(rackSvg, tableSvg, 'diagram')).toBe(rackSvg);
+    expect(composeExport(rackSvg, tableSvg, 'table-only')).toBe(tableSvg);
+    const both = composeExport(rackSvg, tableSvg, 'diagram+table', '#ffffff');
+    expect(both.startsWith('<svg')).toBe(true);
+    expect(both).toContain('translate(0,'); // table stacked below
+    // taller than either piece alone
+    const h = Number(both.match(/height="(\d+)"/)![1]);
+    const rh = Number(rackSvg.match(/height="(\d+)"/)![1]);
+    expect(h).toBeGreaterThan(rh);
   });
 });
