@@ -400,6 +400,8 @@ export interface ProjectStore {
   addRack(name: string): string;
   updateRack(id: string, before: Partial<Rack>, after: Partial<Rack>): void;
   deleteRack(id: string): void;
+  /** Deep-copy a rack with its mounted gear and intra-rack cables. Returns the new id. */
+  cloneRack(rackId: string): string | null;
   racksAll(): Rack[];
   // Rack designer (schema v3) — placement + physical cabling.
   /** Validate + write a device's rack slot atomically. Returns the fit result. */
@@ -1780,6 +1782,51 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     deleteRack(id) {
       commit(new DeleteRackCommand(id));
       history.commitCoalesceBoundary();
+    },
+    cloneRack(rackId) {
+      const src = model.racks.get(rackId);
+      if (!src) return null;
+      const newRackId = newId();
+      // Drop `order` so the clone falls to the end of the row (insertion order). Copying it
+      // would give two racks the same order key → a reorder dead-spot.
+      const newRack: Rack = { ...src, id: newRackId, name: `${src.name} (copy)`, order: undefined };
+
+      // Clone mounted gear with fresh device + interface ids, remembering the remaps so
+      // intra-rack cables can be rewired. Cross-rack cables are intentionally dropped.
+      const srcDevices = [...model.devices.values()].filter((d) => d.rackId === rackId && d.ru != null);
+      const devIdMap = new Map<string, string>();
+      const ifaceIdMap = new Map<string, string>(); // `${oldDevId}:${oldIfaceId}` → newIfaceId
+      const newDevices: Device[] = srcDevices.map((d) => {
+        const nid = newId();
+        devIdMap.set(d.id, nid);
+        const interfaces = (d.interfaces ?? []).map((i) => {
+          const niface = newId();
+          ifaceIdMap.set(`${d.id}:${i.id}`, niface);
+          return { ...i, id: niface };
+        });
+        return { ...d, id: nid, rackId: newRackId, interfaces, groupId: undefined };
+      });
+
+      const srcDevIds = new Set(srcDevices.map((d) => d.id));
+      const newCables: RackCable[] = [...model.rackCables.values()]
+        .filter((c) => srcDevIds.has(c.aEnd.deviceId) && srcDevIds.has(c.bEnd.deviceId))
+        .map((c) => ({
+          ...c,
+          id: newId(),
+          aEnd: { deviceId: devIdMap.get(c.aEnd.deviceId)!, ifaceId: ifaceIdMap.get(`${c.aEnd.deviceId}:${c.aEnd.ifaceId}`) ?? c.aEnd.ifaceId },
+          bEnd: { deviceId: devIdMap.get(c.bEnd.deviceId)!, ifaceId: ifaceIdMap.get(`${c.bEnd.deviceId}:${c.bEnd.ifaceId}`) ?? c.bEnd.ifaceId },
+        }));
+
+      const cmds: Command[] = [
+        new AddRackCommand(newRack),
+        ...newDevices.map((d) => new AddDeviceCommand(d)),
+        ...newCables.map((c) => new AddRackCableCommand(c)),
+      ];
+      history.dispatch(transaction('Clone rack', cmds), model);
+      for (const d of newDevices) index.insert(d.id, deviceBox(d));
+      history.commitCoalesceBoundary();
+      set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
+      return newRackId;
     },
     racksAll() {
       return [...model.racks.values()];

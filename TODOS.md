@@ -437,14 +437,37 @@ not commodity styling. Run /plan-design-review before implementing (UI scope).
 - Full inline WYSIWYG rich-text editor (off-moat; fights the SVG canvas).
 
 ## Deferred from rack-designer CEO review (2026-06-07)
-- [ ] **E6 — Multi-rack row view + cross-rack cabling** (P2). Horizontal multi-rack
-      canvas, drag devices between racks, cables spanning racks. Data model already
-      supports it: cable endpoints are `{deviceId, ifaceId}` referencing any device, so
-      this is a pure additive VIEW layer — no schema migration, no rework. Build after the
-      single-rack designer is solid. Effort: human ~4d / CC ~1h.
-- [ ] **E7 — Power/weight/thermal budget** (P3). Sum per-device draw/weight vs rack
-      capacity, warn on overload. Blocked on adding optional watts/kg/BTU fields to the
-      device model first (reserve them when shaping schema v3). Effort: human ~2d / CC ~30m.
+- [x] **E6 — Multi-rack row view + cross-rack cabling** (P2). ✅ SHIPPED 2026-06-10
+      (Rack Designer v2). Row view, cross-rack cabling, move-device-to-rack, reorder.
+- [~] **E7 — Power/weight/thermal budget** (P3). Watts + weight + U-utilization budget
+      with overload warnings SHIPPED 2026-06-10. **Thermal/BTU half deferred** — add an
+      optional `btu` device field + per-rack airflow/thermal cap. Effort: CC ~20m.
+
+## Deferred from Rack Designer v2 (2026-06-10)
+- [ ] **Drag a device between racks in the Row view** (P3). Cross-rack moves currently
+      go through the "Move to rack" select in the focused editor; add native pointer
+      drag-and-drop from one cabinet onto another in `RackRow.tsx` (React SVG `draggable`
+      typing needs a small shim). Effort: CC ~20m.
+- [ ] **Multi-page PDF for the row export** (P3). A wide multi-rack row + table is one tall
+      composite page today; paginate (one rack per page + a table page) via jsPDF
+      `addPage()` in `pdf.ts`. Effort: CC ~30m.
+- [ ] **Auto-color cables by speed/media** (P4). Optional palette mapping 1G/10G/40G or
+      copper/fiber to colors, on top of the manual swatch. Effort: CC ~15m.
+- [ ] **Cross-rack cable + length should be one undo** (P3). `ConnectPortsDialog.submit`
+      creates the cable (`connectRackCable`) then writes `lengthFt` in a separate
+      `updateRackCable` — two history entries for one action. Fold an optional `lengthFt`
+      into `connectRackCable`. Found by ship adversarial review. Effort: CC ~15m.
+- [ ] **Share the cable-curve helper between row renderers** (P4). `buildRackRowSvg` and
+      `RackRow.tsx` duplicate the bow/cross-arc curve math with drifting magic numbers
+      (`*18/-40` vs `*14/-36`). Extract one `cablePath(pa,pb,i,crossRack)`. Effort: CC ~15m.
+
+## Deferred from Rack Designer v3 (2026-06-10)
+- [ ] **True rear-face port art** (P3). The rear column currently shows the same front
+      faceplate; real rear layouts differ (PSUs, fan trays, rear ports). Add rear-specific
+      art in `rackDeviceArt.ts` keyed on `side`. Effort: CC ~30m.
+- [ ] **Pan/zoom unified canvas + inline port editing** (P3). v3 keeps a focus drill-in for
+      port-level work; a future infinite pan/zoom canvas could place gear + cable inline with
+      no drill-in step (the rejected "unified canvas" CEO option). Needs viewport math.
 
 ## Deferred from rack-designer ship review (2026-06-10)
 - [ ] **Validate rack-cable endpoints exist** (P2). `connectRackCable` (projectStore.ts)

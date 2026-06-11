@@ -84,3 +84,39 @@ describe('too-new guard protects v3 cabling from old builds', () => {
     expect(r.reason).toBe('too-new');
   });
 });
+
+describe('v2 designer (multi-rack/budget) optional fields round-trip without a version bump', () => {
+  it('preserves Device watts/weightKg and Rack maxWatts/maxWeightKg/order across load→save→load', () => {
+    const doc = {
+      ...v2Doc(),
+      schemaVersion: SCHEMA_VERSION, // already a current-version doc carrying the new fields
+      devices: [
+        { id: 'sw', kind: 'device', type: 'switch', name: 'core-sw', x: 0, y: 0, width: 56, height: 40, layerId: 'L', interfaces: [], rackId: 'r1', ru: 40, ruSpan: 1, mount: 'rack', side: 'front', bay: 'full', watts: 120, weightKg: 6 },
+      ],
+      racks: [{ id: 'r1', name: 'MDF', ruHeight: 42, maxWatts: 5000, maxWeightKg: 400, order: 2 }],
+      rackCables: [],
+    };
+    const first = loadDocument(JSON.stringify(doc));
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const d = first.doc.devices.find((x) => x.id === 'sw')!;
+    expect(d.watts).toBe(120);
+    expect(d.weightKg).toBe(6);
+    const r = first.doc.racks[0]!;
+    expect(r.maxWatts).toBe(5000);
+    expect(r.maxWeightKg).toBe(400);
+    expect(r.order).toBe(2);
+    // round-trip stable
+    const saved = JSON.stringify(first.doc);
+    const second = loadDocument(saved);
+    if (!second.ok) return;
+    expect(JSON.stringify(second.doc)).toBe(saved);
+  });
+
+  it('loads a doc WITHOUT the new fields (they stay undefined)', () => {
+    const r = loadDocument(JSON.stringify({ ...v2Doc(), schemaVersion: SCHEMA_VERSION, rackCables: [] }));
+    if (!r.ok) return;
+    expect(r.doc.racks[0]!.maxWatts).toBeUndefined();
+    expect(r.doc.devices[0]!.watts).toBeUndefined();
+  });
+});

@@ -120,6 +120,9 @@ export interface Device {
   mount?: 'rack' | 'rail';
   side?: 'front' | 'rear';
   bay?: 'full' | 'left' | 'right';
+  /** Power draw (watts) and weight (kg) for the rack power/weight budget. Optional. */
+  watts?: number;
+  weightKg?: number;
   /** Locked devices can't be moved or deleted until unlocked. */
   locked?: boolean;
   /** Stacking order; higher renders on top. Default 0. */
@@ -273,6 +276,11 @@ export interface Rack {
   widthIn?: 19 | 23;
   /** Id of the rackTypes preset this rack was created from (schema v3). */
   presetId?: string;
+  /** Capacity caps for the power/weight budget (additive, optional). */
+  maxWatts?: number;
+  maxWeightKg?: number;
+  /** Left-to-right order in the multi-rack row view; absent → insertion order. */
+  order?: number;
   extra?: ExtraFields;
 }
 

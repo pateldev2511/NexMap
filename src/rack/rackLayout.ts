@@ -36,9 +36,41 @@ export function cabinetSize(rack: Rack): { width: number; height: number } {
   };
 }
 
-/** Top-left origin of the bay (device coordinate space) within the cabinet. */
-export function bayOrigin(): { x: number; y: number } {
-  return { x: FRAME_PAD + GUTTER_PX, y: FRAME_PAD };
+/** Horizontal space between adjacent cabinets in the multi-rack row view. */
+export const RACK_GUTTER = 48;
+
+/**
+ * Top-left origin of the bay (device coordinate space) within the cabinet. In the
+ * single-rack editor `offsetX` is 0; in the multi-rack row the cabinet is shifted right
+ * by its placement offset (see `rowLayout`).
+ */
+export function bayOrigin(offsetX = 0): { x: number; y: number } {
+  return { x: offsetX + FRAME_PAD + GUTTER_PX, y: FRAME_PAD };
+}
+
+export interface RackPlacement {
+  rack: Rack;
+  offsetX: number;
+  size: { width: number; height: number };
+}
+
+/**
+ * Lay cabinets left-to-right for the row view / multi-rack export. Each cabinet keeps
+ * its own width (racks can differ); `offsetX` is the cumulative left edge. Returns the
+ * placements plus the total row bounds (width = sum of cabinets + gutters, height = the
+ * tallest cabinet). Pure + deterministic.
+ */
+export function rowLayout(racks: Rack[]): { placements: RackPlacement[]; width: number; height: number } {
+  const placements: RackPlacement[] = [];
+  let offsetX = 0;
+  let height = 0;
+  racks.forEach((rack, i) => {
+    const size = cabinetSize(rack);
+    placements.push({ rack, offsetX, size });
+    height = Math.max(height, size.height);
+    offsetX += size.width + (i < racks.length - 1 ? RACK_GUTTER : 0);
+  });
+  return { placements, width: offsetX, height };
 }
 
 /** y (top) of a given U row's top edge within the bay. U1 sits at the bottom. */

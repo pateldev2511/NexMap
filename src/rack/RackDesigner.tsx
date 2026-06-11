@@ -4,9 +4,20 @@ import { createInterface, defaultDeviceName } from '@/model/schema';
 import { rasterize, downloadBlob } from '@/io/export/raster';
 import { buildPdfBlob } from '@/io/export/pdf';
 import { RackCanvas, type RejectInfo } from './RackCanvas';
+import { RackRow } from './RackRow';
 import { ConnectPortsDialog } from './ConnectPortsDialog';
-import { buildRackSvg, cableScheduleCsv } from './buildRackSvg';
-import { slotOf, canFit, nearestFreeU, type FitResult } from './rackModel';
+import {
+  buildRackSvg,
+  buildRackRowFacesSvg,
+  buildConnectionsTableSvg,
+  composeExport,
+  cableScheduleCsv,
+  cableScheduleRows,
+  type ExportMode,
+} from './buildRackSvg';
+import { analyzeCabling } from './rackHealth';
+import { rackBudget } from './rackBudget';
+import { slotOf, canFit, nearestFreeU, orderRacks, type FitResult } from './rackModel';
 import { RACK_DEVICE_PRESETS, RACK_PRESET_GROUPS, type RackDevicePreset } from './rackDevicePresets';
 import { RACK_PRESETS, rackFieldsFromPreset, DEFAULT_RACK_PRESET } from './rackTypes';
 import styles from './RackDesigner.module.css';
@@ -32,13 +43,19 @@ function rejectReason(fit: FitResult): string {
  * select, drag it vertically to reposition. List-first cabling. Export PNG + CSV.
  */
 export function RackDesigner() {
-  useProjectStore((s) => s.rev);
+  const rev = useProjectStore((s) => s.rev);
   const selection = useProjectStore((s) => s.selection);
   const s = useProjectStore.getState;
 
-  const racks = s().racksAll();
+  // Racks in left-to-right row order (the optional `order` field, else insertion order).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const racks = useMemo(() => orderRacks(s().racksAll()), [rev]);
   const [rackId, setRackId] = useState<string>(racks[0]?.id ?? '');
   const rack = racks.find((r) => r.id === rackId) ?? racks[0];
+  // The side-by-side canvas (all racks, both faces) is the DEFAULT; clicking a rack drills
+  // into the focused single-rack editor for port-level work.
+  const [view, setView] = useState<'focus' | 'row'>('row');
+  const [showRear, setShowRear] = useState(true);
   const [armed, setArmed] = useState<RackDevicePreset | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [newType, setNewType] = useState<string>(DEFAULT_RACK_PRESET.id);
@@ -47,16 +64,29 @@ export function RackDesigner() {
   const [bay, setBay] = useState<'full' | 'left' | 'right'>('full');
   const [selCable, setSelCable] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [deviceSearch, setDeviceSearch] = useState('');
+  const [exportMode, setExportMode] = useState<ExportMode>('diagram');
 
-  const devices = s().devicesAll();
-  const cables = s().rackCablesAll();
+  // Snapshot the store collections ONCE per revision. devicesAll()/rackCablesAll() each
+  // return a fresh array, so memoizing them on `rev` is what makes every downstream memo
+  // (budget, searchHits, cabling, inRack) actually cache instead of recomputing per render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const devices = useMemo(() => s().devicesAll(), [rev]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const cables = useMemo(() => s().rackCablesAll(), [rev]);
   const selectedId = [...selection][0] ?? null;
   const selected = selectedId ? devices.find((d) => d.id === selectedId) : undefined;
   const inRack = useMemo(() => devices.filter((d) => d.rackId === rack?.id), [devices, rack?.id]);
-  const usedU = useMemo(
-    () => inRack.filter((d) => (d.mount ?? 'rack') === 'rack').reduce((sum, d) => sum + (d.ruSpan ?? 1), 0),
-    [inRack],
-  );
+  const budget = useMemo(() => (rack ? rackBudget(rack, devices) : null), [rack, devices]);
+  const usedU = budget?.usedU ?? 0;
+  // Cross-rack device search → ids to highlight in the row view.
+  const searchHits = useMemo(() => {
+    const q = deviceSearch.trim().toLowerCase();
+    if (!q) return new Set<string>();
+    return new Set(devices.filter((d) => d.rackId != null && (d.name.toLowerCase().includes(q) || d.type.toLowerCase().includes(q))).map((d) => d.id));
+  }, [deviceSearch, devices]);
+  // Physical-cabling health (warns, never blocks).
+  const cabling = useMemo(() => analyzeCabling(devices, cables), [devices, cables]);
   // Device counts per face — surfaced on the Front/Rear toggle so flipping to an empty
   // face never looks like your gear vanished.
   const faceCounts = useMemo(() => {
@@ -212,51 +242,124 @@ export function RackDesigner() {
     s().updateDevice(selected.id, { name: selected.name }, { name });
   }
 
+  /** Move a rack one slot left/right in the row by swapping `order` with its neighbor. */
+  function reorderRack(id: string, dir: -1 | 1) {
+    const i = racks.findIndex((r) => r.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= racks.length) return;
+    const a = racks[i]!;
+    const b = racks[j]!;
+    const ao = a.order ?? i;
+    const bo = b.order ?? j;
+    s().updateRack(a.id, { order: a.order }, { order: bo });
+    s().updateRack(b.id, { order: b.order }, { order: ao });
+  }
+
+  /** Drop a device into another rack at the nearest free U (keeps its span/side/bay).
+      Surfaces a rejection (and does NOT move) when the target rack has no room — never a
+      silent no-op. On success, follow the device to its new rack so the move is visible. */
+  function moveDeviceToRack(deviceId: string, targetRackId: string) {
+    const d = devices.find((x) => x.id === deviceId);
+    const target = racks.find((r) => r.id === targetRackId);
+    if (!d || !target || d.rackId === targetRackId) return;
+    const sl = slotOf(d);
+    const occ = devices.filter((x) => x.rackId === targetRackId);
+    const wanted = Math.max(1, Math.min(sl.ru, target.ruHeight - sl.ruSpan + 1));
+    const u = nearestFreeU(target, occ, sl.ruSpan, wanted, sl.side, sl.bay);
+    const showReject = (reason: string) => {
+      setReject({ u: wanted, span: sl.ruSpan, reason, pulseU: null });
+      window.setTimeout(() => setReject(null), 2400);
+    };
+    if (u == null) { showReject(`No room in ${target.name}`); return; }
+    const fit = s().placeInRack(deviceId, targetRackId, { ...sl, ru: u });
+    if (!fit.ok) { showReject(rejectReason(fit)); return; }
+    setRackId(targetRackId);
+    s().select([deviceId]);
+  }
+
+  function cloneCurrentRack() {
+    if (!rack) return;
+    const id = s().cloneRack(rack.id);
+    if (id) setRackId(id);
+  }
+
+  /** Build the export SVG honoring the row/focus view and the chosen export mode. */
+  function exportSvg(background: string): string {
+    const rackSvg =
+      view === 'row'
+        ? buildRackRowFacesSvg(racks, devices, cables, { showRear, background })
+        : buildRackSvg(rack!, devices, cables, { background, side });
+    if (exportMode === 'diagram') return rackSvg;
+    const tableSvg = buildConnectionsTableSvg(cableScheduleRows(devices, cables), { background, title: 'Connections' });
+    return composeExport(rackSvg, tableSvg, exportMode, background);
+  }
+  const exportName = () => (view === 'row' ? 'all-racks' : rack?.name ?? 'rack');
+
   function exportPng() {
     if (!rack) return;
-    const svg = buildRackSvg(rack, devices, cables, { background: '#0c1015', side });
-    rasterize(svg, { scale: 2, mimeType: 'image/png', background: null })
-      .then(({ blob }) => downloadBlob(blob, `${rack.name}-rack.png`))
+    rasterize(exportSvg('#0c1015'), { scale: 2, mimeType: 'image/png', background: null })
+      .then(({ blob }) => downloadBlob(blob, `${exportName()}.png`))
       .catch(() => undefined);
   }
   function exportPdf() {
     if (!rack) return;
-    const svg = buildRackSvg(rack, devices, cables, { background: '#ffffff', side });
-    buildPdfBlob(svg, { pageSize: 'a4', orientation: 'portrait', scale: 2 })
-      .then((blob) => downloadBlob(blob, `${rack.name}-rack.pdf`))
+    buildPdfBlob(exportSvg('#ffffff'), { pageSize: 'a4', orientation: 'portrait', scale: 2 })
+      .then((blob) => downloadBlob(blob, `${exportName()}.pdf`))
       .catch(() => undefined);
   }
   function exportCsv() {
     if (!rack) return;
     const csv = cableScheduleCsv(devices, cables);
-    downloadBlob(new Blob([csv], { type: 'text/csv' }), `${rack.name}-cables.csv`);
+    downloadBlob(new Blob([csv], { type: 'text/csv' }), `${exportName()}-cables.csv`);
   }
 
   return (
     <div className={styles.root}>
       <div className={styles.toolbar}>
         <span className={styles.title}>Rack designer</span>
-        <select value={rack.id} onChange={(e) => setRackId(e.target.value)}>
-          {racks.map((r) => <option key={r.id} value={r.id}>{r.name} · {r.ruHeight}U</option>)}
-        </select>
+        {view === 'focus' ? (
+          <button className={styles.btn} title="Back to the all-racks canvas" onClick={() => { setView('row'); s().select([]); }}>← All racks</button>
+        ) : (
+          <span className={styles.stat}>{racks.length} rack{racks.length === 1 ? '' : 's'} · click one to edit</span>
+        )}
         <button className={styles.btn} onClick={createRack}>+ Rack</button>
-        <div className={styles.seg} title="Mounting face — devices on opposite faces don't collide. Counts show what's on each side.">
-          <button className={side === 'front' ? styles.on : ''} onClick={() => setSide('front')}>
-            Front{faceCounts.front > 0 && <span className={styles.badge}>{faceCounts.front}</span>}
+        <button className={styles.btn} title="Duplicate the focused rack with its gear + cabling" onClick={cloneCurrentRack}>Clone</button>
+        {view === 'row' ? (
+          <button className={`${styles.btn} ${!showRear ? styles.primary : ''}`} title="Show or hide the rear face of every rack" onClick={() => setShowRear((v) => !v)}>
+            {showRear ? 'Hide rear' : 'Show rear'}
           </button>
-          <button className={side === 'rear' ? styles.on : ''} onClick={() => setSide('rear')}>
-            Rear{faceCounts.rear > 0 && <span className={styles.badge}>{faceCounts.rear}</span>}
-          </button>
-        </div>
-        {armed && (armed.mount ?? 'rack') === 'rack' && (
-          <div className={styles.seg} title="Half-width bay: two devices share one U">
-            <button className={bay === 'full' ? styles.on : ''} onClick={() => setBay('full')}>Full</button>
-            <button className={bay === 'left' ? styles.on : ''} onClick={() => setBay('left')}>L</button>
-            <button className={bay === 'right' ? styles.on : ''} onClick={() => setBay('right')}>R</button>
-          </div>
+        ) : (
+          <>
+            <select value={rack.id} onChange={(e) => setRackId(e.target.value)} title="Jump to another rack">
+              {racks.map((r) => <option key={r.id} value={r.id}>{r.name} · {r.ruHeight}U</option>)}
+            </select>
+            <div className={styles.seg} title="Mounting face — devices on opposite faces don't collide.">
+              <button className={side === 'front' ? styles.on : ''} onClick={() => setSide('front')}>
+                Front{faceCounts.front > 0 && <span className={styles.badge}>{faceCounts.front}</span>}
+              </button>
+              <button className={side === 'rear' ? styles.on : ''} onClick={() => setSide('rear')}>
+                Rear{faceCounts.rear > 0 && <span className={styles.badge}>{faceCounts.rear}</span>}
+              </button>
+            </div>
+            {armed && (armed.mount ?? 'rack') === 'rack' && (
+              <div className={styles.seg} title="Half-width bay: two devices share one U">
+                <button className={bay === 'full' ? styles.on : ''} onClick={() => setBay('full')}>Full</button>
+                <button className={bay === 'left' ? styles.on : ''} onClick={() => setBay('left')}>L</button>
+                <button className={bay === 'right' ? styles.on : ''} onClick={() => setBay('right')}>R</button>
+              </div>
+            )}
+          </>
         )}
         <div className={styles.spacer} />
-        <span className={styles.stat}>{usedU} / {rack.ruHeight}U</span>
+        <span className={styles.stat} title="Used / total U (and power/weight if capped)">
+          {usedU} / {rack.ruHeight}U{budget && budget.maxWatts != null ? ` · ${budget.watts}/${budget.maxWatts}W` : ''}
+          {budget && (budget.overWatts || budget.overWeight) ? ' ⚠' : ''}
+        </span>
+        <select value={exportMode} onChange={(e) => setExportMode(e.target.value as ExportMode)} title="What to include in PNG/PDF export">
+          <option value="diagram">Diagram</option>
+          <option value="diagram+table">Diagram + table</option>
+          <option value="table-only">Table only</option>
+        </select>
         <button className={styles.btn} onClick={exportCsv}>Cable CSV</button>
         <button className={styles.btn} onClick={exportPdf}>PDF</button>
         <button className={`${styles.btn} ${styles.primary}`} onClick={exportPng}>Export PNG</button>
@@ -309,22 +412,46 @@ export function RackDesigner() {
       </div>
 
       {/* canvas */}
-      <div className={`${styles.stage} ${armed ? styles.placing : ''}`}>
-        <RackCanvas
-          rack={rack}
-          devices={devices}
-          cables={cables}
-          selectedId={selectedId}
-          selectedCableId={selCable}
-          side={side}
-          armed={armed != null}
-          reject={reject}
-          onPlaceAt={placeAt}
-          onDropPreset={dropPreset}
-          onSelect={(id) => s().select(id ? [id] : [])}
-          onSelectCable={setSelCable}
-          onMoveTo={moveTo}
-        />
+      <div className={`${styles.stage} ${armed && view === 'focus' ? styles.placing : ''}`} style={view === 'row' ? { flexDirection: 'column', alignItems: 'stretch' } : undefined}>
+        {view === 'row' ? (
+          <>
+            <input
+              className={styles.libSearch}
+              style={{ maxWidth: 280, alignSelf: 'center', marginBottom: 14 }}
+              placeholder="Find a device across all racks…"
+              value={deviceSearch}
+              onChange={(e) => setDeviceSearch(e.target.value)}
+              aria-label="Search devices across racks"
+            />
+            <RackRow
+              racks={racks}
+              devices={devices}
+              cables={cables}
+              selectedId={selectedId}
+              searchHits={searchHits}
+              showRear={showRear}
+              onFocusRack={(id) => { setRackId(id); setView('focus'); }}
+              onSelect={(id) => s().select(id ? [id] : [])}
+              onReorder={reorderRack}
+            />
+          </>
+        ) : (
+          <RackCanvas
+            rack={rack}
+            devices={devices}
+            cables={cables}
+            selectedId={selectedId}
+            selectedCableId={selCable}
+            side={side}
+            armed={armed != null}
+            reject={reject}
+            onPlaceAt={placeAt}
+            onDropPreset={dropPreset}
+            onSelect={(id) => s().select(id ? [id] : [])}
+            onSelectCable={setSelCable}
+            onMoveTo={moveTo}
+          />
+        )}
       </div>
 
       {/* sidebar */}
@@ -349,6 +476,18 @@ export function RackDesigner() {
                 <button className={styles.btn} title="Unmount to the tray" onClick={() => { s().select([selected.id]); s().unmountFromRack(selected.id); }}>Unmount</button>
                 <button className={styles.btn} title="Delete (⌫)" onClick={deleteSelected}>Delete</button>
               </div>
+              {racks.length > 1 && (
+                <div className={styles.kv} style={{ marginTop: 6 }}>
+                  <span>Move to rack</span>
+                  <select
+                    value={selected.rackId ?? ''}
+                    onChange={(e) => moveDeviceToRack(selected.id, e.target.value)}
+                    aria-label="Move device to another rack"
+                  >
+                    {racks.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                  </select>
+                </div>
+              )}
               <button className={styles.connectBtn} style={{ marginTop: 8 }} onClick={() => setConnecting(true)}>+ Cable a port…</button>
             </>
           ) : (
@@ -359,6 +498,25 @@ export function RackDesigner() {
             </div>
           )}
         </div>
+        {cabling.issues.length > 0 && (
+          <div className={styles.sec}>
+            <h3>Cabling health · {cabling.issues.length}</h3>
+            {cabling.issues.slice(0, 8).map((iss) => (
+              <div
+                key={iss.id}
+                className={styles.healthIssue}
+                title="Click to select the cable/device"
+                onClick={() => { const id = iss.objectIds.find((o) => cables.some((c) => c.id === o)); if (id) setSelCable(id); else if (iss.objectIds[0]) s().select([iss.objectIds[0]]); }}
+              >
+                <span className={styles.healthDot} />
+                {iss.message}
+              </div>
+            ))}
+            {cabling.issues.length > 8 && (
+              <div style={{ fontSize: 11, color: 'var(--chrome-fg-muted)', marginTop: 4 }}>+{cabling.issues.length - 8} more…</div>
+            )}
+          </div>
+        )}
         <div className={styles.sec} style={{ flex: 1 }}>
           <h3>Cable schedule · {cables.length}</h3>
           {cables.length === 0 && (
