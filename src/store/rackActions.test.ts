@@ -174,3 +174,54 @@ describe('CRITICAL cascade — deleteInterface removes the port AND its cable, a
     expect(s().rackCablesAll()).toHaveLength(1);
   });
 });
+
+describe('cloneRack', () => {
+  it('duplicates the rack, its gear, and intra-rack cables with fresh ids; undo restores', () => {
+    const r = s().addRack('MDF');
+    const a = s().addDeviceAt('switch', 0, 0);
+    const b = s().addDeviceAt('server', 0, 0);
+    const pa = s().addInterface(a, 'Gi1/0/1')!;
+    const pb = s().addInterface(b, 'vmnic0')!;
+    s().placeInRack(a, r, slot({ ru: 40 }));
+    s().placeInRack(b, r, slot({ ru: 36, ruSpan: 2 }));
+    s().connectRackCable({ deviceId: a, ifaceId: pa }, { deviceId: b, ifaceId: pb }, '#fff');
+
+    const newId = s().cloneRack(r)!;
+    expect(newId).toBeTruthy();
+    expect(newId).not.toBe(r);
+    expect(s().racksAll()).toHaveLength(2);
+    const clonedDevices = s().devicesAll().filter((d) => d.rackId === newId);
+    expect(clonedDevices).toHaveLength(2); // gear duplicated
+    // cable duplicated and rewired to the cloned devices (2 cables total now)
+    const cables = s().rackCablesAll();
+    expect(cables).toHaveLength(2);
+    const clonedIds = new Set(clonedDevices.map((d) => d.id));
+    expect(cables.some((c) => clonedIds.has(c.aEnd.deviceId) && clonedIds.has(c.bEnd.deviceId))).toBe(true);
+
+    s().undo();
+    expect(s().racksAll()).toHaveLength(1);
+    expect(s().rackCablesAll()).toHaveLength(1);
+  });
+
+  it('drops the source rack order so the clone lands at the end of the row', () => {
+    const r = s().addRack('MDF');
+    s().updateRack(r, { order: undefined }, { order: 5 }); // user reordered this rack
+    const cloneId = s().cloneRack(r)!;
+    expect(s().racksAll().find((x) => x.id === cloneId)!.order).toBeUndefined();
+  });
+
+  it('drops cross-rack cables when cloning', () => {
+    const r1 = s().addRack('A');
+    const r2 = s().addRack('B');
+    const a = s().addDeviceAt('switch', 0, 0);
+    const b = s().addDeviceAt('switch', 0, 0);
+    const pa = s().addInterface(a, 'p1')!;
+    const pb = s().addInterface(b, 'p1')!;
+    s().placeInRack(a, r1, slot({ ru: 40 }));
+    s().placeInRack(b, r2, slot({ ru: 40 }));
+    s().connectRackCable({ deviceId: a, ifaceId: pa }, { deviceId: b, ifaceId: pb }, '#fff'); // cross-rack
+    s().cloneRack(r1);
+    // the clone of r1 has device a' but its only cable was cross-rack → not copied
+    expect(s().rackCablesAll()).toHaveLength(1);
+  });
+});
