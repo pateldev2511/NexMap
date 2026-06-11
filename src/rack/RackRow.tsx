@@ -20,6 +20,7 @@ import {
 } from './rackLayout';
 import { slotOf } from './rackModel';
 import { rackBudget } from './rackBudget';
+import { deviceFaceParts, RACK_ART_DEFS } from './rackDeviceArt';
 import styles from './RackDesigner.module.css';
 
 export interface RackRowProps {
@@ -28,6 +29,7 @@ export interface RackRowProps {
   cables: RackCable[];
   selectedId: string | null;
   searchHits: Set<string>;
+  showRear: boolean;
   onFocusRack: (rackId: string) => void;
   onSelect: (deviceId: string | null) => void;
   onReorder: (rackId: string, dir: -1 | 1) => void;
@@ -37,29 +39,32 @@ export interface RackRowProps {
 const FACE_GAP = 22;
 
 export function RackRow({
-  racks, devices, cables, selectedId, searchHits,
+  racks, devices, cables, selectedId, searchHits, showRear,
   onFocusRack, onSelect, onReorder,
 }: RackRowProps) {
-  // Two columns per rack (front, rear). Lay them out left-to-right.
+  // Front (and optionally rear) column per rack, laid out left-to-right.
   let x = 0;
   let height = 0;
   const cols = racks.map((rack) => {
     const size = cabinetSize(rack);
     const frontX = x;
-    const rearX = x + size.width + FACE_GAP;
-    x = rearX + size.width + RACK_GUTTER;
+    const rearX = showRear ? x + size.width + FACE_GAP : x;
+    x = (showRear ? rearX + size.width : frontX + size.width) + RACK_GUTTER;
     height = Math.max(height, size.height);
     return { rack, frontX, rearX, size };
   });
   const width = Math.max(0, x - RACK_GUTTER);
 
-  // deviceId → its face-column origin offset + center, for cable routing.
+  // deviceId → its face-column origin offset + center, for cable routing. Rear devices are
+  // only placed (and only cabled) when the rear face is shown.
   const center = new Map<string, { x: number; y: number }>();
   const rackOf = new Map<string, string>();
   for (const c of cols) {
     for (const d of devices) {
       if (d.rackId !== c.rack.id || d.ru == null) continue;
-      const colX = slotOf(d).side === 'rear' ? c.rearX : c.frontX;
+      const isRear = slotOf(d).side === 'rear';
+      if (isRear && !showRear) continue;
+      const colX = isRear ? c.rearX : c.frontX;
       const origin = bayOrigin(colX);
       const r = deviceRect(c.rack, d);
       center.set(d.id, { x: origin.x + r.x + r.w / 2, y: origin.y + r.y + r.h / 2 });
@@ -72,11 +77,12 @@ export function RackRow({
     const bayH = rack.ruHeight * U_PX;
     const size = cabinetSize(rack);
     return (
-      <g key={`${rack.id}-${face}`}>
+      // Whole face is a click target → drill into the focused editor. Device clicks
+      // stopPropagation and select instead.
+      <g key={`${rack.id}-${face}`} onClick={() => onFocusRack(rack.id)} style={{ cursor: 'pointer' }}>
         <rect
           x={originX + 1} y={1} width={size.width - 2} height={size.height - 2} rx={10}
           fill="var(--chrome-bg)" stroke="var(--chrome-border)" strokeWidth={1.5}
-          onClick={() => onFocusRack(rack.id)} style={{ cursor: 'pointer' }}
         />
         <rect x={origin.x} y={origin.y} width={BAY_W} height={bayH} rx={4} fill="var(--canvas-bg)" stroke="var(--chrome-border)" />
         <text x={origin.x} y={FRAME_PAD - 2} fontSize={11} fontWeight={700} fill="var(--chrome-fg)">{rack.name} · {face}</text>
@@ -84,20 +90,20 @@ export function RackRow({
         {Array.from({ length: rack.ruHeight }, (_, k) => k + 1).filter((u) => u % 5 === 0 || u === 1).map((u) => (
           <text key={u} x={origin.x - 6} y={origin.y + uLabelCenterY(rack, u) + 3} textAnchor="end" fontSize={8} fontFamily="var(--font-mono)" fill="var(--chrome-fg-muted)">{u}</text>
         ))}
-        {/* devices on this face */}
+        {/* devices on this face — realistic shared art + select/search overlay */}
         {devices.filter((d) => d.rackId === rack.id && d.ru != null && slotOf(d).side === face).map((d) => {
           const r = deviceRect(rack, d);
+          const panel = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
           const sel = d.id === selectedId;
           const hit = searchHits.has(d.id);
           return (
             <g key={d.id} onClick={(e) => { e.stopPropagation(); onSelect(d.id); onFocusRack(rack.id); }} style={{ cursor: 'pointer' }}>
-              <rect
-                x={origin.x + r.x} y={origin.y + r.y} width={r.w} height={r.h} rx={3}
-                fill="var(--rack-chassis, #2b323b)"
-                stroke={sel ? 'var(--accent)' : hit ? '#f59e0b' : 'var(--rack-chassis-bd, #10131b)'}
-                strokeWidth={sel || hit ? 2 : 1}
-              />
-              <text x={origin.x + r.x + 6} y={origin.y + r.y + r.h / 2 + 4} fontSize={11} fontFamily="var(--font-mono)" fill="#eef2f7">{d.name}</text>
+              <g dangerouslySetInnerHTML={{ __html: deviceFaceParts(d, panel).join('') }} />
+              <rect x={panel.x} y={panel.y} width={panel.w} height={panel.h} fill="transparent" />
+              {(sel || hit) && (
+                <rect x={panel.x} y={panel.y} width={panel.w} height={panel.h} rx={3} fill="none"
+                  stroke={sel ? 'var(--accent)' : '#f59e0b'} strokeWidth={2} pointerEvents="none" />
+              )}
             </g>
           );
         })}
@@ -108,14 +114,15 @@ export function RackRow({
   return (
     <div className={styles.rowScroll}>
       <svg width={width} height={height + 18} className={styles.svg} role="img" aria-label="All racks">
+        <g dangerouslySetInnerHTML={{ __html: RACK_ART_DEFS }} />
         {cols.map((c, i) => {
           const b = rackBudget(c.rack, devices);
           const bayH = c.rack.ruHeight * U_PX;
-          const groupRight = c.rearX + c.size.width;
+          const groupRight = (showRear ? c.rearX : c.frontX) + c.size.width;
           return (
             <g key={c.rack.id}>
               {renderFace(c.rack, c.frontX, 'front')}
-              {renderFace(c.rack, c.rearX, 'rear')}
+              {showRear && renderFace(c.rack, c.rearX, 'rear')}
               {/* reorder chevrons over the rack group */}
               {i > 0 && (
                 <text x={c.frontX + 10} y={c.size.height + 14} fontSize={13} fill="var(--accent)" style={{ cursor: 'pointer' }} onClick={() => onReorder(c.rack.id, -1)} aria-label="Move rack left">◀</text>

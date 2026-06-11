@@ -22,6 +22,7 @@ export interface RejectInfo {
 }
 import { panelKindFor } from './panelKind';
 import { slotOf } from './rackModel';
+import { deviceFaceParts, RACK_ART_DEFS } from './rackDeviceArt';
 import styles from './RackDesigner.module.css';
 
 /**
@@ -129,6 +130,7 @@ export function RackCanvas({
     const ports = (d.interfaces ?? []).map((i) => ({ id: i.id, name: i.name }));
     const isSel = d.id === selectedId;
 
+    // Jack centers feed cable endpoints; the shared art draws onto these same rects.
     const jacks = kind === 'switch' || kind === 'patch' || kind === 'firewall'
       ? portLayout(panel, ports)
       : [];
@@ -146,25 +148,13 @@ export function RackCanvas({
         tabIndex={0}
         aria-label={`${d.name}, U${d.ru}${(d.ruSpan ?? 1) > 1 ? `–U${(d.ru ?? 0) + (d.ruSpan ?? 1) - 1}` : ''}`}
       >
-        <rect
-          x={panel.x} y={panel.y} width={panel.w} height={panel.h} rx={3}
-          style={{ fill: 'var(--rack-chassis, #2b323b)', stroke: isSel ? cssVar('--accent') : 'var(--rack-chassis-bd, #10131b)', strokeWidth: isSel ? 2 : 1 }}
-        />
-        <text x={panel.x + 8} y={panel.y + panel.h / 2 + 4} fontFamily="var(--font-mono)" fontSize={11} style={{ fill: '#e7ecf2' }}>
-          {d.name}
-        </text>
-        {jacks.map((j) => (
-          <rect key={j.ifaceId} x={j.x} y={j.y} width={j.w} height={j.h} rx={1.5}
-            style={{ fill: '#0a1018', stroke: '#46525f', strokeWidth: 0.75 }} />
-        ))}
-        {kind === 'server' && Array.from({ length: 6 }, (_, i) => {
-          const bw = 12, gap = 4, total = 6 * bw + 5 * gap;
-          const sx = panel.x + panel.w - 10 - total + i * (bw + gap);
-          return <rect key={i} x={sx} y={panel.y + 5} width={bw} height={panel.h - 10} rx={1.5}
-            style={{ fill: '#3a424c', stroke: '#10131b', strokeWidth: 0.75 }} />;
-        })}
-        {(kind === 'switch' || kind === 'server' || kind === 'firewall') && (
-          <circle cx={panel.x + panel.w - 6} cy={panel.y + 6} r={2.5} style={{ fill: '#34d399' }} />
+        {/* realistic device art (shared, hex SVG strings) */}
+        <g dangerouslySetInnerHTML={{ __html: deviceFaceParts(d, panel).join('') }} />
+        {/* transparent hit area so the whole panel drags/selects */}
+        <rect x={panel.x} y={panel.y} width={panel.w} height={panel.h} fill="transparent" />
+        {isSel && (
+          <rect x={panel.x} y={panel.y} width={panel.w} height={panel.h} rx={3}
+            fill="none" style={{ stroke: cssVar('--accent'), strokeWidth: 2 }} pointerEvents="none" />
         )}
       </g>
     );
@@ -198,6 +188,7 @@ export function RackCanvas({
         onDropPreset(key, yToU(e.clientY));
       }}
     >
+      <g dangerouslySetInnerHTML={{ __html: RACK_ART_DEFS }} />
       {/* cabinet frame + corner screws */}
       <rect x={1} y={1} width={width - 2} height={height - 2} rx={12}
         style={{ fill: 'var(--chrome-bg)', stroke: 'var(--chrome-border)', strokeWidth: 2 }} />

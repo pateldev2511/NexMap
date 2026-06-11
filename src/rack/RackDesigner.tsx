@@ -8,7 +8,7 @@ import { RackRow } from './RackRow';
 import { ConnectPortsDialog } from './ConnectPortsDialog';
 import {
   buildRackSvg,
-  buildRackRowSvg,
+  buildRackRowFacesSvg,
   buildConnectionsTableSvg,
   composeExport,
   cableScheduleCsv,
@@ -52,7 +52,10 @@ export function RackDesigner() {
   const racks = useMemo(() => orderRacks(s().racksAll()), [rev]);
   const [rackId, setRackId] = useState<string>(racks[0]?.id ?? '');
   const rack = racks.find((r) => r.id === rackId) ?? racks[0];
-  const [view, setView] = useState<'focus' | 'row'>('focus');
+  // The side-by-side canvas (all racks, both faces) is the DEFAULT; clicking a rack drills
+  // into the focused single-rack editor for port-level work.
+  const [view, setView] = useState<'focus' | 'row'>('row');
+  const [showRear, setShowRear] = useState(true);
   const [armed, setArmed] = useState<RackDevicePreset | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [newType, setNewType] = useState<string>(DEFAULT_RACK_PRESET.id);
@@ -284,7 +287,7 @@ export function RackDesigner() {
   function exportSvg(background: string): string {
     const rackSvg =
       view === 'row'
-        ? buildRackRowSvg(racks, devices, cables, { background, side })
+        ? buildRackRowFacesSvg(racks, devices, cables, { showRear, background })
         : buildRackSvg(rack!, devices, cables, { background, side });
     if (exportMode === 'diagram') return rackSvg;
     const tableSvg = buildConnectionsTableSvg(cableScheduleRows(devices, cables), { background, title: 'Connections' });
@@ -314,31 +317,38 @@ export function RackDesigner() {
     <div className={styles.root}>
       <div className={styles.toolbar}>
         <span className={styles.title}>Rack designer</span>
-        <div className={styles.seg} title="Focus = edit one rack; Row = see all racks side by side">
-          <button className={view === 'focus' ? styles.on : ''} onClick={() => setView('focus')}>Focus</button>
-          <button className={view === 'row' ? styles.on : ''} onClick={() => setView('row')}>
-            Row{racks.length > 1 && <span className={styles.badge}>{racks.length}</span>}
-          </button>
-        </div>
-        <select value={rack.id} onChange={(e) => setRackId(e.target.value)}>
-          {racks.map((r) => <option key={r.id} value={r.id}>{r.name} · {r.ruHeight}U</option>)}
-        </select>
+        {view === 'focus' ? (
+          <button className={styles.btn} title="Back to the all-racks canvas" onClick={() => { setView('row'); s().select([]); }}>← All racks</button>
+        ) : (
+          <span className={styles.stat}>{racks.length} rack{racks.length === 1 ? '' : 's'} · click one to edit</span>
+        )}
         <button className={styles.btn} onClick={createRack}>+ Rack</button>
-        <button className={styles.btn} title="Duplicate this rack with its gear + cabling" onClick={cloneCurrentRack}>Clone</button>
-        <div className={styles.seg} title="Mounting face — devices on opposite faces don't collide. Counts show what's on each side.">
-          <button className={side === 'front' ? styles.on : ''} onClick={() => setSide('front')}>
-            Front{faceCounts.front > 0 && <span className={styles.badge}>{faceCounts.front}</span>}
+        <button className={styles.btn} title="Duplicate the focused rack with its gear + cabling" onClick={cloneCurrentRack}>Clone</button>
+        {view === 'row' ? (
+          <button className={`${styles.btn} ${!showRear ? styles.primary : ''}`} title="Show or hide the rear face of every rack" onClick={() => setShowRear((v) => !v)}>
+            {showRear ? 'Hide rear' : 'Show rear'}
           </button>
-          <button className={side === 'rear' ? styles.on : ''} onClick={() => setSide('rear')}>
-            Rear{faceCounts.rear > 0 && <span className={styles.badge}>{faceCounts.rear}</span>}
-          </button>
-        </div>
-        {armed && (armed.mount ?? 'rack') === 'rack' && (
-          <div className={styles.seg} title="Half-width bay: two devices share one U">
-            <button className={bay === 'full' ? styles.on : ''} onClick={() => setBay('full')}>Full</button>
-            <button className={bay === 'left' ? styles.on : ''} onClick={() => setBay('left')}>L</button>
-            <button className={bay === 'right' ? styles.on : ''} onClick={() => setBay('right')}>R</button>
-          </div>
+        ) : (
+          <>
+            <select value={rack.id} onChange={(e) => setRackId(e.target.value)} title="Jump to another rack">
+              {racks.map((r) => <option key={r.id} value={r.id}>{r.name} · {r.ruHeight}U</option>)}
+            </select>
+            <div className={styles.seg} title="Mounting face — devices on opposite faces don't collide.">
+              <button className={side === 'front' ? styles.on : ''} onClick={() => setSide('front')}>
+                Front{faceCounts.front > 0 && <span className={styles.badge}>{faceCounts.front}</span>}
+              </button>
+              <button className={side === 'rear' ? styles.on : ''} onClick={() => setSide('rear')}>
+                Rear{faceCounts.rear > 0 && <span className={styles.badge}>{faceCounts.rear}</span>}
+              </button>
+            </div>
+            {armed && (armed.mount ?? 'rack') === 'rack' && (
+              <div className={styles.seg} title="Half-width bay: two devices share one U">
+                <button className={bay === 'full' ? styles.on : ''} onClick={() => setBay('full')}>Full</button>
+                <button className={bay === 'left' ? styles.on : ''} onClick={() => setBay('left')}>L</button>
+                <button className={bay === 'right' ? styles.on : ''} onClick={() => setBay('right')}>R</button>
+              </div>
+            )}
+          </>
         )}
         <div className={styles.spacer} />
         <span className={styles.stat} title="Used / total U (and power/weight if capped)">
@@ -419,6 +429,7 @@ export function RackDesigner() {
               cables={cables}
               selectedId={selectedId}
               searchHits={searchHits}
+              showRear={showRear}
               onFocusRack={(id) => { setRackId(id); setView('focus'); }}
               onSelect={(id) => s().select(id ? [id] : [])}
               onReorder={reorderRack}
