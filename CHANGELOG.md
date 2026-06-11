@@ -16,6 +16,17 @@ minor/patch semantics are not yet enforced.
   Auto-numbered device names, inline rename, keyboard nudge/delete, and an
   invalid-drop rejection hint. Everything runs locally — no login, no server.
   `.nexmap` schema migrated v2 → v3 (additive, round-trip-safe).
+- **Rack Designer v2 — multi-rack + cross-rack cabling + validation + table export.**
+  A new **Row view** shows every rack side by side in one canvas; click a rack to
+  focus and edit it, reorder cabinets, and move a device to another rack. Cables can
+  now span racks. A **cabling-health** panel warns (never blocks) on physical loops
+  (spanning-tree), single points of failure, bridge cables, speed/media mismatches,
+  and cross-rack sanity — reusing the network designer's graph engine on the physical
+  cable graph. A **connections table** is shown in-app and export now offers three
+  modes (diagram, diagram + table, or table only) for PNG/PDF. Plus a per-rack
+  **power/weight + U-utilization budget** with overload warnings, one-click **rack
+  clone** (gear + intra-rack cabling), and **cross-rack device search**. All additive
+  to schema v3 — no version bump, old files load unchanged.
 - Flat 2D device-model icons (detailed, per-type) distinct from the 3D
   isometric models; the library palette and flat-mode export track the active
   projection.
