@@ -461,6 +461,14 @@ not commodity styling. Run /plan-design-review before implementing (UI scope).
       `RackRow.tsx` duplicate the bow/cross-arc curve math with drifting magic numbers
       (`*18/-40` vs `*14/-36`). Extract one `cablePath(pa,pb,i,crossRack)`. Effort: CC ~15m.
 
+## Deferred from Rack Designer v3 (2026-06-10)
+- [ ] **True rear-face port art** (P3). The rear column currently shows the same front
+      faceplate; real rear layouts differ (PSUs, fan trays, rear ports). Add rear-specific
+      art in `rackDeviceArt.ts` keyed on `side`. Effort: CC ~30m.
+- [ ] **Pan/zoom unified canvas + inline port editing** (P3). v3 keeps a focus drill-in for
+      port-level work; a future infinite pan/zoom canvas could place gear + cable inline with
+      no drill-in step (the rejected "unified canvas" CEO option). Needs viewport math.
+
 ## Deferred from rack-designer ship review (2026-06-10)
 - [ ] **Validate rack-cable endpoints exist** (P2). `connectRackCable` (projectStore.ts)
       only checks self-cable and already-cabled; it does not verify each `{deviceId, ifaceId}`

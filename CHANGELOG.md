@@ -8,6 +8,16 @@ minor/patch semantics are not yet enforced.
 
 ### Added
 
+- **Rack Designer v3 — default side-by-side canvas + realistic gear.** The designer now
+  opens straight into the multi-rack canvas: every rack shown next to the others with
+  **both faces (front + rear) side by side**, a **Hide rear** toggle, and `+ Rack` dropping
+  a new cabinet in place. Click a rack to drill into the detailed port editor; "← All racks"
+  returns. Every device is redrawn realistically (Studio Realism): switches with real RJ45
+  jacks, link/activity LEDs, and SFP+ cages; patch panels with numbered keystone ports;
+  servers with drive bays, status LCD, and power button; PDUs with outlets; brushed-metal
+  faceplates with a glossy sheen. One shared renderer (`rackDeviceArt.ts`) drives the live
+  editor, the canvas, and the PNG/PDF export identically — gradients survive rasterization.
+
 - **Rack Designer** — a separate designer screen, chosen at launch (Network vs
   Rack). Drag switches, servers, firewalls, patch panels, PDUs and more into a
   cabinet at any U; front/rear faces; full- and half-bay placement; 0U rail gear.
