@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildRackSvg,
   buildRackRowSvg,
+  buildRackRowFacesSvg,
   buildConnectionsTableSvg,
   composeExport,
   cableScheduleRows,
@@ -116,6 +117,21 @@ describe('buildRackRowSvg — multiple racks in one canvas', () => {
     const viaWrapper = buildRackSvg(rack, [sw, srv], [cable], { background: '#fff' });
     const viaRow = buildRackRowSvg([rack], [sw, srv], [cable], { background: '#fff' });
     expect(viaWrapper).toBe(viaRow);
+  });
+
+  it('buildRackRowFacesSvg stacks front over rear (both) and exactly one art <defs>', () => {
+    const rearDev: Device = { ...swB, id: 'rsw', name: 'rear-sw', side: 'rear', interfaces: [{ id: 'r1', name: 'Gi0/1' }] };
+    const both = buildRackRowFacesSvg([rack, rackB], [sw, srv, swB, rearDev], [], { showRear: true, background: '#fff' });
+    expect(both).toContain('· front');
+    expect(both).toContain('· rear');
+    // de-duped: the shared gradient id appears once even though two rows were stacked
+    expect((both.match(/id="rkMetal"/g) ?? []).length).toBe(1);
+    const m = both.match(/width="(\d+)" height="(\d+)"/);
+    expect(Number.isInteger(Number(m![1]))).toBe(true);
+
+    const frontOnly = buildRackRowFacesSvg([rack, rackB], [sw, srv, swB, rearDev], [], { showRear: false, background: '#fff' });
+    expect(frontOnly).toContain('· front');
+    expect(frontOnly).not.toContain('· rear');
   });
 });
 

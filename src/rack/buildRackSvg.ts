@@ -22,10 +22,10 @@ import {
   type Rect,
   type RackPlacement,
 } from './rackLayout';
-import { panelKindFor } from './panelKind';
 import { slotOf } from './rackModel';
+import { deviceFaceParts, RACK_ART_DEFS } from './rackDeviceArt';
 
-/** Literal-hex export palette (B+ console, light-on-print). */
+/** Literal-hex CABINET-CHROME palette (device colors now live in rackDeviceArt.ts). */
 const C = {
   frame: '#ffffff',
   frameBd: '#b9c4d0',
@@ -34,14 +34,6 @@ const C = {
   railHole: '#9aa6b2',
   uNum: '#0e7490',
   bayBg: '#eef2f7',
-  chassis: '#2b323b',
-  chassisBd: '#10131b',
-  text: '#eef2f7',
-  textMut: '#9aa6b2',
-  jack: '#0a1018',
-  jackBd: '#46525f',
-  led: '#34d399',
-  drive: '#3a424c',
   title: '#15212e',
 } as const;
 
@@ -49,53 +41,8 @@ function rect(r: Rect, fill: string, extra = ''): string {
   return `<rect x="${r.x.toFixed(1)}" y="${r.y.toFixed(1)}" width="${r.w.toFixed(1)}" height="${r.h.toFixed(1)}" fill="${fill}" ${extra}/>`;
 }
 
-/** Draw the front-panel contents of one device (panel-local svg, already translated). */
-function devicePanel(device: Device, panel: Rect): string {
-  const parts: string[] = [];
-  // chassis
-  parts.push(
-    `<rect x="${panel.x.toFixed(1)}" y="${panel.y.toFixed(1)}" width="${panel.w.toFixed(1)}" height="${panel.h.toFixed(1)}" rx="3" fill="${C.chassis}" stroke="${C.chassisBd}" stroke-width="1"/>`,
-  );
-  // brand label
-  const name = escapeXml(device.name);
-  parts.push(
-    `<text x="${(panel.x + 8).toFixed(1)}" y="${(panel.y + panel.h / 2 + 4).toFixed(1)}" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="${C.text}">${name}</text>`,
-  );
-
-  const kind = panelKindFor(device.type);
-  const ports = (device.interfaces ?? []).map((i) => ({ id: i.id, name: i.name }));
-
-  if (kind === 'switch' || kind === 'patch' || kind === 'firewall') {
-    const jacks = portLayout(panel, ports);
-    for (const j of jacks) {
-      parts.push(rect({ x: j.x, y: j.y, w: j.w, h: j.h }, C.jack, `rx="1.5" stroke="${C.jackBd}" stroke-width="0.75"`));
-    }
-    // status LED
-    parts.push(`<circle cx="${(panel.x + panel.w - 6).toFixed(1)}" cy="${(panel.y + 6).toFixed(1)}" r="2.5" fill="${C.led}"/>`);
-  } else if (kind === 'server') {
-    // drive-bay array on the right
-    const bays = 6;
-    const bw = 12;
-    const gap = 4;
-    const totalW = bays * bw + (bays - 1) * gap;
-    const startX = panel.x + panel.w - 10 - totalW;
-    for (let i = 0; i < bays; i++) {
-      parts.push(
-        rect({ x: startX + i * (bw + gap), y: panel.y + 5, w: bw, h: panel.h - 10 }, C.drive, `rx="1.5" stroke="${C.chassisBd}" stroke-width="0.75"`),
-      );
-    }
-    parts.push(`<circle cx="${(panel.x + panel.w - 4).toFixed(1)}" cy="${(panel.y + 6).toFixed(1)}" r="2.5" fill="${C.led}"/>`);
-  } else if (kind === 'psu') {
-    // two fan grilles
-    const r = Math.min(panel.h - 8, 22) / 2;
-    const cy = panel.y + panel.h / 2;
-    for (let i = 0; i < 2; i++) {
-      const cx = panel.x + panel.w - 16 - i * (r * 2 + 6);
-      parts.push(`<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}" fill="${C.jack}" stroke="${C.jackBd}" stroke-width="1"/>`);
-    }
-  }
-  return parts.join('');
-}
+// Device front-panel art now lives in the shared rackDeviceArt.ts (Studio Realism), used
+// identically by the live editor, the multi-rack canvas, and this export renderer.
 
 /** Center point of a cabled port in ABSOLUTE row coords (offsetX shifts the cabinet). */
 function portCenter(rack: Rack, device: Device, ifaceId: string, offsetX = 0): { x: number; y: number } | null {
@@ -153,13 +100,13 @@ function renderCabinet(placement: RackPlacement, mounted: Device[], face: 'front
     );
   }
 
-  // devices on the requested face
+  // devices on the requested face — realistic art from the shared generator
   for (const d of mounted) {
     if (d.rackId !== rack.id || d.ru == null) continue;
     if (slotOf(d).side !== face) continue;
     const r = deviceRect(rack, d);
     const panel: Rect = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
-    parts.push(devicePanel(d, panel));
+    parts.push(...deviceFaceParts(d, panel));
   }
   return parts;
 }
@@ -190,7 +137,7 @@ export function buildRackRowSvg(
     }
   }
 
-  const parts: string[] = [];
+  const parts: string[] = [RACK_ART_DEFS];
   if (opts.background) parts.push(`<rect x="0" y="0" width="${width}" height="${height}" fill="${escapeXml(opts.background)}"/>`);
   for (const p of placements) parts.push(...renderCabinet(p, devices, face));
 
@@ -361,6 +308,41 @@ export type ExportMode = 'diagram' | 'diagram+table' | 'table-only';
 function svgDims(svg: string): { w: number; h: number } {
   const m = svg.match(/width="(\d+)" height="(\d+)"/);
   return { w: m ? Number(m[1]) : 0, h: m ? Number(m[2]) : 0 };
+}
+
+/** Stack two rack-row SVGs vertically into one. De-dupes the shared art `<defs>` so the
+ *  composed document has exactly one (ids must be unique per SVG document). */
+function vstackSvg(top: string, bottom: string, background?: string | null, gap = 28): string {
+  const a = svgDims(top);
+  const b = svgDims(bottom);
+  const width = Math.max(a.w, b.w);
+  const height = a.h + gap + b.h;
+  const strip = (s: string) => s.replace(RACK_ART_DEFS, '');
+  const bg = background ? `<rect x="0" y="0" width="${width}" height="${height}" fill="${escapeXml(background)}"/>` : '';
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
+    RACK_ART_DEFS + bg +
+    `<g>${strip(top)}</g>` +
+    `<g transform="translate(0,${a.h + gap})">${strip(bottom)}</g>` +
+    `</svg>`
+  );
+}
+
+/**
+ * Multi-rack elevation for export honoring the canvas's face setting. `showRear` stacks the
+ * front row above the rear row (one de-duped `<defs>`); otherwise front only. Pure +
+ * testable, so the both-faces composition isn't trapped in a component closure.
+ */
+export function buildRackRowFacesSvg(
+  racks: Rack[],
+  devices: Device[],
+  cables: RackCable[],
+  opts: { showRear: boolean; background?: string | null },
+): string {
+  const front = buildRackRowSvg(racks, devices, cables, { background: opts.background, side: 'front' });
+  if (!opts.showRear) return front;
+  const rear = buildRackRowSvg(racks, devices, cables, { background: opts.background, side: 'rear' });
+  return vstackSvg(front, rear, opts.background);
 }
 
 /**
