@@ -221,17 +221,26 @@ export interface CableScheduleRow {
   from: string;
   to: string;
   lengthFt: string;
+  /** Port VLAN(s): a single id when both ends agree, "a/b" when they differ, "" when unset. */
+  vlan: string;
 }
 
 /** Derive the installer-facing patch list from drawn cables (E3). */
 export function cableScheduleRows(devices: Device[], cables: RackCable[]): CableScheduleRow[] {
   const byId = new Map(devices.map((d) => [d.id, d]));
+  const ifaceOf = (deviceId: string, ifaceId: string) =>
+    byId.get(deviceId)?.interfaces?.find((i) => i.id === ifaceId);
   const endLabel = (deviceId: string, ifaceId: string): string => {
     const dev = byId.get(deviceId);
-    const iface = dev?.interfaces?.find((i) => i.id === ifaceId);
-    const devName = dev?.name ?? deviceId;
-    const portName = iface?.name ?? ifaceId;
-    return `${devName}:${portName}`;
+    const portName = ifaceOf(deviceId, ifaceId)?.name ?? ifaceId;
+    return `${dev?.name ?? deviceId}:${portName}`;
+  };
+  const vlanCol = (c: RackCable): string => {
+    const va = ifaceOf(c.aEnd.deviceId, c.aEnd.ifaceId)?.vlan;
+    const vb = ifaceOf(c.bEnd.deviceId, c.bEnd.ifaceId)?.vlan;
+    if (va == null && vb == null) return '';
+    if (va != null && vb != null) return va === vb ? String(va) : `${va}/${vb}`;
+    return String(va ?? vb);
   };
   return cables.map((c) => ({
     color: c.color,
@@ -239,15 +248,16 @@ export function cableScheduleRows(devices: Device[], cables: RackCable[]): Cable
     from: endLabel(c.aEnd.deviceId, c.aEnd.ifaceId),
     to: endLabel(c.bEnd.deviceId, c.bEnd.ifaceId),
     lengthFt: c.lengthFt != null ? String(c.lengthFt) : '',
+    vlan: vlanCol(c),
   }));
 }
 
 /** CSV patch list. Reuses the simple quoting convention of the existing CSV exports. */
 export function cableScheduleCsv(devices: Device[], cables: RackCable[]): string {
   const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
-  const header = ['Color', 'Label', 'From', 'To', 'Length (ft)'].join(',');
+  const header = ['Color', 'Label', 'From', 'To', 'VLAN', 'Length (ft)'].join(',');
   const rows = cableScheduleRows(devices, cables).map((r) =>
-    [q(r.color), q(r.label), q(r.from), q(r.to), q(r.lengthFt)].join(','),
+    [q(r.color), q(r.label), q(r.from), q(r.to), q(r.vlan), q(r.lengthFt)].join(','),
   );
   return [header, ...rows].join('\n');
 }
@@ -267,12 +277,13 @@ const TBL = {
   border: '#cdd6e0',
   text: '#15212e',
 } as const;
-// [swatch, From, To, Label, Length] — fixed widths keep the literal-hex SVG simple.
-const TBL_COLS: { key: 'color' | 'from' | 'to' | 'label' | 'lengthFt'; label: string; w: number }[] = [
+// [swatch, From, To, Label, VLAN, Length] — fixed widths keep the literal-hex SVG simple.
+const TBL_COLS: { key: 'color' | 'from' | 'to' | 'label' | 'vlan' | 'lengthFt'; label: string; w: number }[] = [
   { key: 'color', label: '', w: 30 },
-  { key: 'from', label: 'From', w: 190 },
-  { key: 'to', label: 'To', w: 190 },
-  { key: 'label', label: 'Label', w: 150 },
+  { key: 'from', label: 'From', w: 180 },
+  { key: 'to', label: 'To', w: 180 },
+  { key: 'label', label: 'Label', w: 130 },
+  { key: 'vlan', label: 'VLAN', w: 60 },
   { key: 'lengthFt', label: 'Length (ft)', w: 90 },
 ];
 

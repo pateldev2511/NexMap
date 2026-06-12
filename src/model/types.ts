@@ -68,6 +68,11 @@ export interface Interface {
   kind?: string;
   /** Link speed, e.g. "1G", "10G". */
   speed?: string;
+  /**
+   * Access (or native) VLAN id tagged on this port, 1–4094 (schema v3 additive). Absent →
+   * untagged/unset. Drives the rack VLAN-mismatch health check and the cable schedule.
+   */
+  vlan?: number;
   notes?: string;
   extra?: ExtraFields;
 }

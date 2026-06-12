@@ -6,6 +6,7 @@ import { nextFreeHost } from '@/lib/ipam';
 import { defaultDeviceName } from '@/model/schema';
 import { VENDORS, MODELS, ROLES } from '@/lib/deviceCatalog';
 import { MIN_LINK_WIDTH, MAX_LINK_WIDTH, DEFAULT_LINK_WIDTH } from '@/canvas/connector';
+import { parseVlanId, VLAN_MIN, VLAN_MAX } from '@/rack/vlan';
 import {
   MIN_ICON_SCALE,
   MAX_ICON_SCALE,
@@ -292,6 +293,18 @@ function InterfacesSection({ device }: { device: Device }) {
             placeholder="speed"
             aria-label="Interface speed"
             onChange={(e) => updateInterface(device.id, iface.id, { speed: e.target.value })}
+            onBlur={endEdit}
+          />
+          <input
+            className={styles.ifaceVlan}
+            value={iface.vlan ?? ''}
+            type="number"
+            min={VLAN_MIN}
+            max={VLAN_MAX}
+            placeholder="VLAN"
+            aria-label="Port VLAN id"
+            title="Access VLAN (1–4094)"
+            onChange={(e) => updateInterface(device.id, iface.id, { vlan: parseVlanId(e.target.value) })}
             onBlur={endEdit}
           />
           <button
