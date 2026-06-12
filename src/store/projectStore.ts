@@ -28,6 +28,9 @@ import type {
 } from '@/model/types';
 import { canFit, isFullDepth, type FitResult, type Slot } from '@/rack/rackModel';
 import { checkConnect, pruneCablesForInterfaces } from '@/rack/rackCables';
+import { presetByKey } from '@/rack/rackDevicePresets';
+import { rackFieldsFromPreset, rackPresetById, DEFAULT_RACK_PRESET } from '@/rack/rackTypes';
+import type { RackTemplate } from '@/rack/rackTemplates';
 import {
   createDevice,
   createEmptyDocument,
@@ -398,6 +401,8 @@ export interface ProjectStore {
   deleteSubnet(id: string): void;
   subnetsAll(): Subnet[];
   addRack(name: string): string;
+  /** Append a pre-made template's racks+devices to the row in one undoable edit. Returns new rack ids. */
+  applyRackTemplate(template: RackTemplate): string[];
   updateRack(id: string, before: Partial<Rack>, after: Partial<Rack>): void;
   deleteRack(id: string): void;
   /** Deep-copy a rack with its mounted gear and intra-rack cables. Returns the new id. */
@@ -1827,6 +1832,46 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       history.commitCoalesceBoundary();
       set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
       return newRackId;
+    },
+    applyRackTemplate(template) {
+      // Append to the end of the current row so applying a template is never destructive.
+      let order = [...model.racks.values()].length;
+      const cmds: Command[] = [];
+      const newDevices: Device[] = [];
+      const newRackIds: string[] = [];
+      for (const tr of template.racks) {
+        const preset = rackPresetById(tr.rackPresetId) ?? DEFAULT_RACK_PRESET;
+        const rack = createRack(tr.name, preset.ruHeight, { ...rackFieldsFromPreset(preset), order: order++ });
+        newRackIds.push(rack.id);
+        cmds.push(new AddRackCommand(rack));
+        for (const td of tr.devices) {
+          const p = presetByKey(td.presetKey);
+          if (!p) continue;
+          const interfaces = p.ports > 0
+            ? Array.from({ length: p.ports }, (_, i) => createInterface(p.portName(i)))
+            : [];
+          const dev = createDevice(p.type, -9999, -9999, firstLayerId(), {
+            ...(td.name ? { name: td.name } : {}),
+            interfaces,
+            rackId: rack.id,
+            ru: td.ru,
+            ruSpan: p.span,
+            mount: p.mount ?? 'rack',
+            side: td.side ?? 'front',
+            bay: 'full',
+            ...(p.watts ? { watts: p.watts } : {}),
+            ...(p.weightKg ? { weightKg: p.weightKg } : {}),
+          });
+          newDevices.push(dev);
+          cmds.push(new AddDeviceCommand(dev));
+        }
+      }
+      if (!cmds.length) return [];
+      history.dispatch(transaction('Apply template', cmds), model);
+      for (const dv of newDevices) index.insert(dv.id, deviceBox(dv));
+      history.commitCoalesceBoundary();
+      set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
+      return newRackIds;
     },
     racksAll() {
       return [...model.racks.values()];

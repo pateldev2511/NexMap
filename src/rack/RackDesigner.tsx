@@ -20,6 +20,8 @@ import { rackBudget } from './rackBudget';
 import { slotOf, canFit, nearestFreeU, isFullDepth, orderRacks, type FitResult } from './rackModel';
 import { RACK_DEVICE_PRESETS, RACK_PRESET_GROUPS, type RackDevicePreset } from './rackDevicePresets';
 import { RACK_PRESETS, rackFieldsFromPreset, DEFAULT_RACK_PRESET } from './rackTypes';
+import { RackTemplatePicker } from './RackTemplatePicker';
+import type { RackTemplate } from './rackTemplates';
 import styles from './RackDesigner.module.css';
 
 /** Human-readable reason for a rejected drop. */
@@ -63,6 +65,7 @@ export function RackDesigner() {
   const [side, setSideState] = useState<'front' | 'rear'>('front');
   const [bay, setBay] = useState<'full' | 'left' | 'right'>('full');
   const [selCable, setSelCable] = useState<string | null>(null);
+  const [showTemplates, setShowTemplates] = useState(false);
   const [search, setSearch] = useState('');
   const [deviceSearch, setDeviceSearch] = useState('');
   const [exportMode, setExportMode] = useState<ExportMode>('diagram');
@@ -147,6 +150,9 @@ export function RackDesigner() {
               </select>{' '}
               <button className={`${styles.btn} ${styles.primary}`} onClick={createRack}>+ New rack</button>
             </div>
+            <div className={styles.templatesWrap}>
+              <RackTemplatePicker onApply={applyTemplate} />
+            </div>
           </div>
         </div>
       </div>
@@ -158,6 +164,13 @@ export function RackDesigner() {
     const id = s().addRack(preset.label.split(' · ')[0] ?? 'Rack');
     s().updateRack(id, {}, rackFieldsFromPreset(preset));
     setRackId(id);
+  }
+
+  function applyTemplate(t: RackTemplate) {
+    const ids = s().applyRackTemplate(t);
+    if (ids[0]) setRackId(ids[0]);
+    setView('row');
+    setShowTemplates(false);
   }
 
   /** Shared by click-to-place AND drag-and-drop: validate, then create + mount, or reject. */
@@ -201,7 +214,11 @@ export function RackDesigner() {
     const ifaces = preset.ports > 0
       ? Array.from({ length: preset.ports }, (_, i) => createInterface(preset.portName(i)))
       : [];
-    s().updateDevice(id, { name: base, interfaces: [] }, { name, interfaces: ifaces });
+    s().updateDevice(
+      id,
+      { name: base, interfaces: [], watts: undefined, weightKg: undefined },
+      { name, interfaces: ifaces, watts: preset.watts || undefined, weightKg: preset.weightKg || undefined },
+    );
     s().placeInRack(id, rack.id, slot);
     s().select([id]);
   }
@@ -325,6 +342,7 @@ export function RackDesigner() {
           <span className={styles.stat}>{racks.length} rack{racks.length === 1 ? '' : 's'} · click one to edit</span>
         )}
         <button className={styles.btn} onClick={createRack}>+ Rack</button>
+        <button className={`${styles.btn} ${showTemplates ? styles.primary : ''}`} title="Insert a pre-made rack template" onClick={() => setShowTemplates((v) => !v)}>Templates</button>
         <button className={styles.btn} title="Duplicate the focused rack with its gear + cabling" onClick={cloneCurrentRack}>Clone</button>
         {view === 'row' ? (
           <button className={`${styles.btn} ${!showRear ? styles.primary : ''}`} title="Show or hide the rear face of every rack" onClick={() => setShowRear((v) => !v)}>
@@ -415,6 +433,13 @@ export function RackDesigner() {
 
       {/* canvas */}
       <div className={`${styles.stage} ${armed && view === 'focus' ? styles.placing : ''}`} style={view === 'row' ? { flexDirection: 'column', alignItems: 'stretch' } : undefined}>
+        {showTemplates && (
+          <div className={styles.templateOverlay} onClick={() => setShowTemplates(false)}>
+            <div onClick={(e) => e.stopPropagation()}>
+              <RackTemplatePicker onApply={applyTemplate} onClose={() => setShowTemplates(false)} />
+            </div>
+          </div>
+        )}
         {view === 'row' ? (
           <>
             <input
