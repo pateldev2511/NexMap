@@ -24,11 +24,13 @@
  *   - mount:'rack' | 'rail'   — rail = 0U side channel (PDU); does not consume U,
  *                                collides only with other rail items on the same side.
  */
-import type { Device, Rack } from '@/model/types';
+import type { Device, DeviceType, Rack } from '@/model/types';
+import { panelKindFor } from './panelKind';
 
 export type Mount = 'rack' | 'rail';
 export type Side = 'front' | 'rear';
 export type Bay = 'full' | 'left' | 'right';
+export type Depth = 'full' | 'shallow';
 
 export interface Slot {
   /** Lowest occupied U, 1-based. */
@@ -38,6 +40,23 @@ export interface Slot {
   mount: Mount;
   side: Side;
   bay: Bay;
+  /**
+   * Chassis depth. A 'full'-depth unit (switch, server, firewall, …) fills the U from the
+   * front rail to the rear rail, so it occupies BOTH faces and blocks the opposite side.
+   * A 'shallow' unit (patch panel, blanking filler, cable manager) is thin enough that a
+   * front and a rear unit can share one U. Derived from the device type — never persisted.
+   */
+  depth: Depth;
+}
+
+/**
+ * Is this device a full-depth chassis that consumes the whole U front-to-rear? Shallow gear
+ * (keystone patch panels, blanking panels, cable managers) is the exception — those can sit
+ * back-to-back on opposite faces of the same U. Pure function of type; no schema field.
+ */
+export function isFullDepth(type: DeviceType): boolean {
+  const k = panelKindFor(type);
+  return k !== 'patch' && k !== 'blank' && k !== 'cable-mgr';
 }
 
 export type FitResult =
@@ -63,6 +82,7 @@ export function slotOf(d: Device): Slot {
     mount: d.mount ?? 'rack',
     side: d.side ?? 'front',
     bay: d.bay ?? 'full',
+    depth: isFullDepth(d.type) ? 'full' : 'shallow',
   };
 }
 
@@ -92,10 +112,15 @@ export function uRangesOverlap(a: Slot, b: Slot): boolean {
  *  - Rack-mounted items collide when their U ranges overlap AND their bays conflict.
  */
 export function slotsCollide(a: Slot, b: Slot): boolean {
-  if (a.side !== b.side) return false;
   if (a.mount === 'rail' || b.mount === 'rail') {
-    // Two rail items on the same side share the channel; one rail + one rack don't.
-    return a.mount === 'rail' && b.mount === 'rail';
+    // Rail items live in the side channel: two on the same side share it; one rail + one
+    // rack don't, and opposite sides have separate channels.
+    return a.side === b.side && a.mount === 'rail' && b.mount === 'rail';
+  }
+  if (a.side !== b.side) {
+    // Opposite faces are independent UNLESS both are full-depth chassis — those fill the U
+    // front-to-rear, so two of them can't occupy overlapping U on opposite sides.
+    return a.depth === 'full' && b.depth === 'full' && uRangesOverlap(a, b);
   }
   return uRangesOverlap(a, b) && baysConflict(a.bay, b.bay);
 }
@@ -152,11 +177,12 @@ export function firstFreeU(
   span: number,
   side: Side = 'front',
   bay: Bay = 'full',
+  depth: Depth = 'full',
   ignoreId?: string,
 ): number | null {
   if (span < 1 || span > rack.ruHeight) return null;
   for (let ru = 1; ru <= rack.ruHeight - span + 1; ru++) {
-    const candidate: Slot = { ru, ruSpan: span, mount: 'rack', side, bay };
+    const candidate: Slot = { ru, ruSpan: span, mount: 'rack', side, bay, depth };
     if (canFit(rack, occupants, candidate, ignoreId).ok) return ru;
   }
   return null;
@@ -175,12 +201,13 @@ export function nearestFreeU(
   target: number,
   side: Side = 'front',
   bay: Bay = 'full',
+  depth: Depth = 'full',
   ignoreId?: string,
 ): number | null {
   if (span < 1 || span > rack.ruHeight) return null;
   const maxRu = rack.ruHeight - span + 1;
   const fits = (ru: number) =>
-    ru >= 1 && ru <= maxRu && canFit(rack, occupants, { ru, ruSpan: span, mount: 'rack', side, bay }, ignoreId).ok;
+    ru >= 1 && ru <= maxRu && canFit(rack, occupants, { ru, ruSpan: span, mount: 'rack', side, bay, depth }, ignoreId).ok;
   const start = Math.max(1, Math.min(maxRu, Math.round(target)));
   for (let d = 0; d <= rack.ruHeight; d++) {
     if (fits(start - d)) return start - d;

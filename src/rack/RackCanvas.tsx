@@ -22,7 +22,7 @@ export interface RejectInfo {
 }
 import { panelKindFor } from './panelKind';
 import { slotOf } from './rackModel';
-import { deviceFaceParts, RACK_ART_DEFS } from './rackDeviceArt';
+import { deviceFaceParts, deviceGhostParts, RACK_ART_DEFS } from './rackDeviceArt';
 import styles from './RackDesigner.module.css';
 
 /**
@@ -160,6 +160,23 @@ export function RackCanvas({
     );
   };
 
+  /** A device on the OTHER face, drawn as a muted back-of-chassis ghost so its U doesn't
+   *  read as empty. Non-interactive; the real, editable panel lives on the opposite face. */
+  const renderGhost = (d: Device) => {
+    const r = deviceRect(rack, d);
+    const panel: Rect = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
+    return (
+      <g key={`ghost-${d.id}`} pointerEvents="none" aria-hidden="true">
+        <title>{`${d.name} — mounted on the ${slotOf(d).side} face`}</title>
+        <g dangerouslySetInnerHTML={{ __html: deviceGhostParts(d, panel, side).join('') }} />
+      </g>
+    );
+  };
+
+  // Ghosts (opposite face, rack-mounted) render BEHIND the live panels.
+  const ghosts = mounted
+    .filter((d) => slotOf(d).side !== side && slotOf(d).mount !== 'rail')
+    .map(renderGhost);
   const panels = mounted.filter((d) => slotOf(d).side === side).map(renderPanel);
 
   return (
@@ -214,13 +231,14 @@ export function RackCanvas({
         );
       })}
 
-      {/* devices */}
+      {/* opposite-face ghosts (behind), then live devices */}
+      {ghosts}
       {panels}
 
       {/* empty-face hint — so flipping to a bare face never reads as "gear vanished".
           Anchored near the TOP of the bay (not its vertical center) so it stays visible
           without scrolling a tall 42U cabinet. */}
-      {panels.length === 0 && !armed && dragU == null && (
+      {panels.length === 0 && ghosts.length === 0 && !armed && dragU == null && (
         <text
           x={origin.x + BAY_W / 2} y={origin.y + 110} textAnchor="middle"
           fontFamily="var(--font-ui)" fontSize={13} style={{ fill: 'var(--chrome-fg-muted)' }}

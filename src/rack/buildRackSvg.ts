@@ -23,7 +23,7 @@ import {
   type RackPlacement,
 } from './rackLayout';
 import { slotOf } from './rackModel';
-import { deviceFaceParts, RACK_ART_DEFS } from './rackDeviceArt';
+import { deviceFaceParts, deviceGhostParts, RACK_ART_DEFS } from './rackDeviceArt';
 
 /** Literal-hex CABINET-CHROME palette (device colors now live in rackDeviceArt.ts). */
 const C = {
@@ -60,10 +60,21 @@ export interface BuildRackSvgOptions {
   background?: string | null;
   /** Which mounting face to render. Default 'front'. */
   side?: 'front' | 'rear';
+  /**
+   * Also draw opposite-face gear as muted "ghosts" so a full-depth chassis on the other
+   * side still reads as occupying its U. Default true for a single-face render; the
+   * both-faces composition turns it off (both faces are already drawn for real).
+   */
+  ghostOpposite?: boolean;
 }
 
 /** Render one cabinet (frame, bay, U labels, on-face devices) at its row offset. */
-function renderCabinet(placement: RackPlacement, mounted: Device[], face: 'front' | 'rear'): string[] {
+function renderCabinet(
+  placement: RackPlacement,
+  mounted: Device[],
+  face: 'front' | 'rear',
+  ghostOpposite = false,
+): string[] {
   const { rack, offsetX, size } = placement;
   const origin = bayOrigin(offsetX);
   const left = offsetX;
@@ -100,6 +111,17 @@ function renderCabinet(placement: RackPlacement, mounted: Device[], face: 'front
     );
   }
 
+  // opposite-face ghosts first (behind), so the U doesn't read as empty for back-mounted gear
+  if (ghostOpposite) {
+    for (const d of mounted) {
+      if (d.rackId !== rack.id || d.ru == null) continue;
+      const s = slotOf(d);
+      if (s.side === face || s.mount === 'rail') continue;
+      const r = deviceRect(rack, d);
+      const panel: Rect = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
+      parts.push(...deviceGhostParts(d, panel, face));
+    }
+  }
   // devices on the requested face — realistic art from the shared generator
   for (const d of mounted) {
     if (d.rackId !== rack.id || d.ru == null) continue;
@@ -137,9 +159,10 @@ export function buildRackRowSvg(
     }
   }
 
+  const ghostOpposite = opts.ghostOpposite ?? false;
   const parts: string[] = [RACK_ART_DEFS];
   if (opts.background) parts.push(`<rect x="0" y="0" width="${width}" height="${height}" fill="${escapeXml(opts.background)}"/>`);
-  for (const p of placements) parts.push(...renderCabinet(p, devices, face));
+  for (const p of placements) parts.push(...renderCabinet(p, devices, face, ghostOpposite));
 
   // cables (global pass — both endpoints resolved with their own cabinet offset)
   const endPoint = (deviceId: string, ifaceId: string): { x: number; y: number } | null => {
@@ -188,7 +211,8 @@ export function buildRackSvg(
   cables: RackCable[],
   opts: BuildRackSvgOptions = {},
 ): string {
-  return buildRackRowSvg([rack], devices, cables, opts);
+  // A single focused rack shows one face → ghost the opposite side (matches the editor).
+  return buildRackRowSvg([rack], devices, cables, { ghostOpposite: true, ...opts });
 }
 
 export interface CableScheduleRow {
@@ -339,9 +363,11 @@ export function buildRackRowFacesSvg(
   cables: RackCable[],
   opts: { showRear: boolean; background?: string | null },
 ): string {
-  const front = buildRackRowSvg(racks, devices, cables, { background: opts.background, side: 'front' });
+  // Rear hidden → ghost rear gear onto the front row. Rear shown → both rows are drawn for
+  // real, so neither needs ghosts.
+  const front = buildRackRowSvg(racks, devices, cables, { background: opts.background, side: 'front', ghostOpposite: !opts.showRear });
   if (!opts.showRear) return front;
-  const rear = buildRackRowSvg(racks, devices, cables, { background: opts.background, side: 'rear' });
+  const rear = buildRackRowSvg(racks, devices, cables, { background: opts.background, side: 'rear', ghostOpposite: false });
   return vstackSvg(front, rear, opts.background);
 }
 

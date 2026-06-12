@@ -9,6 +9,7 @@ import {
   canFit,
   firstFreeU,
   nearestFreeU,
+  isFullDepth,
   orderRacks,
   type Slot,
 } from './rackModel';
@@ -62,13 +63,14 @@ const slot = (over: Partial<Slot> = {}): Slot => ({
   mount: 'rack',
   side: 'front',
   bay: 'full',
+  depth: 'full',
   ...over,
 });
 
 describe('slotOf — v2 back-compat defaults', () => {
   it('defaults mount/side/bay for a legacy racked device', () => {
     const s = slotOf(dev({ ru: 40, ruSpan: 2, mount: undefined, side: undefined, bay: undefined }));
-    expect(s).toEqual({ ru: 40, ruSpan: 2, mount: 'rack', side: 'front', bay: 'full' });
+    expect(s).toEqual({ ru: 40, ruSpan: 2, mount: 'rack', side: 'front', bay: 'full', depth: 'full' });
   });
   it('clamps ruSpan to >= 1 and defaults ru to 1', () => {
     expect(slotOf(dev({ ru: undefined, ruSpan: 0 }))).toMatchObject({ ru: 1, ruSpan: 1 });
@@ -101,9 +103,28 @@ describe('uRangesOverlap', () => {
   });
 });
 
+describe('isFullDepth', () => {
+  it('treats switches/servers/firewalls/UPS as full-depth (block both faces)', () => {
+    for (const t of ['switch', 'router', 'server', 'storage', 'firewall', 'ups'] as const) {
+      expect(isFullDepth(t)).toBe(true);
+    }
+  });
+  it('treats patch panels as shallow (can share a U front+rear)', () => {
+    expect(isFullDepth('patch-panel')).toBe(false);
+  });
+});
+
 describe('slotsCollide', () => {
-  it('different sides never collide', () => {
-    expect(slotsCollide(slot({ side: 'front' }), slot({ side: 'rear' }))).toBe(false);
+  it('two full-depth chassis on opposite faces DO collide (they fill the U front-to-rear)', () => {
+    expect(slotsCollide(slot({ side: 'front', depth: 'full' }), slot({ side: 'rear', depth: 'full' }))).toBe(true);
+  });
+  it('shallow gear on opposite faces shares the U (patch front + PDU/blank rear)', () => {
+    expect(slotsCollide(slot({ side: 'front', depth: 'shallow' }), slot({ side: 'rear', depth: 'shallow' }))).toBe(false);
+    // one shallow + one full on opposite faces still fits — the shallow one leaves room
+    expect(slotsCollide(slot({ side: 'front', depth: 'full' }), slot({ side: 'rear', depth: 'shallow' }))).toBe(false);
+  });
+  it('opposite-face full-depth only collide where their U ranges overlap', () => {
+    expect(slotsCollide(slot({ side: 'front', ru: 1 }), slot({ side: 'rear', ru: 5 }))).toBe(false);
   });
   it('same U + full bay collide', () => {
     expect(slotsCollide(slot({ ru: 5 }), slot({ ru: 5 }))).toBe(true);

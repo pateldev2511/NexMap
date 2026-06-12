@@ -26,7 +26,7 @@ import type {
   View,
   Vlan,
 } from '@/model/types';
-import { canFit, type FitResult, type Slot } from '@/rack/rackModel';
+import { canFit, isFullDepth, type FitResult, type Slot } from '@/rack/rackModel';
 import { checkConnect, pruneCablesForInterfaces } from '@/rack/rackCables';
 import {
   createDevice,
@@ -1838,7 +1838,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       const rack = model.racks.get(rackId);
       if (!device || !rack) return { ok: false, reason: 'invalid' };
       const occupants = [...model.devices.values()].filter((d) => d.rackId === rackId);
-      const fit = canFit(rack, occupants, slot, deviceId);
+      // Depth is a property of THIS device's type, not whatever the caller passed — derive it
+      // so a full-depth chassis correctly blocks the opposite face.
+      const candidate: Slot = { ...slot, depth: isFullDepth(device.type) ? 'full' : 'shallow' };
+      const fit = canFit(rack, occupants, candidate, deviceId);
       if (!fit.ok) return fit;
       const before: Partial<Device> = {
         rackId: device.rackId,

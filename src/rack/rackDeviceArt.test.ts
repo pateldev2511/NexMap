@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deviceFaceParts, RACK_ART_DEFS } from './rackDeviceArt';
+import { deviceFaceParts, deviceGhostParts, RACK_ART_DEFS } from './rackDeviceArt';
 import type { Device, DeviceType } from '@/model/types';
 
 const panel = { x: 100, y: 50, w: 560, h: 30 };
@@ -58,5 +58,30 @@ describe('rackDeviceArt — export-safe shared art', () => {
 
   it('handles a device with zero interfaces without crashing', () => {
     expect(() => deviceFaceParts(dev('switch', { interfaces: [] }), panel)).not.toThrow();
+  });
+});
+
+describe('deviceGhostParts — opposite-face back-of-chassis', () => {
+  it('labels the real face and the device name, var-free', () => {
+    const svg = join(deviceGhostParts(dev('switch', { name: 'sw-rear' }), panel, 'front'));
+    expect(svg).toContain('rear · sw-rear'); // viewing front → device is on the rear
+    expect(svg).not.toContain('var(');
+    expect(svg).not.toContain('url(#rkLedG)'); // no live link LEDs — it's a ghost
+  });
+
+  it('flips the label when viewing the rear face', () => {
+    const svg = join(deviceGhostParts(dev('server', { name: 'esxi-01' }), panel, 'rear'));
+    expect(svg).toContain('front · esxi-01');
+  });
+
+  it('escapes a hostile device name', () => {
+    const svg = join(deviceGhostParts(dev('switch', { name: 'a"<b' }), panel, 'front'));
+    expect(svg).not.toContain('<b');
+    expect(svg).toContain('&lt;');
+  });
+
+  it('emits a hatched slab (lines) without throwing', () => {
+    expect(() => deviceGhostParts(dev('switch'), panel, 'front')).not.toThrow();
+    expect(join(deviceGhostParts(dev('switch'), panel, 'front'))).toContain('<line');
   });
 });

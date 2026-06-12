@@ -49,6 +49,11 @@ const C = {
   driveRail: '#2c3744',
   patchText: '#3a4654',
   vent: '#11161d',
+  // opposite-face "ghost" (back of a chassis seen from the other side)
+  ghostFill: '#161b22',
+  ghostBd: '#39424f',
+  ghostHatch: '#2c343f',
+  ghostText: '#6b7787',
 } as const;
 
 const n = (v: number) => v.toFixed(1);
@@ -76,6 +81,41 @@ function chassis(device: Device, p: Rect, opts: { faceplate?: string; led?: stri
     `<text x="${n(p.x + 8)}" y="${n(p.y + p.h / 2 + 4)}" font-family="ui-monospace,Menlo,monospace" font-size="10" font-weight="700" fill="${C.text}">${escapeXml(device.name)}</text>` +
     `<circle cx="${n(p.x + p.w - 6)}" cy="${n(p.y + 6)}" r="2.5" fill="${led}"/>`
   );
+}
+
+/**
+ * "Ghost" art for a device mounted on the OPPOSITE face — drawn on the face you're viewing
+ * so a full-depth chassis on the back still reads as occupying its U from the front (you see
+ * its back panel, not empty space). Muted, hatched, non-glossy, labeled with the real face.
+ * `viewingFace` is the face being rendered; the device actually lives on the other one.
+ */
+export function deviceGhostParts(device: Device, panel: Rect, viewingFace: 'front' | 'rear'): string[] {
+  const realFace = viewingFace === 'front' ? 'rear' : 'front';
+  const { x, y, w, h } = panel;
+  const out: string[] = [
+    // recessed back-panel slab
+    `<rect x="${n(x)}" y="${n(y)}" width="${n(w)}" height="${n(h)}" rx="3" fill="${C.ghostFill}" stroke="${C.ghostBd}" stroke-width="1" stroke-dasharray="4 3"/>`,
+  ];
+  // diagonal hatch so it reads as "behind", not a real faceplate
+  const step = 9;
+  for (let gx = x - h; gx < x + w; gx += step) {
+    const x1 = Math.max(x, gx);
+    const y1 = gx < x ? y + (x - gx) : y;
+    const x2 = Math.min(x + w, gx + h);
+    const y2 = gx + h > x + w ? y + (x + w - gx) : y + h;
+    if (x2 > x1) out.push(`<line x1="${n(x1)}" y1="${n(y1)}" x2="${n(x2)}" y2="${n(y2)}" stroke="${C.ghostHatch}" stroke-width="0.75"/>`);
+  }
+  // back-of-chassis hints: a couple of fan grilles + a PSU block on the right
+  const fanR = Math.min(h * 0.32, 9);
+  const cy = y + h / 2;
+  for (let i = 0; i < 2; i++) {
+    const fx = x + w - 16 - i * (fanR * 2 + 5);
+    out.push(`<circle cx="${n(fx)}" cy="${n(cy)}" r="${n(fanR)}" fill="none" stroke="${C.ghostHatch}" stroke-width="0.9"/>`);
+    out.push(`<circle cx="${n(fx)}" cy="${n(cy)}" r="${n(fanR * 0.32)}" fill="${C.ghostHatch}"/>`);
+  }
+  // label: "rear · name" so it's unambiguous which side the gear is really on
+  out.push(`<text x="${n(x + 7)}" y="${n(y + h / 2 + 3.5)}" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="${C.ghostText}">${realFace} · ${escapeXml(device.name)}</text>`);
+  return out;
 }
 
 /**

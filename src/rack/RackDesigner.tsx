@@ -17,7 +17,7 @@ import {
 } from './buildRackSvg';
 import { analyzeCabling } from './rackHealth';
 import { rackBudget } from './rackBudget';
-import { slotOf, canFit, nearestFreeU, orderRacks, type FitResult } from './rackModel';
+import { slotOf, canFit, nearestFreeU, isFullDepth, orderRacks, type FitResult } from './rackModel';
 import { RACK_DEVICE_PRESETS, RACK_PRESET_GROUPS, type RackDevicePreset } from './rackDevicePresets';
 import { RACK_PRESETS, rackFieldsFromPreset, DEFAULT_RACK_PRESET } from './rackTypes';
 import styles from './RackDesigner.module.css';
@@ -166,13 +166,15 @@ export function RackDesigner() {
     const span = preset.span;
     const mount = preset.mount ?? 'rack';
     const useBay = mount === 'rail' ? 'full' : bay; // rail items span the channel
+    const depth = isFullDepth(preset.type) ? 'full' : 'shallow';
     const slot = {
       ru: Math.min(u, rack.ruHeight - span + 1),
       ruSpan: span,
       mount,
       side,
       bay: useBay,
-    };
+      depth,
+    } as const;
     const occ = devices.filter((d) => d.rackId === rack.id);
     // Pre-check BEFORE creating anything — never leave an orphan device on rejection.
     const fit = canFit(rack, occ, slot);
@@ -181,7 +183,7 @@ export function RackDesigner() {
         u: slot.ru,
         span,
         reason: rejectReason(fit),
-        pulseU: nearestFreeU(rack, occ, span, slot.ru, side, useBay),
+        pulseU: nearestFreeU(rack, occ, span, slot.ru, side, useBay, depth),
       });
       window.setTimeout(() => setReject(null), 2400);
       return;
@@ -265,7 +267,7 @@ export function RackDesigner() {
     const sl = slotOf(d);
     const occ = devices.filter((x) => x.rackId === targetRackId);
     const wanted = Math.max(1, Math.min(sl.ru, target.ruHeight - sl.ruSpan + 1));
-    const u = nearestFreeU(target, occ, sl.ruSpan, wanted, sl.side, sl.bay);
+    const u = nearestFreeU(target, occ, sl.ruSpan, wanted, sl.side, sl.bay, sl.depth);
     const showReject = (reason: string) => {
       setReject({ u: wanted, span: sl.ruSpan, reason, pulseU: null });
       window.setTimeout(() => setReject(null), 2400);

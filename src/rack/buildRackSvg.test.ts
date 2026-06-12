@@ -131,7 +131,18 @@ describe('buildRackRowSvg — multiple racks in one canvas', () => {
 
     const frontOnly = buildRackRowFacesSvg([rack, rackB], [sw, srv, swB, rearDev], [], { showRear: false, background: '#fff' });
     expect(frontOnly).toContain('· front');
-    expect(frontOnly).not.toContain('· rear');
+    expect(frontOnly).not.toContain('U · rear'); // no rear FACE title (the ghost label is fine)
+    // rear-hidden front-only export GHOSTS the rear switch so its U isn't blank
+    expect(frontOnly).toContain('rear · rear-sw');
+    // ...but when both faces are stacked, no ghost is drawn (the real rear row is there)
+    expect(both).not.toContain('rear · rear-sw');
+  });
+
+  it('a focused single-rack export ghosts the opposite face by default', () => {
+    const rearSw: Device = { ...sw, id: 'rsw', name: 'rear-sw', side: 'rear' };
+    const frontView = buildRackSvg(rack, [sw, rearSw], [], { side: 'front' });
+    expect(frontView).toContain('rear · rear-sw'); // rear gear ghosted onto the front
+    expect(frontView).toContain('core-sw'); // real front device still drawn
   });
 });
 

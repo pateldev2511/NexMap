@@ -20,7 +20,7 @@ import {
 } from './rackLayout';
 import { slotOf } from './rackModel';
 import { rackBudget } from './rackBudget';
-import { deviceFaceParts, RACK_ART_DEFS } from './rackDeviceArt';
+import { deviceFaceParts, deviceGhostParts, RACK_ART_DEFS } from './rackDeviceArt';
 import styles from './RackDesigner.module.css';
 
 export interface RackRowProps {
@@ -90,6 +90,15 @@ export function RackRow({
         {Array.from({ length: rack.ruHeight }, (_, k) => k + 1).filter((u) => u % 5 === 0 || u === 1).map((u) => (
           <text key={u} x={origin.x - 6} y={origin.y + uLabelCenterY(rack, u) + 3} textAnchor="end" fontSize={8} fontFamily="var(--font-mono)" fill="var(--chrome-fg-muted)">{u}</text>
         ))}
+        {/* When the rear column is hidden, ghost rear gear onto the front so its U doesn't
+            read as empty (full-depth chassis occupy both faces). */}
+        {face === 'front' && !showRear && devices
+          .filter((d) => d.rackId === rack.id && d.ru != null && slotOf(d).side === 'rear' && slotOf(d).mount !== 'rail')
+          .map((d) => {
+            const r = deviceRect(rack, d);
+            const panel = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
+            return <g key={`ghost-${d.id}`} pointerEvents="none" dangerouslySetInnerHTML={{ __html: deviceGhostParts(d, panel, 'front').join('') }} />;
+          })}
         {/* devices on this face — realistic shared art + select/search overlay */}
         {devices.filter((d) => d.rackId === rack.id && d.ru != null && slotOf(d).side === face).map((d) => {
           const r = deviceRect(rack, d);
