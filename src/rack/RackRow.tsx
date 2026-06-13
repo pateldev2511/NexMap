@@ -83,7 +83,7 @@ export function RackRow({
     return (
       // Whole face is a click target → drill into the focused editor. Device clicks
       // stopPropagation and select instead.
-      <g key={`${rack.id}-${face}`} onClick={() => onFocusRack(rack.id)} style={{ cursor: 'pointer' }}>
+      <g key={`${rack.id}-${face}`} data-rack-face={`${rack.id}-${face}`} onClick={() => onFocusRack(rack.id)} style={{ cursor: 'pointer' }}>
         <rect
           x={originX + 1} y={1} width={size.width - 2} height={size.height - 2} rx={10}
           fill="var(--chrome-bg)" stroke="var(--chrome-border)" strokeWidth={1.5}
@@ -177,15 +177,20 @@ export function RackRow({
 
   function onPointerDown(e: React.PointerEvent) {
     if (e.button !== 0) return;
+    // Don't capture the pointer yet — capturing on pointerdown retargets the click to the
+    // container and would break click-to-drill-in on rack faces. Capture only once an actual
+    // drag starts (in onPointerMove past the threshold).
     pan.current = { active: true, sx: e.clientX, sy: e.clientY, tx: vpRef.current.tx, ty: vpRef.current.ty, moved: false };
-    containerRef.current?.setPointerCapture?.(e.pointerId);
   }
   function onPointerMove(e: React.PointerEvent) {
     if (!pan.current.active) return;
     const dx = e.clientX - pan.current.sx;
     const dy = e.clientY - pan.current.sy;
-    if (Math.abs(dx) + Math.abs(dy) > 4) pan.current.moved = true;
-    setVp((v) => ({ ...v, tx: pan.current.tx + dx, ty: pan.current.ty + dy }));
+    if (!pan.current.moved && Math.abs(dx) + Math.abs(dy) > 4) {
+      pan.current.moved = true;
+      containerRef.current?.setPointerCapture?.(e.pointerId); // capture only for a real pan
+    }
+    if (pan.current.moved) setVp((v) => ({ ...v, tx: pan.current.tx + dx, ty: pan.current.ty + dy }));
   }
   function onPointerUp(e: React.PointerEvent) {
     pan.current.active = false;

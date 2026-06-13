@@ -12,7 +12,7 @@ test('rack designer opens into the side-by-side canvas; +Rack in place; hide rea
 
   // +Rack drops another cabinet in place (still the canvas)
   await page.getByRole('button', { name: /^\+ Rack$/ }).click();
-  await expect(page.getByText(/2 racks/)).toBeVisible();
+  await expect(page.getByText(/2 racks · click one to edit/)).toBeVisible();
 
   // hide-rear toggle flips the label
   const hideRear = page.getByRole('button', { name: /Hide rear/ });
@@ -22,7 +22,9 @@ test('rack designer opens into the side-by-side canvas; +Rack in place; hide rea
   await page.getByRole('button', { name: /Show rear/ }).click();
 
   // click a rack → focused editor; back button returns to the canvas
-  await row.click({ position: { x: 120, y: 220 } });
+  // (target the rack face directly — the canvas is pan/zoomed, so a fixed pixel
+  // position isn't reliable; a stable element hook is.)
+  await page.locator('[data-rack-face]').first().click();
   await expect(page.getByTestId('rack-canvas')).toBeVisible();
   await page.getByRole('button', { name: /All racks/ }).click();
   await expect(row).toBeVisible();

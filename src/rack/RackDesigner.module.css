@@ -580,3 +580,13 @@
   min-width: 38px;
   text-align: center;
 }
+
+/* Empty-state column: top-aligned + scrollable so the tall template picker never
+   pushes the "+ New rack" CTA up under the toolbar (e2e regression guard). */
+.emptyState {
+  width: 100%;
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 28px 0 48px;
+  text-align: center;
+}

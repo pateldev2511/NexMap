@@ -145,14 +145,16 @@ export function RackDesigner() {
         <div className={styles.toolbar}>
           <span className={styles.title}>Rack designer</span>
         </div>
-        <div className={styles.stage}>
-          <div className={styles.hint}>
-            No racks yet. Pick a rack type and start mounting gear.
-            <div className={styles.cta}>
-              <select value={newType} onChange={(e) => setNewType(e.target.value)}>
-                {RACK_PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-              </select>{' '}
-              <button className={`${styles.btn} ${styles.primary}`} onClick={createRack}>+ New rack</button>
+        <div className={styles.stage} style={{ alignItems: 'flex-start' }}>
+          <div className={styles.emptyState}>
+            <div className={styles.hint} style={{ maxWidth: 'none' }}>
+              No racks yet. Pick a rack type and start mounting gear.
+              <div className={styles.cta}>
+                <select value={newType} onChange={(e) => setNewType(e.target.value)}>
+                  {RACK_PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                </select>{' '}
+                <button className={`${styles.btn} ${styles.primary}`} onClick={createRack}>+ New rack</button>
+              </div>
             </div>
             <div className={styles.templatesWrap}>
               <RackTemplatePicker onApply={applyTemplate} />

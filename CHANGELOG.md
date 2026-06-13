@@ -6,6 +6,14 @@ minor/patch semantics are not yet enforced.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Rack canvas pan/zoom no longer steals clicks (v0.6.1).** Capturing the pointer on
+  press retargeted the subsequent click to the canvas, so clicking a rack to drill in (or
+  selecting gear) silently stopped working in the row view. The pointer is now captured
+  only once an actual pan drag begins, so plain clicks reach the rack again. Caught by the
+  multi-rack e2e.
+
 ### Added
 
 - **Rack canvas navigation + A/B power (v0.6.0).**
