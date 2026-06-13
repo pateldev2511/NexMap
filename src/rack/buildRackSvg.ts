@@ -128,7 +128,7 @@ function renderCabinet(
     if (slotOf(d).side !== face) continue;
     const r = deviceRect(rack, d);
     const panel: Rect = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
-    parts.push(...deviceFaceParts(d, panel));
+    parts.push(...deviceFaceParts(d, panel, face));
   }
   return parts;
 }

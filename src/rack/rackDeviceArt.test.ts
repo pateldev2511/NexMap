@@ -61,6 +61,27 @@ describe('rackDeviceArt — export-safe shared art', () => {
   });
 });
 
+describe('deviceFaceParts — rear faceplate', () => {
+  it('full-depth gear shows a power+cooling rear, not a mirror of the front jacks', () => {
+    const front = join(deviceFaceParts(dev('switch'), panel, 'front'));
+    const rear = join(deviceFaceParts(dev('switch'), panel, 'rear'));
+    expect(rear).not.toBe(front);
+    expect(rear).toContain('<line'); // fan grille spokes
+    expect(rear).not.toContain('notch'); // no front RJ45 jacks on the rear
+    expect(rear).toContain('core-sw'); // name still labeled
+  });
+
+  it('shallow gear (patch panel) renders the same both faces', () => {
+    const front = join(deviceFaceParts(dev('patch-panel'), panel, 'front'));
+    const rear = join(deviceFaceParts(dev('patch-panel'), panel, 'rear'));
+    expect(rear).toBe(front);
+  });
+
+  it('defaults to the front face when not specified', () => {
+    expect(join(deviceFaceParts(dev('switch'), panel))).toBe(join(deviceFaceParts(dev('switch'), panel, 'front')));
+  });
+});
+
 describe('deviceFaceParts — lifecycle status overlay', () => {
   it('draws nothing extra for active/unset, a dot for planned, a scrim for decommissioned', () => {
     const base = join(deviceFaceParts(dev('switch'), panel));

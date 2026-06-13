@@ -124,7 +124,7 @@ export function RackRow({
           const hit = searchHits.has(d.id);
           return (
             <g key={d.id} onClick={(e) => { e.stopPropagation(); onSelect(d.id); onFocusRack(rack.id); }} style={{ cursor: 'pointer' }}>
-              <g dangerouslySetInnerHTML={{ __html: deviceFaceParts(d, panel).join('') }} />
+              <g dangerouslySetInnerHTML={{ __html: deviceFaceParts(d, panel, face).join('') }} />
               {colorBy !== 'gear' && (() => {
                 const tint = deviceColorBy(d, colorBy);
                 return tint ? <rect x={panel.x} y={panel.y} width={panel.w} height={panel.h} rx={3} fill={tint} fillOpacity={0.6} pointerEvents="none" /> : null;

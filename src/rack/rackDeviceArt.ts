@@ -17,6 +17,7 @@ import type { Device } from '@/model/types';
 import { escapeXml } from '@/io/export/buildSvg';
 import { portLayout, type Rect } from './rackLayout';
 import { panelKindFor } from './panelKind';
+import { isFullDepth } from './rackModel';
 
 /** Shared gradient defs. Include ONCE per SVG document (root). */
 export const RACK_ART_DEFS = [
@@ -122,7 +123,11 @@ export function deviceGhostParts(device: Device, panel: Rect, viewingFace: 'fron
  * Front-panel art for one device in ABSOLUTE coords (panel rect already positioned).
  * Returns SVG element strings; the consumer joins + wraps them.
  */
-export function deviceFaceParts(device: Device, panel: Rect): string[] {
+export function deviceFaceParts(device: Device, panel: Rect, face: 'front' | 'rear' = 'front'): string[] {
+  // The rear of a full-depth chassis is power + cooling, not a mirror of the front jacks.
+  if (face === 'rear' && isFullDepth(device.type)) {
+    return [...rearFaceParts(device, panel), ...statusOverlay(device, panel)];
+  }
   const kind = panelKindFor(device.type);
   const ports = (device.interfaces ?? []).map((i) => ({ id: i.id, name: i.name }));
   const out: string[] = [];
@@ -225,5 +230,40 @@ function statusOverlay(device: Device, p: Rect): string[] {
   }
   // corner status dot (top-left, opposite the chassis status LED)
   out.push(`<circle cx="${n(p.x + 6)}" cy="${n(p.y + 6)}" r="3" fill="${color}" stroke="#0a0e12" stroke-width="0.6"/>`);
+  return out;
+}
+
+/**
+ * Rear faceplate for a full-depth chassis (schema v3): two redundant PSU modules with
+ * C14 inlets on the right, fan grilles in the middle, and the escaped name — what you'd
+ * actually see from the back of the rack. Hex-only, shared by editor/canvas/export.
+ */
+function rearFaceParts(device: Device, p: Rect): string[] {
+  const out = [chassis(device, p, { led: 'url(#rkLedG)' })];
+
+  // two PSU modules on the right, each with a power inlet + status LED
+  const psuW = 42;
+  const gap = 6;
+  const psuH = Math.min(p.h - 8, 26);
+  const psuY = p.y + (p.h - psuH) / 2;
+  for (let i = 0; i < 2; i++) {
+    const px = p.x + p.w - 8 - (i + 1) * psuW - i * gap;
+    out.push(`<rect x="${n(px)}" y="${n(psuY)}" width="${psuW}" height="${n(psuH)}" rx="2" fill="${C.vent}" stroke="${C.cageBd}" stroke-width="0.8"/>`);
+    out.push(`<rect x="${n(px + psuW / 2 - 6)}" y="${n(psuY + psuH / 2 - 4)}" width="12" height="8" rx="1" fill="${C.notch}" stroke="${C.jackBd}" stroke-width="0.6"/>`);
+    out.push(`<circle cx="${n(px + 6)}" cy="${n(psuY + 5)}" r="1.6" fill="url(#rkLedG)"/>`);
+  }
+
+  // fan grilles (center): rings + hub + spokes
+  const fanR = Math.min(p.h * 0.34, 11);
+  const cy = p.y + p.h / 2;
+  for (let i = 0; i < 2; i++) {
+    const fx = p.x + 64 + i * (fanR * 2 + 8);
+    out.push(`<circle cx="${n(fx)}" cy="${n(cy)}" r="${n(fanR)}" fill="none" stroke="${C.ghostHatch}" stroke-width="1.1"/>`);
+    out.push(`<circle cx="${n(fx)}" cy="${n(cy)}" r="${n(fanR * 0.3)}" fill="${C.ghostHatch}"/>`);
+    for (const a of [0, 60, 120]) {
+      const rad = (a * Math.PI) / 180;
+      out.push(`<line x1="${n(fx - fanR * Math.cos(rad))}" y1="${n(cy - fanR * Math.sin(rad))}" x2="${n(fx + fanR * Math.cos(rad))}" y2="${n(cy + fanR * Math.sin(rad))}" stroke="${C.ghostHatch}" stroke-width="0.6"/>`);
+    }
+  }
   return out;
 }
