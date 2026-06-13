@@ -8,6 +8,15 @@ minor/patch semantics are not yet enforced.
 
 ### Added
 
+- **Rack canvas navigation + A/B power (v0.6.0).**
+  - **Pan + zoom** on the multi-rack canvas: wheel-zoom anchored to the cursor, drag-to-pan,
+    fit-to-screen, and a zoom control cluster. The canvas no longer just scrolls — large
+    fleets are navigable. (Crisp vector zoom via an SVG transform.)
+  - **A/B power feeds.** Each device cords into feed A, B, or A+B (redundant PSUs); the
+    fleet capacity strip shows per-feed load (`⚡ A x · B y kW`) and flags single-corded
+    devices that have no power redundancy. Per-feed failover load is modeled too (what each
+    feed must carry if the other dies).
+
 - **Rack Designer Pro — power, planning, and at-a-glance ops (v0.5.0).** A big batch of
   rack-designer upgrades:
   - **Realistic power/weight budgets.** Every device now carries nominal watts + weight, so
