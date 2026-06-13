@@ -18,6 +18,7 @@ import {
 } from './buildRackSvg';
 import { analyzeCabling } from './rackHealth';
 import { rackBudget, fleetBudget } from './rackBudget';
+import { powerFeedAnalysis } from './rackPower';
 import { slotOf, canFit, nearestFreeU, isFullDepth, orderRacks, type FitResult } from './rackModel';
 import { RACK_DEVICE_PRESETS, RACK_PRESET_GROUPS, type RackDevicePreset } from './rackDevicePresets';
 import { RACK_PRESETS, rackFieldsFromPreset, DEFAULT_RACK_PRESET } from './rackTypes';
@@ -473,6 +474,20 @@ export function RackDesigner() {
                   <span><b>{f.usedU}</b>/{f.totalU}U used · <b>{f.freeU}</b> free ({pct}%)</span>
                   <span><b>{(f.watts / 1000).toFixed(2)}</b> kW{f.maxWatts > 0 ? ` / ${(f.maxWatts / 1000).toFixed(2)} kW` : ''}</span>
                   <span><b>{f.weightKg.toFixed(0)}</b> kg</span>
+                  {(() => {
+                    const pf = powerFeedAnalysis(devices);
+                    if (pf.normalA + pf.normalB <= 0) return null;
+                    return (
+                      <>
+                        <span title="Per-feed power load (dual-corded gear splits A/B)">⚡ A <b>{(pf.normalA / 1000).toFixed(2)}</b> · B <b>{(pf.normalB / 1000).toFixed(2)}</b> kW</span>
+                        {pf.singleCorded > 0 && (
+                          <span className={styles.capOver} title="Single-corded devices have no A/B power redundancy">
+                            ⚠ {pf.singleCorded} single-corded
+                          </span>
+                        )}
+                      </>
+                    );
+                  })()}
                   {f.anyOver && <span className={styles.capOver}>⚠ over capacity</span>}
                 </div>
               );
