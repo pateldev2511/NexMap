@@ -20,24 +20,37 @@ export interface RackBudget {
   overWeight: boolean;
 }
 
-export function rackBudget(rack: Rack, devices: Device[]): RackBudget {
-  const inRack = devices.filter((d) => d.rackId === rack.id && d.ru != null);
-
-  // Count DISTINCT occupied U across both faces (front+rear at the same U share the depth;
-  // left+right half-bays share their U). Rail-mounted (0U) gear never consumes U.
+/**
+ * The set of physical U occupied by rack-mounted gear (rail items are 0U → never counted).
+ * Pass `side` to count one face only (drives the per-face occupancy heatmap); omit it to
+ * count distinct U across both faces (the U-budget). Pure.
+ */
+export function occupiedUnits(rack: Rack, devices: Device[], side?: 'front' | 'rear'): Set<number> {
   const occupied = new Set<number>();
-  let watts = 0;
-  let weightKg = 0;
-  for (const d of inRack) {
-    watts += d.watts ?? 0;
-    weightKg += d.weightKg ?? 0;
+  for (const d of devices) {
+    if (d.rackId !== rack.id || d.ru == null) continue;
     if ((d.mount ?? 'rack') === 'rail') continue;
+    if (side && (d.side ?? 'front') !== side) continue;
     const base = d.ru ?? 1;
     const span = d.ruSpan ?? 1;
     for (let u = base; u < base + span; u++) {
       if (u >= 1 && u <= rack.ruHeight) occupied.add(u);
     }
   }
+  return occupied;
+}
+
+export function rackBudget(rack: Rack, devices: Device[]): RackBudget {
+  const inRack = devices.filter((d) => d.rackId === rack.id && d.ru != null);
+
+  let watts = 0;
+  let weightKg = 0;
+  for (const d of inRack) {
+    watts += d.watts ?? 0;
+    weightKg += d.weightKg ?? 0;
+  }
+  // Distinct U across both faces (front+rear share depth; half-bays share their U).
+  const occupied = occupiedUnits(rack, devices);
 
   const usedU = occupied.size;
   const freeU = Math.max(0, rack.ruHeight - usedU);

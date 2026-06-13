@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { rackBudget, fleetBudget } from './rackBudget';
+import { rackBudget, fleetBudget, occupiedUnits } from './rackBudget';
 import type { Device, Rack } from '@/model/types';
 
 const rack = (over: Partial<Rack> = {}): Rack => ({ id: 'r1', name: 'R', ruHeight: 42, ...over });
@@ -84,5 +84,19 @@ describe('fleetBudget — aggregate across racks', () => {
   it('is zero/clean for no racks', () => {
     const f = fleetBudget([], []);
     expect(f).toMatchObject({ rackCount: 0, totalU: 0, usedU: 0, freeU: 0, watts: 0, anyOver: false });
+  });
+});
+
+describe('occupiedUnits — per-face occupancy (heatmap source)', () => {
+  it('marks each spanned U, honors the side filter, and skips rail gear', () => {
+    const r = rack({ ruHeight: 10 });
+    const ds: Device[] = [
+      dev({ id: 'f', ru: 1, ruSpan: 2, side: 'front' }),       // front U1,2
+      dev({ id: 'b', ru: 5, ruSpan: 1, side: 'rear' }),        // rear U5
+      dev({ id: 'p', ru: 1, ruSpan: 6, mount: 'rail' }),       // rail → ignored
+    ];
+    expect([...occupiedUnits(r, ds, 'front')].sort((a, c) => a - c)).toEqual([1, 2]);
+    expect([...occupiedUnits(r, ds, 'rear')]).toEqual([5]);
+    expect(occupiedUnits(r, ds).size).toBe(3); // both faces, no rail
   });
 });

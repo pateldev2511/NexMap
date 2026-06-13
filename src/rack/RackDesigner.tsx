@@ -22,6 +22,7 @@ import { RACK_DEVICE_PRESETS, RACK_PRESET_GROUPS, type RackDevicePreset } from '
 import { RACK_PRESETS, rackFieldsFromPreset, DEFAULT_RACK_PRESET } from './rackTypes';
 import { RackTemplatePicker } from './RackTemplatePicker';
 import type { RackTemplate } from './rackTemplates';
+import { COLOR_BY_MODES, colorByLegend, type ColorByMode } from './rackColorBy';
 import styles from './RackDesigner.module.css';
 
 /** Human-readable reason for a rejected drop. */
@@ -66,6 +67,7 @@ export function RackDesigner() {
   const [bay, setBay] = useState<'full' | 'left' | 'right'>('full');
   const [selCable, setSelCable] = useState<string | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [colorBy, setColorBy] = useState<ColorByMode>('gear');
   const [search, setSearch] = useState('');
   const [deviceSearch, setDeviceSearch] = useState('');
   const [exportMode, setExportMode] = useState<ExportMode>('diagram');
@@ -345,9 +347,14 @@ export function RackDesigner() {
         <button className={`${styles.btn} ${showTemplates ? styles.primary : ''}`} title="Insert a pre-made rack template" onClick={() => setShowTemplates((v) => !v)}>Templates</button>
         <button className={styles.btn} title="Duplicate the focused rack with its gear + cabling" onClick={cloneCurrentRack}>Clone</button>
         {view === 'row' ? (
-          <button className={`${styles.btn} ${!showRear ? styles.primary : ''}`} title="Show or hide the rear face of every rack" onClick={() => setShowRear((v) => !v)}>
-            {showRear ? 'Hide rear' : 'Show rear'}
-          </button>
+          <>
+            <button className={`${styles.btn} ${!showRear ? styles.primary : ''}`} title="Show or hide the rear face of every rack" onClick={() => setShowRear((v) => !v)}>
+              {showRear ? 'Hide rear' : 'Show rear'}
+            </button>
+            <select value={colorBy} onChange={(e) => setColorBy(e.target.value as ColorByMode)} title="Tint devices by an attribute to scan the fleet">
+              {COLOR_BY_MODES.map((m) => <option key={m.value} value={m.value}>Color: {m.label}</option>)}
+            </select>
+          </>
         ) : (
           <>
             <select value={rack.id} onChange={(e) => setRackId(e.target.value)} title="Jump to another rack">
@@ -463,6 +470,20 @@ export function RackDesigner() {
                 </div>
               );
             })()}
+            {colorBy !== 'gear' && (() => {
+              const legend = colorByLegend(devices, colorBy);
+              if (legend.length === 0) return null;
+              return (
+                <div className={styles.capacityStrip} style={{ marginTop: -6 }} role="group" aria-label="Color legend">
+                  {legend.map((e) => (
+                    <span key={e.value} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ width: 11, height: 11, borderRadius: 3, background: e.color, display: 'inline-block' }} />
+                      {e.value}
+                    </span>
+                  ))}
+                </div>
+              );
+            })()}
             <RackRow
               racks={racks}
               devices={devices}
@@ -470,6 +491,7 @@ export function RackDesigner() {
               selectedId={selectedId}
               searchHits={searchHits}
               showRear={showRear}
+              colorBy={colorBy}
               onFocusRack={(id) => { setRackId(id); setView('focus'); }}
               onSelect={(id) => s().select(id ? [id] : [])}
               onReorder={reorderRack}
