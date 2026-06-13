@@ -22,7 +22,7 @@ import {
   type Rect,
   type RackPlacement,
 } from './rackLayout';
-import { slotOf } from './rackModel';
+import { slotOf, orderRacks } from './rackModel';
 import { deviceFaceParts, deviceGhostParts, RACK_ART_DEFS } from './rackDeviceArt';
 
 /** Literal-hex CABINET-CHROME palette (device colors now live in rackDeviceArt.ts). */
@@ -197,6 +197,63 @@ export function buildRackRowSvg(
     }
   });
 
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.round(width)}" height="${Math.round(height)}" viewBox="0 0 ${Math.round(width)} ${Math.round(height)}">` +
+    parts.join('') +
+    `</svg>`
+  );
+}
+
+/**
+ * Printable label sheet (schema v3): one cut-out label per mounted device with its name,
+ * rack + U position, and model — the physical-install handoff. Pure, literal-hex, escaped
+ * text, integer dims; rasterizes/PDFs through the same pipeline as the elevation. Rail gear
+ * (PDUs) is included since it still needs a label.
+ */
+export function buildLabelSheetSvg(
+  racks: Rack[],
+  devices: Device[],
+  opts: { background?: string | null } = {},
+): string {
+  const cols = 3;
+  const cw = 230, ch = 48, padX = 16, padY = 16, gap = 10, headH = 26;
+  const cells: { rack: string; name: string; sub: string; model: string }[] = [];
+  for (const rack of orderRacks(racks)) {
+    const inRack = devices
+      .filter((d) => d.rackId === rack.id && d.ru != null)
+      .sort((a, b) => (b.ru ?? 0) - (a.ru ?? 0));
+    for (const d of inRack) {
+      const s = slotOf(d);
+      const top = (d.ru ?? 0) + (s.ruSpan - 1);
+      const uLabel = s.ruSpan > 1 ? `U${d.ru}–U${top}` : `U${d.ru}`;
+      cells.push({
+        rack: rack.name,
+        name: d.name,
+        sub: `${rack.name} · ${uLabel} · ${s.side}`,
+        model: [d.vendor, d.model].filter(Boolean).join(' '),
+      });
+    }
+  }
+
+  const rows = Math.max(1, Math.ceil(cells.length / cols));
+  const width = padX * 2 + cols * cw + (cols - 1) * gap;
+  const height = padY * 2 + headH + rows * (ch + gap);
+  const parts: string[] = [];
+  if (opts.background) parts.push(`<rect x="0" y="0" width="${width}" height="${height}" fill="${escapeXml(opts.background)}"/>`);
+  parts.push(`<text x="${padX}" y="${padY + 14}" font-family="ui-sans-serif,system-ui,sans-serif" font-size="15" font-weight="700" fill="${C.title}">Rack labels · ${cells.length}</text>`);
+  if (cells.length === 0) {
+    parts.push(`<text x="${padX}" y="${padY + headH + 16}" font-family="ui-sans-serif,system-ui,sans-serif" font-size="12" fill="${C.uNum}">No mounted devices.</text>`);
+  }
+  cells.forEach((c, i) => {
+    const col = i % cols, row = Math.floor(i / cols);
+    const x = padX + col * (cw + gap);
+    const y = padY + headH + row * (ch + gap);
+    parts.push(`<rect x="${x}" y="${y}" width="${cw}" height="${ch}" rx="4" fill="#ffffff" stroke="#c4ccd6" stroke-width="1"/>`);
+    parts.push(`<rect x="${x}" y="${y}" width="4" height="${ch}" fill="#0e7490"/>`);
+    parts.push(`<text x="${x + 12}" y="${y + 19}" font-family="ui-sans-serif,system-ui,sans-serif" font-size="13" font-weight="700" fill="#15212e">${escapeXml(c.name)}</text>`);
+    parts.push(`<text x="${x + 12}" y="${y + 34}" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#5b6573">${escapeXml(c.sub)}</text>`);
+    if (c.model) parts.push(`<text x="${x + 12}" y="${y + 45}" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#8a93a0">${escapeXml(c.model)}</text>`);
+  });
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.round(width)}" height="${Math.round(height)}" viewBox="0 0 ${Math.round(width)} ${Math.round(height)}">` +
     parts.join('') +

@@ -9,6 +9,7 @@ import { ConnectPortsDialog } from './ConnectPortsDialog';
 import {
   buildRackSvg,
   buildRackRowFacesSvg,
+  buildLabelSheetSvg,
   buildConnectionsTableSvg,
   composeExport,
   cableScheduleCsv,
@@ -333,6 +334,11 @@ export function RackDesigner() {
     const csv = cableScheduleCsv(devices, cables);
     downloadBlob(new Blob([csv], { type: 'text/csv' }), `${exportName()}-cables.csv`);
   }
+  function exportLabels() {
+    rasterize(buildLabelSheetSvg(racks, devices, { background: '#ffffff' }), { scale: 2, mimeType: 'image/png', background: null })
+      .then(({ blob }) => downloadBlob(blob, `${exportName()}-labels.png`))
+      .catch(() => undefined);
+  }
 
   return (
     <div className={styles.root}>
@@ -388,6 +394,7 @@ export function RackDesigner() {
           <option value="table-only">Table only</option>
         </select>
         <button className={styles.btn} onClick={exportCsv}>Cable CSV</button>
+        <button className={styles.btn} title="Printable label strips for every device" onClick={exportLabels}>Labels</button>
         <button className={styles.btn} onClick={exportPdf}>PDF</button>
         <button className={`${styles.btn} ${styles.primary}`} onClick={exportPng}>Export PNG</button>
       </div>

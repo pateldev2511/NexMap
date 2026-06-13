@@ -3,6 +3,7 @@ import {
   buildRackSvg,
   buildRackRowSvg,
   buildRackRowFacesSvg,
+  buildLabelSheetSvg,
   buildConnectionsTableSvg,
   composeExport,
   cableScheduleRows,
@@ -186,5 +187,25 @@ describe('buildConnectionsTableSvg + composeExport (E2 export modes)', () => {
     const h = Number(both.match(/height="(\d+)"/)![1]);
     const rh = Number(rackSvg.match(/height="(\d+)"/)![1]);
     expect(h).toBeGreaterThan(rh);
+  });
+});
+
+describe('buildLabelSheetSvg — printable labels', () => {
+  it('emits a label per mounted device with name + rack/U, escaped, integer dims', () => {
+    const svg = buildLabelSheetSvg([rack], [sw, srv], {});
+    expect(svg).toContain('Rack labels · 2');
+    expect(svg).toContain('core-sw');
+    expect(svg).toContain('esxi-01');
+    expect(svg).toContain('U40'); // sw at U40
+    expect(svg).toContain('U36–U37'); // srv is 2U at U36
+    expect(svg).toContain('MDF &quot;Main&quot;'); // rack name escaped
+    const m = svg.match(/width="(\d+)" height="(\d+)"/);
+    expect(Number.isInteger(Number(m![1]))).toBe(true);
+  });
+
+  it('handles an empty rack without crashing', () => {
+    const svg = buildLabelSheetSvg([rack], [], {});
+    expect(svg).toContain('Rack labels · 0');
+    expect(svg).toContain('No mounted devices');
   });
 });
