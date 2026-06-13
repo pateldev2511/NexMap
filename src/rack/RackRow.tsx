@@ -19,8 +19,9 @@ import {
   RACK_GUTTER,
 } from './rackLayout';
 import { slotOf } from './rackModel';
-import { rackBudget } from './rackBudget';
-import { deviceFaceParts, RACK_ART_DEFS } from './rackDeviceArt';
+import { rackBudget, occupiedUnits } from './rackBudget';
+import { deviceFaceParts, deviceGhostParts, RACK_ART_DEFS } from './rackDeviceArt';
+import { deviceColorBy, type ColorByMode } from './rackColorBy';
 import styles from './RackDesigner.module.css';
 
 export interface RackRowProps {
@@ -30,6 +31,7 @@ export interface RackRowProps {
   selectedId: string | null;
   searchHits: Set<string>;
   showRear: boolean;
+  colorBy: ColorByMode;
   onFocusRack: (rackId: string) => void;
   onSelect: (deviceId: string | null) => void;
   onReorder: (rackId: string, dir: -1 | 1) => void;
@@ -39,7 +41,7 @@ export interface RackRowProps {
 const FACE_GAP = 22;
 
 export function RackRow({
-  racks, devices, cables, selectedId, searchHits, showRear,
+  racks, devices, cables, selectedId, searchHits, showRear, colorBy,
   onFocusRack, onSelect, onReorder,
 }: RackRowProps) {
   // Front (and optionally rear) column per rack, laid out left-to-right.
@@ -90,6 +92,30 @@ export function RackRow({
         {Array.from({ length: rack.ruHeight }, (_, k) => k + 1).filter((u) => u % 5 === 0 || u === 1).map((u) => (
           <text key={u} x={origin.x - 6} y={origin.y + uLabelCenterY(rack, u) + 3} textAnchor="end" fontSize={8} fontFamily="var(--font-mono)" fill="var(--chrome-fg-muted)">{u}</text>
         ))}
+        {/* occupancy heatmap — a per-U track on the left edge: filled = used, faint = free */}
+        {(() => {
+          const occ = occupiedUnits(rack, devices, face);
+          return Array.from({ length: rack.ruHeight }, (_, k) => k + 1).map((u) => (
+            <rect
+              key={`heat-${u}`}
+              x={origin.x - 3.5}
+              y={origin.y + uLabelCenterY(rack, u) - U_PX / 2 + 0.5}
+              width={2.5}
+              height={U_PX - 1}
+              fill={occ.has(u) ? 'var(--accent)' : 'var(--chrome-border)'}
+              fillOpacity={occ.has(u) ? 0.6 : 0.22}
+            />
+          ));
+        })()}
+        {/* When the rear column is hidden, ghost rear gear onto the front so its U doesn't
+            read as empty (full-depth chassis occupy both faces). */}
+        {face === 'front' && !showRear && devices
+          .filter((d) => d.rackId === rack.id && d.ru != null && slotOf(d).side === 'rear' && slotOf(d).mount !== 'rail')
+          .map((d) => {
+            const r = deviceRect(rack, d);
+            const panel = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
+            return <g key={`ghost-${d.id}`} pointerEvents="none" dangerouslySetInnerHTML={{ __html: deviceGhostParts(d, panel, 'front').join('') }} />;
+          })}
         {/* devices on this face — realistic shared art + select/search overlay */}
         {devices.filter((d) => d.rackId === rack.id && d.ru != null && slotOf(d).side === face).map((d) => {
           const r = deviceRect(rack, d);
@@ -98,7 +124,11 @@ export function RackRow({
           const hit = searchHits.has(d.id);
           return (
             <g key={d.id} onClick={(e) => { e.stopPropagation(); onSelect(d.id); onFocusRack(rack.id); }} style={{ cursor: 'pointer' }}>
-              <g dangerouslySetInnerHTML={{ __html: deviceFaceParts(d, panel).join('') }} />
+              <g dangerouslySetInnerHTML={{ __html: deviceFaceParts(d, panel, face).join('') }} />
+              {colorBy !== 'gear' && (() => {
+                const tint = deviceColorBy(d, colorBy);
+                return tint ? <rect x={panel.x} y={panel.y} width={panel.w} height={panel.h} rx={3} fill={tint} fillOpacity={0.6} pointerEvents="none" /> : null;
+              })()}
               <rect x={panel.x} y={panel.y} width={panel.w} height={panel.h} fill="transparent" />
               {(sel || hit) && (
                 <rect x={panel.x} y={panel.y} width={panel.w} height={panel.h} rx={3} fill="none"

@@ -15,6 +15,7 @@ const slot = (over: Partial<Slot> = {}): Slot => ({
   mount: 'rack',
   side: 'front',
   bay: 'full',
+  depth: 'full',
   ...over,
 });
 
@@ -53,6 +54,25 @@ describe('placeInRack', () => {
     expect(s().placeInRack(d, r, slot({ ru: 40 }))).toEqual({ ok: true }); // same spot, no self-collision
     expect(s().placeInRack(d, r, slot({ ru: 10 }))).toEqual({ ok: true });
     expect(s().getDevice(d)!.ru).toBe(10);
+  });
+
+  it('a full-depth chassis on the rear blocks the same U on the front', () => {
+    const r = s().addRack('MDF');
+    const back = s().addDeviceAt('switch', 0, 0); // full-depth
+    const front = s().addDeviceAt('switch', 0, 0); // full-depth
+    expect(s().placeInRack(back, r, slot({ ru: 20, side: 'rear' }))).toEqual({ ok: true });
+    // front device at the same U collides with the rear chassis (occupies both faces)
+    expect(s().placeInRack(front, r, slot({ ru: 20, side: 'front' }))).toEqual({ ok: false, reason: 'occupied' });
+    // but a different U on the front is fine
+    expect(s().placeInRack(front, r, slot({ ru: 10, side: 'front' }))).toEqual({ ok: true });
+  });
+
+  it('shallow gear (patch panel) on opposite faces can share one U', () => {
+    const r = s().addRack('MDF');
+    const rear = s().addDeviceAt('patch-panel', 0, 0); // shallow
+    const front = s().addDeviceAt('patch-panel', 0, 0); // shallow
+    expect(s().placeInRack(rear, r, slot({ ru: 20, side: 'rear' }))).toEqual({ ok: true });
+    expect(s().placeInRack(front, r, slot({ ru: 20, side: 'front' }))).toEqual({ ok: true });
   });
 
   it('unmountFromRack clears placement', () => {

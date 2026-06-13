@@ -9,6 +9,7 @@ import { ConnectPortsDialog } from './ConnectPortsDialog';
 import {
   buildRackSvg,
   buildRackRowFacesSvg,
+  buildLabelSheetSvg,
   buildConnectionsTableSvg,
   composeExport,
   cableScheduleCsv,
@@ -16,10 +17,13 @@ import {
   type ExportMode,
 } from './buildRackSvg';
 import { analyzeCabling } from './rackHealth';
-import { rackBudget } from './rackBudget';
-import { slotOf, canFit, nearestFreeU, orderRacks, type FitResult } from './rackModel';
+import { rackBudget, fleetBudget } from './rackBudget';
+import { slotOf, canFit, nearestFreeU, isFullDepth, orderRacks, type FitResult } from './rackModel';
 import { RACK_DEVICE_PRESETS, RACK_PRESET_GROUPS, type RackDevicePreset } from './rackDevicePresets';
 import { RACK_PRESETS, rackFieldsFromPreset, DEFAULT_RACK_PRESET } from './rackTypes';
+import { RackTemplatePicker } from './RackTemplatePicker';
+import type { RackTemplate } from './rackTemplates';
+import { COLOR_BY_MODES, colorByLegend, type ColorByMode } from './rackColorBy';
 import styles from './RackDesigner.module.css';
 
 /** Human-readable reason for a rejected drop. */
@@ -63,6 +67,8 @@ export function RackDesigner() {
   const [side, setSideState] = useState<'front' | 'rear'>('front');
   const [bay, setBay] = useState<'full' | 'left' | 'right'>('full');
   const [selCable, setSelCable] = useState<string | null>(null);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [colorBy, setColorBy] = useState<ColorByMode>('gear');
   const [search, setSearch] = useState('');
   const [deviceSearch, setDeviceSearch] = useState('');
   const [exportMode, setExportMode] = useState<ExportMode>('diagram');
@@ -147,6 +153,9 @@ export function RackDesigner() {
               </select>{' '}
               <button className={`${styles.btn} ${styles.primary}`} onClick={createRack}>+ New rack</button>
             </div>
+            <div className={styles.templatesWrap}>
+              <RackTemplatePicker onApply={applyTemplate} />
+            </div>
           </div>
         </div>
       </div>
@@ -160,19 +169,28 @@ export function RackDesigner() {
     setRackId(id);
   }
 
+  function applyTemplate(t: RackTemplate) {
+    const ids = s().applyRackTemplate(t);
+    if (ids[0]) setRackId(ids[0]);
+    setView('row');
+    setShowTemplates(false);
+  }
+
   /** Shared by click-to-place AND drag-and-drop: validate, then create + mount, or reject. */
   function placePreset(preset: RackDevicePreset, u: number) {
     if (!rack) return;
     const span = preset.span;
     const mount = preset.mount ?? 'rack';
     const useBay = mount === 'rail' ? 'full' : bay; // rail items span the channel
+    const depth = isFullDepth(preset.type) ? 'full' : 'shallow';
     const slot = {
       ru: Math.min(u, rack.ruHeight - span + 1),
       ruSpan: span,
       mount,
       side,
       bay: useBay,
-    };
+      depth,
+    } as const;
     const occ = devices.filter((d) => d.rackId === rack.id);
     // Pre-check BEFORE creating anything — never leave an orphan device on rejection.
     const fit = canFit(rack, occ, slot);
@@ -181,7 +199,7 @@ export function RackDesigner() {
         u: slot.ru,
         span,
         reason: rejectReason(fit),
-        pulseU: nearestFreeU(rack, occ, span, slot.ru, side, useBay),
+        pulseU: nearestFreeU(rack, occ, span, slot.ru, side, useBay, depth),
       });
       window.setTimeout(() => setReject(null), 2400);
       return;
@@ -199,7 +217,11 @@ export function RackDesigner() {
     const ifaces = preset.ports > 0
       ? Array.from({ length: preset.ports }, (_, i) => createInterface(preset.portName(i)))
       : [];
-    s().updateDevice(id, { name: base, interfaces: [] }, { name, interfaces: ifaces });
+    s().updateDevice(
+      id,
+      { name: base, interfaces: [], watts: undefined, weightKg: undefined },
+      { name, interfaces: ifaces, watts: preset.watts || undefined, weightKg: preset.weightKg || undefined },
+    );
     s().placeInRack(id, rack.id, slot);
     s().select([id]);
   }
@@ -265,7 +287,7 @@ export function RackDesigner() {
     const sl = slotOf(d);
     const occ = devices.filter((x) => x.rackId === targetRackId);
     const wanted = Math.max(1, Math.min(sl.ru, target.ruHeight - sl.ruSpan + 1));
-    const u = nearestFreeU(target, occ, sl.ruSpan, wanted, sl.side, sl.bay);
+    const u = nearestFreeU(target, occ, sl.ruSpan, wanted, sl.side, sl.bay, sl.depth);
     const showReject = (reason: string) => {
       setReject({ u: wanted, span: sl.ruSpan, reason, pulseU: null });
       window.setTimeout(() => setReject(null), 2400);
@@ -312,6 +334,11 @@ export function RackDesigner() {
     const csv = cableScheduleCsv(devices, cables);
     downloadBlob(new Blob([csv], { type: 'text/csv' }), `${exportName()}-cables.csv`);
   }
+  function exportLabels() {
+    rasterize(buildLabelSheetSvg(racks, devices, { background: '#ffffff' }), { scale: 2, mimeType: 'image/png', background: null })
+      .then(({ blob }) => downloadBlob(blob, `${exportName()}-labels.png`))
+      .catch(() => undefined);
+  }
 
   return (
     <div className={styles.root}>
@@ -323,11 +350,17 @@ export function RackDesigner() {
           <span className={styles.stat}>{racks.length} rack{racks.length === 1 ? '' : 's'} · click one to edit</span>
         )}
         <button className={styles.btn} onClick={createRack}>+ Rack</button>
+        <button className={`${styles.btn} ${showTemplates ? styles.primary : ''}`} title="Insert a pre-made rack template" onClick={() => setShowTemplates((v) => !v)}>Templates</button>
         <button className={styles.btn} title="Duplicate the focused rack with its gear + cabling" onClick={cloneCurrentRack}>Clone</button>
         {view === 'row' ? (
-          <button className={`${styles.btn} ${!showRear ? styles.primary : ''}`} title="Show or hide the rear face of every rack" onClick={() => setShowRear((v) => !v)}>
-            {showRear ? 'Hide rear' : 'Show rear'}
-          </button>
+          <>
+            <button className={`${styles.btn} ${!showRear ? styles.primary : ''}`} title="Show or hide the rear face of every rack" onClick={() => setShowRear((v) => !v)}>
+              {showRear ? 'Hide rear' : 'Show rear'}
+            </button>
+            <select value={colorBy} onChange={(e) => setColorBy(e.target.value as ColorByMode)} title="Tint devices by an attribute to scan the fleet">
+              {COLOR_BY_MODES.map((m) => <option key={m.value} value={m.value}>Color: {m.label}</option>)}
+            </select>
+          </>
         ) : (
           <>
             <select value={rack.id} onChange={(e) => setRackId(e.target.value)} title="Jump to another rack">
@@ -361,6 +394,7 @@ export function RackDesigner() {
           <option value="table-only">Table only</option>
         </select>
         <button className={styles.btn} onClick={exportCsv}>Cable CSV</button>
+        <button className={styles.btn} title="Printable label strips for every device" onClick={exportLabels}>Labels</button>
         <button className={styles.btn} onClick={exportPdf}>PDF</button>
         <button className={`${styles.btn} ${styles.primary}`} onClick={exportPng}>Export PNG</button>
       </div>
@@ -413,6 +447,13 @@ export function RackDesigner() {
 
       {/* canvas */}
       <div className={`${styles.stage} ${armed && view === 'focus' ? styles.placing : ''}`} style={view === 'row' ? { flexDirection: 'column', alignItems: 'stretch' } : undefined}>
+        {showTemplates && (
+          <div className={styles.templateOverlay} onClick={() => setShowTemplates(false)}>
+            <div onClick={(e) => e.stopPropagation()}>
+              <RackTemplatePicker onApply={applyTemplate} onClose={() => setShowTemplates(false)} />
+            </div>
+          </div>
+        )}
         {view === 'row' ? (
           <>
             <input
@@ -423,6 +464,33 @@ export function RackDesigner() {
               onChange={(e) => setDeviceSearch(e.target.value)}
               aria-label="Search devices across racks"
             />
+            {(() => {
+              const f = fleetBudget(racks, devices);
+              const pct = f.totalU > 0 ? Math.round((f.usedU / f.totalU) * 100) : 0;
+              return (
+                <div className={styles.capacityStrip} role="status" aria-label="Fleet capacity">
+                  <span><b>{f.rackCount}</b> rack{f.rackCount === 1 ? '' : 's'}</span>
+                  <span><b>{f.usedU}</b>/{f.totalU}U used · <b>{f.freeU}</b> free ({pct}%)</span>
+                  <span><b>{(f.watts / 1000).toFixed(2)}</b> kW{f.maxWatts > 0 ? ` / ${(f.maxWatts / 1000).toFixed(2)} kW` : ''}</span>
+                  <span><b>{f.weightKg.toFixed(0)}</b> kg</span>
+                  {f.anyOver && <span className={styles.capOver}>⚠ over capacity</span>}
+                </div>
+              );
+            })()}
+            {colorBy !== 'gear' && (() => {
+              const legend = colorByLegend(devices, colorBy);
+              if (legend.length === 0) return null;
+              return (
+                <div className={styles.capacityStrip} style={{ marginTop: -6 }} role="group" aria-label="Color legend">
+                  {legend.map((e) => (
+                    <span key={e.value} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ width: 11, height: 11, borderRadius: 3, background: e.color, display: 'inline-block' }} />
+                      {e.value}
+                    </span>
+                  ))}
+                </div>
+              );
+            })()}
             <RackRow
               racks={racks}
               devices={devices}
@@ -430,6 +498,7 @@ export function RackDesigner() {
               selectedId={selectedId}
               searchHits={searchHits}
               showRear={showRear}
+              colorBy={colorBy}
               onFocusRack={(id) => { setRackId(id); setView('focus'); }}
               onSelect={(id) => s().select(id ? [id] : [])}
               onReorder={reorderRack}
@@ -518,7 +587,19 @@ export function RackDesigner() {
           </div>
         )}
         <div className={styles.sec} style={{ flex: 1 }}>
-          <h3>Cable schedule · {cables.length}</h3>
+          <h3>
+            Cable schedule · {cables.length}
+            {cables.some((c) => c.lengthFt == null) && (
+              <button
+                className={styles.btn}
+                style={{ float: 'right', fontSize: 11 }}
+                title="Estimate length (ft) from rack geometry for every cable without one"
+                onClick={() => s().autoLengthRackCables()}
+              >
+                Auto-length
+              </button>
+            )}
+          </h3>
           {cables.length === 0 && (
             <div style={{ fontSize: 12, color: 'var(--chrome-fg-muted)' }}>No cables yet.</div>
           )}
@@ -536,6 +617,7 @@ export function RackDesigner() {
                 <span className={styles.sw} style={{ background: c.color }} />
                 <span className={styles.ep}>{a?.name}:{pn(a, c.aEnd.ifaceId)} → {b?.name}:{pn(b, c.bEnd.ifaceId)}</span>
                 {c.label && <span className={styles.lbl}>{c.label}</span>}
+                {c.lengthFt != null && <span className={styles.lbl}>{c.lengthFt}ft</span>}
                 <button
                   className={styles.x}
                   aria-label="Remove cable"

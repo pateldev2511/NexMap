@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { rackBudget } from './rackBudget';
+import { rackBudget, fleetBudget, occupiedUnits } from './rackBudget';
 import type { Device, Rack } from '@/model/types';
 
 const rack = (over: Partial<Rack> = {}): Rack => ({ id: 'r1', name: 'R', ruHeight: 42, ...over });
@@ -60,5 +60,43 @@ describe('rackBudget — power & weight', () => {
     const b = rackBudget(rack(), [dev({ id: 'x', rackId: 'other', watts: 500 })]);
     expect(b.watts).toBe(0);
     expect(b.usedU).toBe(0);
+  });
+});
+
+describe('fleetBudget — aggregate across racks', () => {
+  it('sums U, power, and weight across every rack and flags any overload', () => {
+    const r1: Rack = { id: 'r1', name: 'A', ruHeight: 10, maxWatts: 100 };
+    const r2: Rack = { id: 'r2', name: 'B', ruHeight: 20 };
+    const devices: Device[] = [
+      { id: 'a', kind: 'device', type: 'server', name: 'a', x: 0, y: 0, width: 56, height: 40, layerId: 'L', rackId: 'r1', ru: 1, ruSpan: 2, mount: 'rack', side: 'front', bay: 'full', watts: 150, weightKg: 10 },
+      { id: 'b', kind: 'device', type: 'server', name: 'b', x: 0, y: 0, width: 56, height: 40, layerId: 'L', rackId: 'r2', ru: 1, ruSpan: 1, mount: 'rack', side: 'front', bay: 'full', watts: 50, weightKg: 5 },
+    ];
+    const f = fleetBudget([r1, r2], devices);
+    expect(f.rackCount).toBe(2);
+    expect(f.totalU).toBe(30);
+    expect(f.usedU).toBe(3); // 2U in r1 + 1U in r2
+    expect(f.freeU).toBe(27);
+    expect(f.watts).toBe(200);
+    expect(f.weightKg).toBe(15);
+    expect(f.anyOver).toBe(true); // r1 draws 150W against a 100W cap
+  });
+
+  it('is zero/clean for no racks', () => {
+    const f = fleetBudget([], []);
+    expect(f).toMatchObject({ rackCount: 0, totalU: 0, usedU: 0, freeU: 0, watts: 0, anyOver: false });
+  });
+});
+
+describe('occupiedUnits — per-face occupancy (heatmap source)', () => {
+  it('marks each spanned U, honors the side filter, and skips rail gear', () => {
+    const r = rack({ ruHeight: 10 });
+    const ds: Device[] = [
+      dev({ id: 'f', ru: 1, ruSpan: 2, side: 'front' }),       // front U1,2
+      dev({ id: 'b', ru: 5, ruSpan: 1, side: 'rear' }),        // rear U5
+      dev({ id: 'p', ru: 1, ruSpan: 6, mount: 'rail' }),       // rail → ignored
+    ];
+    expect([...occupiedUnits(r, ds, 'front')].sort((a, c) => a - c)).toEqual([1, 2]);
+    expect([...occupiedUnits(r, ds, 'rear')]).toEqual([5]);
+    expect(occupiedUnits(r, ds).size).toBe(3); // both faces, no rail
   });
 });

@@ -22,8 +22,8 @@ import {
   type Rect,
   type RackPlacement,
 } from './rackLayout';
-import { slotOf } from './rackModel';
-import { deviceFaceParts, RACK_ART_DEFS } from './rackDeviceArt';
+import { slotOf, orderRacks } from './rackModel';
+import { deviceFaceParts, deviceGhostParts, RACK_ART_DEFS } from './rackDeviceArt';
 
 /** Literal-hex CABINET-CHROME palette (device colors now live in rackDeviceArt.ts). */
 const C = {
@@ -60,10 +60,21 @@ export interface BuildRackSvgOptions {
   background?: string | null;
   /** Which mounting face to render. Default 'front'. */
   side?: 'front' | 'rear';
+  /**
+   * Also draw opposite-face gear as muted "ghosts" so a full-depth chassis on the other
+   * side still reads as occupying its U. Default true for a single-face render; the
+   * both-faces composition turns it off (both faces are already drawn for real).
+   */
+  ghostOpposite?: boolean;
 }
 
 /** Render one cabinet (frame, bay, U labels, on-face devices) at its row offset. */
-function renderCabinet(placement: RackPlacement, mounted: Device[], face: 'front' | 'rear'): string[] {
+function renderCabinet(
+  placement: RackPlacement,
+  mounted: Device[],
+  face: 'front' | 'rear',
+  ghostOpposite = false,
+): string[] {
   const { rack, offsetX, size } = placement;
   const origin = bayOrigin(offsetX);
   const left = offsetX;
@@ -100,13 +111,24 @@ function renderCabinet(placement: RackPlacement, mounted: Device[], face: 'front
     );
   }
 
+  // opposite-face ghosts first (behind), so the U doesn't read as empty for back-mounted gear
+  if (ghostOpposite) {
+    for (const d of mounted) {
+      if (d.rackId !== rack.id || d.ru == null) continue;
+      const s = slotOf(d);
+      if (s.side === face || s.mount === 'rail') continue;
+      const r = deviceRect(rack, d);
+      const panel: Rect = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
+      parts.push(...deviceGhostParts(d, panel, face));
+    }
+  }
   // devices on the requested face — realistic art from the shared generator
   for (const d of mounted) {
     if (d.rackId !== rack.id || d.ru == null) continue;
     if (slotOf(d).side !== face) continue;
     const r = deviceRect(rack, d);
     const panel: Rect = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
-    parts.push(...deviceFaceParts(d, panel));
+    parts.push(...deviceFaceParts(d, panel, face));
   }
   return parts;
 }
@@ -137,9 +159,10 @@ export function buildRackRowSvg(
     }
   }
 
+  const ghostOpposite = opts.ghostOpposite ?? false;
   const parts: string[] = [RACK_ART_DEFS];
   if (opts.background) parts.push(`<rect x="0" y="0" width="${width}" height="${height}" fill="${escapeXml(opts.background)}"/>`);
-  for (const p of placements) parts.push(...renderCabinet(p, devices, face));
+  for (const p of placements) parts.push(...renderCabinet(p, devices, face, ghostOpposite));
 
   // cables (global pass — both endpoints resolved with their own cabinet offset)
   const endPoint = (deviceId: string, ifaceId: string): { x: number; y: number } | null => {
@@ -181,6 +204,63 @@ export function buildRackRowSvg(
   );
 }
 
+/**
+ * Printable label sheet (schema v3): one cut-out label per mounted device with its name,
+ * rack + U position, and model — the physical-install handoff. Pure, literal-hex, escaped
+ * text, integer dims; rasterizes/PDFs through the same pipeline as the elevation. Rail gear
+ * (PDUs) is included since it still needs a label.
+ */
+export function buildLabelSheetSvg(
+  racks: Rack[],
+  devices: Device[],
+  opts: { background?: string | null } = {},
+): string {
+  const cols = 3;
+  const cw = 230, ch = 48, padX = 16, padY = 16, gap = 10, headH = 26;
+  const cells: { rack: string; name: string; sub: string; model: string }[] = [];
+  for (const rack of orderRacks(racks)) {
+    const inRack = devices
+      .filter((d) => d.rackId === rack.id && d.ru != null)
+      .sort((a, b) => (b.ru ?? 0) - (a.ru ?? 0));
+    for (const d of inRack) {
+      const s = slotOf(d);
+      const top = (d.ru ?? 0) + (s.ruSpan - 1);
+      const uLabel = s.ruSpan > 1 ? `U${d.ru}–U${top}` : `U${d.ru}`;
+      cells.push({
+        rack: rack.name,
+        name: d.name,
+        sub: `${rack.name} · ${uLabel} · ${s.side}`,
+        model: [d.vendor, d.model].filter(Boolean).join(' '),
+      });
+    }
+  }
+
+  const rows = Math.max(1, Math.ceil(cells.length / cols));
+  const width = padX * 2 + cols * cw + (cols - 1) * gap;
+  const height = padY * 2 + headH + rows * (ch + gap);
+  const parts: string[] = [];
+  if (opts.background) parts.push(`<rect x="0" y="0" width="${width}" height="${height}" fill="${escapeXml(opts.background)}"/>`);
+  parts.push(`<text x="${padX}" y="${padY + 14}" font-family="ui-sans-serif,system-ui,sans-serif" font-size="15" font-weight="700" fill="${C.title}">Rack labels · ${cells.length}</text>`);
+  if (cells.length === 0) {
+    parts.push(`<text x="${padX}" y="${padY + headH + 16}" font-family="ui-sans-serif,system-ui,sans-serif" font-size="12" fill="${C.uNum}">No mounted devices.</text>`);
+  }
+  cells.forEach((c, i) => {
+    const col = i % cols, row = Math.floor(i / cols);
+    const x = padX + col * (cw + gap);
+    const y = padY + headH + row * (ch + gap);
+    parts.push(`<rect x="${x}" y="${y}" width="${cw}" height="${ch}" rx="4" fill="#ffffff" stroke="#c4ccd6" stroke-width="1"/>`);
+    parts.push(`<rect x="${x}" y="${y}" width="4" height="${ch}" fill="#0e7490"/>`);
+    parts.push(`<text x="${x + 12}" y="${y + 19}" font-family="ui-sans-serif,system-ui,sans-serif" font-size="13" font-weight="700" fill="#15212e">${escapeXml(c.name)}</text>`);
+    parts.push(`<text x="${x + 12}" y="${y + 34}" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#5b6573">${escapeXml(c.sub)}</text>`);
+    if (c.model) parts.push(`<text x="${x + 12}" y="${y + 45}" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#8a93a0">${escapeXml(c.model)}</text>`);
+  });
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.round(width)}" height="${Math.round(height)}" viewBox="0 0 ${Math.round(width)} ${Math.round(height)}">` +
+    parts.join('') +
+    `</svg>`
+  );
+}
+
 /** Single-rack elevation SVG — thin wrapper over the row builder (back-compat). */
 export function buildRackSvg(
   rack: Rack,
@@ -188,7 +268,8 @@ export function buildRackSvg(
   cables: RackCable[],
   opts: BuildRackSvgOptions = {},
 ): string {
-  return buildRackRowSvg([rack], devices, cables, opts);
+  // A single focused rack shows one face → ghost the opposite side (matches the editor).
+  return buildRackRowSvg([rack], devices, cables, { ghostOpposite: true, ...opts });
 }
 
 export interface CableScheduleRow {
@@ -197,17 +278,26 @@ export interface CableScheduleRow {
   from: string;
   to: string;
   lengthFt: string;
+  /** Port VLAN(s): a single id when both ends agree, "a/b" when they differ, "" when unset. */
+  vlan: string;
 }
 
 /** Derive the installer-facing patch list from drawn cables (E3). */
 export function cableScheduleRows(devices: Device[], cables: RackCable[]): CableScheduleRow[] {
   const byId = new Map(devices.map((d) => [d.id, d]));
+  const ifaceOf = (deviceId: string, ifaceId: string) =>
+    byId.get(deviceId)?.interfaces?.find((i) => i.id === ifaceId);
   const endLabel = (deviceId: string, ifaceId: string): string => {
     const dev = byId.get(deviceId);
-    const iface = dev?.interfaces?.find((i) => i.id === ifaceId);
-    const devName = dev?.name ?? deviceId;
-    const portName = iface?.name ?? ifaceId;
-    return `${devName}:${portName}`;
+    const portName = ifaceOf(deviceId, ifaceId)?.name ?? ifaceId;
+    return `${dev?.name ?? deviceId}:${portName}`;
+  };
+  const vlanCol = (c: RackCable): string => {
+    const va = ifaceOf(c.aEnd.deviceId, c.aEnd.ifaceId)?.vlan;
+    const vb = ifaceOf(c.bEnd.deviceId, c.bEnd.ifaceId)?.vlan;
+    if (va == null && vb == null) return '';
+    if (va != null && vb != null) return va === vb ? String(va) : `${va}/${vb}`;
+    return String(va ?? vb);
   };
   return cables.map((c) => ({
     color: c.color,
@@ -215,15 +305,16 @@ export function cableScheduleRows(devices: Device[], cables: RackCable[]): Cable
     from: endLabel(c.aEnd.deviceId, c.aEnd.ifaceId),
     to: endLabel(c.bEnd.deviceId, c.bEnd.ifaceId),
     lengthFt: c.lengthFt != null ? String(c.lengthFt) : '',
+    vlan: vlanCol(c),
   }));
 }
 
 /** CSV patch list. Reuses the simple quoting convention of the existing CSV exports. */
 export function cableScheduleCsv(devices: Device[], cables: RackCable[]): string {
   const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
-  const header = ['Color', 'Label', 'From', 'To', 'Length (ft)'].join(',');
+  const header = ['Color', 'Label', 'From', 'To', 'VLAN', 'Length (ft)'].join(',');
   const rows = cableScheduleRows(devices, cables).map((r) =>
-    [q(r.color), q(r.label), q(r.from), q(r.to), q(r.lengthFt)].join(','),
+    [q(r.color), q(r.label), q(r.from), q(r.to), q(r.vlan), q(r.lengthFt)].join(','),
   );
   return [header, ...rows].join('\n');
 }
@@ -243,12 +334,13 @@ const TBL = {
   border: '#cdd6e0',
   text: '#15212e',
 } as const;
-// [swatch, From, To, Label, Length] — fixed widths keep the literal-hex SVG simple.
-const TBL_COLS: { key: 'color' | 'from' | 'to' | 'label' | 'lengthFt'; label: string; w: number }[] = [
+// [swatch, From, To, Label, VLAN, Length] — fixed widths keep the literal-hex SVG simple.
+const TBL_COLS: { key: 'color' | 'from' | 'to' | 'label' | 'vlan' | 'lengthFt'; label: string; w: number }[] = [
   { key: 'color', label: '', w: 30 },
-  { key: 'from', label: 'From', w: 190 },
-  { key: 'to', label: 'To', w: 190 },
-  { key: 'label', label: 'Label', w: 150 },
+  { key: 'from', label: 'From', w: 180 },
+  { key: 'to', label: 'To', w: 180 },
+  { key: 'label', label: 'Label', w: 130 },
+  { key: 'vlan', label: 'VLAN', w: 60 },
   { key: 'lengthFt', label: 'Length (ft)', w: 90 },
 ];
 
@@ -339,9 +431,11 @@ export function buildRackRowFacesSvg(
   cables: RackCable[],
   opts: { showRear: boolean; background?: string | null },
 ): string {
-  const front = buildRackRowSvg(racks, devices, cables, { background: opts.background, side: 'front' });
+  // Rear hidden → ghost rear gear onto the front row. Rear shown → both rows are drawn for
+  // real, so neither needs ghosts.
+  const front = buildRackRowSvg(racks, devices, cables, { background: opts.background, side: 'front', ghostOpposite: !opts.showRear });
   if (!opts.showRear) return front;
-  const rear = buildRackRowSvg(racks, devices, cables, { background: opts.background, side: 'rear' });
+  const rear = buildRackRowSvg(racks, devices, cables, { background: opts.background, side: 'rear', ghostOpposite: false });
   return vstackSvg(front, rear, opts.background);
 }
 

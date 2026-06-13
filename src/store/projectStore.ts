@@ -26,8 +26,12 @@ import type {
   View,
   Vlan,
 } from '@/model/types';
-import { canFit, type FitResult, type Slot } from '@/rack/rackModel';
+import { canFit, isFullDepth, type FitResult, type Slot } from '@/rack/rackModel';
 import { checkConnect, pruneCablesForInterfaces } from '@/rack/rackCables';
+import { presetByKey } from '@/rack/rackDevicePresets';
+import { estimateCableLengthFt } from '@/rack/cableLength';
+import { rackFieldsFromPreset, rackPresetById, DEFAULT_RACK_PRESET } from '@/rack/rackTypes';
+import type { RackTemplate } from '@/rack/rackTemplates';
 import {
   createDevice,
   createEmptyDocument,
@@ -398,6 +402,8 @@ export interface ProjectStore {
   deleteSubnet(id: string): void;
   subnetsAll(): Subnet[];
   addRack(name: string): string;
+  /** Append a pre-made template's racks+devices to the row in one undoable edit. Returns new rack ids. */
+  applyRackTemplate(template: RackTemplate): string[];
   updateRack(id: string, before: Partial<Rack>, after: Partial<Rack>): void;
   deleteRack(id: string): void;
   /** Deep-copy a rack with its mounted gear and intra-rack cables. Returns the new id. */
@@ -416,6 +422,8 @@ export interface ProjectStore {
     label?: string,
   ): string | null;
   updateRackCable(id: string, before: Partial<RackCable>, after: Partial<RackCable>): void;
+  /** Estimate + fill length (ft) from rack geometry for every cable missing one. Returns count updated. */
+  autoLengthRackCables(): number;
   disconnectRackCable(id: string): void;
   rackCablesAll(): RackCable[];
   getRackCable(id: string): RackCable | undefined;
@@ -1828,6 +1836,46 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
       return newRackId;
     },
+    applyRackTemplate(template) {
+      // Append to the end of the current row so applying a template is never destructive.
+      let order = [...model.racks.values()].length;
+      const cmds: Command[] = [];
+      const newDevices: Device[] = [];
+      const newRackIds: string[] = [];
+      for (const tr of template.racks) {
+        const preset = rackPresetById(tr.rackPresetId) ?? DEFAULT_RACK_PRESET;
+        const rack = createRack(tr.name, preset.ruHeight, { ...rackFieldsFromPreset(preset), order: order++ });
+        newRackIds.push(rack.id);
+        cmds.push(new AddRackCommand(rack));
+        for (const td of tr.devices) {
+          const p = presetByKey(td.presetKey);
+          if (!p) continue;
+          const interfaces = p.ports > 0
+            ? Array.from({ length: p.ports }, (_, i) => createInterface(p.portName(i)))
+            : [];
+          const dev = createDevice(p.type, -9999, -9999, firstLayerId(), {
+            ...(td.name ? { name: td.name } : {}),
+            interfaces,
+            rackId: rack.id,
+            ru: td.ru,
+            ruSpan: p.span,
+            mount: p.mount ?? 'rack',
+            side: td.side ?? 'front',
+            bay: 'full',
+            ...(p.watts ? { watts: p.watts } : {}),
+            ...(p.weightKg ? { weightKg: p.weightKg } : {}),
+          });
+          newDevices.push(dev);
+          cmds.push(new AddDeviceCommand(dev));
+        }
+      }
+      if (!cmds.length) return [];
+      history.dispatch(transaction('Apply template', cmds), model);
+      for (const dv of newDevices) index.insert(dv.id, deviceBox(dv));
+      history.commitCoalesceBoundary();
+      set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
+      return newRackIds;
+    },
     racksAll() {
       return [...model.racks.values()];
     },
@@ -1838,7 +1886,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       const rack = model.racks.get(rackId);
       if (!device || !rack) return { ok: false, reason: 'invalid' };
       const occupants = [...model.devices.values()].filter((d) => d.rackId === rackId);
-      const fit = canFit(rack, occupants, slot, deviceId);
+      // Depth is a property of THIS device's type, not whatever the caller passed — derive it
+      // so a full-depth chassis correctly blocks the opposite face.
+      const candidate: Slot = { ...slot, depth: isFullDepth(device.type) ? 'full' : 'shallow' };
+      const fit = canFit(rack, occupants, candidate, deviceId);
       if (!fit.ok) return fit;
       const before: Partial<Device> = {
         rackId: device.rackId,
@@ -1882,6 +1933,24 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     },
     updateRackCable(id, before, after) {
       commit(new UpdateRackCableCommand(id, before, after));
+    },
+    autoLengthRackCables() {
+      const racks = [...model.racks.values()];
+      const cmds: Command[] = [];
+      for (const c of model.rackCables.values()) {
+        if (c.lengthFt != null) continue; // respect a length the user typed
+        const a = model.devices.get(c.aEnd.deviceId);
+        const b = model.devices.get(c.bEnd.deviceId);
+        if (!a || !b) continue;
+        const est = estimateCableLengthFt(a, b, racks);
+        if (est == null) continue;
+        cmds.push(new UpdateRackCableCommand(c.id, { lengthFt: undefined }, { lengthFt: est }));
+      }
+      if (!cmds.length) return 0;
+      history.dispatch(transaction('Auto-length cables', cmds), model);
+      history.commitCoalesceBoundary();
+      set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
+      return cmds.length;
     },
     disconnectRackCable(id) {
       commit(new DeleteRackCableCommand(id));

@@ -17,6 +17,7 @@ import type { Device } from '@/model/types';
 import { escapeXml } from '@/io/export/buildSvg';
 import { portLayout, type Rect } from './rackLayout';
 import { panelKindFor } from './panelKind';
+import { isFullDepth } from './rackModel';
 
 /** Shared gradient defs. Include ONCE per SVG document (root). */
 export const RACK_ART_DEFS = [
@@ -49,6 +50,11 @@ const C = {
   driveRail: '#2c3744',
   patchText: '#3a4654',
   vent: '#11161d',
+  // opposite-face "ghost" (back of a chassis seen from the other side)
+  ghostFill: '#161b22',
+  ghostBd: '#39424f',
+  ghostHatch: '#2c343f',
+  ghostText: '#6b7787',
 } as const;
 
 const n = (v: number) => v.toFixed(1);
@@ -79,10 +85,49 @@ function chassis(device: Device, p: Rect, opts: { faceplate?: string; led?: stri
 }
 
 /**
+ * "Ghost" art for a device mounted on the OPPOSITE face — drawn on the face you're viewing
+ * so a full-depth chassis on the back still reads as occupying its U from the front (you see
+ * its back panel, not empty space). Muted, hatched, non-glossy, labeled with the real face.
+ * `viewingFace` is the face being rendered; the device actually lives on the other one.
+ */
+export function deviceGhostParts(device: Device, panel: Rect, viewingFace: 'front' | 'rear'): string[] {
+  const realFace = viewingFace === 'front' ? 'rear' : 'front';
+  const { x, y, w, h } = panel;
+  const out: string[] = [
+    // recessed back-panel slab
+    `<rect x="${n(x)}" y="${n(y)}" width="${n(w)}" height="${n(h)}" rx="3" fill="${C.ghostFill}" stroke="${C.ghostBd}" stroke-width="1" stroke-dasharray="4 3"/>`,
+  ];
+  // diagonal hatch so it reads as "behind", not a real faceplate
+  const step = 9;
+  for (let gx = x - h; gx < x + w; gx += step) {
+    const x1 = Math.max(x, gx);
+    const y1 = gx < x ? y + (x - gx) : y;
+    const x2 = Math.min(x + w, gx + h);
+    const y2 = gx + h > x + w ? y + (x + w - gx) : y + h;
+    if (x2 > x1) out.push(`<line x1="${n(x1)}" y1="${n(y1)}" x2="${n(x2)}" y2="${n(y2)}" stroke="${C.ghostHatch}" stroke-width="0.75"/>`);
+  }
+  // back-of-chassis hints: a couple of fan grilles + a PSU block on the right
+  const fanR = Math.min(h * 0.32, 9);
+  const cy = y + h / 2;
+  for (let i = 0; i < 2; i++) {
+    const fx = x + w - 16 - i * (fanR * 2 + 5);
+    out.push(`<circle cx="${n(fx)}" cy="${n(cy)}" r="${n(fanR)}" fill="none" stroke="${C.ghostHatch}" stroke-width="0.9"/>`);
+    out.push(`<circle cx="${n(fx)}" cy="${n(cy)}" r="${n(fanR * 0.32)}" fill="${C.ghostHatch}"/>`);
+  }
+  // label: "rear · name" so it's unambiguous which side the gear is really on
+  out.push(`<text x="${n(x + 7)}" y="${n(y + h / 2 + 3.5)}" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="${C.ghostText}">${realFace} · ${escapeXml(device.name)}</text>`);
+  return out;
+}
+
+/**
  * Front-panel art for one device in ABSOLUTE coords (panel rect already positioned).
  * Returns SVG element strings; the consumer joins + wraps them.
  */
-export function deviceFaceParts(device: Device, panel: Rect): string[] {
+export function deviceFaceParts(device: Device, panel: Rect, face: 'front' | 'rear' = 'front'): string[] {
+  // The rear of a full-depth chassis is power + cooling, not a mirror of the front jacks.
+  if (face === 'rear' && isFullDepth(device.type)) {
+    return [...rearFaceParts(device, panel), ...statusOverlay(device, panel)];
+  }
   const kind = panelKindFor(device.type);
   const ports = (device.interfaces ?? []).map((i) => ({ id: i.id, name: i.name }));
   const out: string[] = [];
@@ -154,6 +199,70 @@ export function deviceFaceParts(device: Device, panel: Rect): string[] {
     for (const sx of [panel.x + 10, panel.x + panel.w - 10]) {
       out.push(`<circle cx="${n(sx)}" cy="${n(panel.y + panel.h / 2)}" r="2.6" fill="#3a4654" stroke="${C.chassisBd}" stroke-width="0.6"/>`);
       out.push(`<path d="M ${n(sx - 1.6)} ${n(panel.y + panel.h / 2)} h 3.2" stroke="${C.notch}" stroke-width="0.7"/>`);
+    }
+  }
+  out.push(...statusOverlay(device, panel));
+  return out;
+}
+
+/** Per-status colors for the lifecycle marker. 'active' has none (the default live state). */
+const STATUS_COLOR: Record<string, string> = {
+  planned: '#3b82f6',
+  maintenance: '#f59e0b',
+  decommissioned: '#ef4444',
+};
+
+/**
+ * Lifecycle tint drawn ON TOP of any device: a corner status dot, a dashed outline for
+ * 'planned', and a faded scrim for 'decommissioned'. 'active'/absent → nothing. Hex-only,
+ * so it rasterizes identically in the editor, the canvas, and the export.
+ */
+function statusOverlay(device: Device, p: Rect): string[] {
+  const status = device.status;
+  if (!status || status === 'active') return [];
+  const color = STATUS_COLOR[status] ?? '#3b82f6';
+  const out: string[] = [];
+  if (status === 'decommissioned') {
+    out.push(`<rect x="${n(p.x)}" y="${n(p.y)}" width="${n(p.w)}" height="${n(p.h)}" rx="3" fill="#0a0e12" fill-opacity="0.42"/>`);
+  }
+  if (status === 'planned') {
+    out.push(`<rect x="${n(p.x + 0.75)}" y="${n(p.y + 0.75)}" width="${n(p.w - 1.5)}" height="${n(p.h - 1.5)}" rx="3" fill="none" stroke="${color}" stroke-width="1.5" stroke-dasharray="5 3"/>`);
+  }
+  // corner status dot (top-left, opposite the chassis status LED)
+  out.push(`<circle cx="${n(p.x + 6)}" cy="${n(p.y + 6)}" r="3" fill="${color}" stroke="#0a0e12" stroke-width="0.6"/>`);
+  return out;
+}
+
+/**
+ * Rear faceplate for a full-depth chassis (schema v3): two redundant PSU modules with
+ * C14 inlets on the right, fan grilles in the middle, and the escaped name — what you'd
+ * actually see from the back of the rack. Hex-only, shared by editor/canvas/export.
+ */
+function rearFaceParts(device: Device, p: Rect): string[] {
+  const out = [chassis(device, p, { led: 'url(#rkLedG)' })];
+
+  // two PSU modules on the right, each with a power inlet + status LED
+  const psuW = 42;
+  const gap = 6;
+  const psuH = Math.min(p.h - 8, 26);
+  const psuY = p.y + (p.h - psuH) / 2;
+  for (let i = 0; i < 2; i++) {
+    const px = p.x + p.w - 8 - (i + 1) * psuW - i * gap;
+    out.push(`<rect x="${n(px)}" y="${n(psuY)}" width="${psuW}" height="${n(psuH)}" rx="2" fill="${C.vent}" stroke="${C.cageBd}" stroke-width="0.8"/>`);
+    out.push(`<rect x="${n(px + psuW / 2 - 6)}" y="${n(psuY + psuH / 2 - 4)}" width="12" height="8" rx="1" fill="${C.notch}" stroke="${C.jackBd}" stroke-width="0.6"/>`);
+    out.push(`<circle cx="${n(px + 6)}" cy="${n(psuY + 5)}" r="1.6" fill="url(#rkLedG)"/>`);
+  }
+
+  // fan grilles (center): rings + hub + spokes
+  const fanR = Math.min(p.h * 0.34, 11);
+  const cy = p.y + p.h / 2;
+  for (let i = 0; i < 2; i++) {
+    const fx = p.x + 64 + i * (fanR * 2 + 8);
+    out.push(`<circle cx="${n(fx)}" cy="${n(cy)}" r="${n(fanR)}" fill="none" stroke="${C.ghostHatch}" stroke-width="1.1"/>`);
+    out.push(`<circle cx="${n(fx)}" cy="${n(cy)}" r="${n(fanR * 0.3)}" fill="${C.ghostHatch}"/>`);
+    for (const a of [0, 60, 120]) {
+      const rad = (a * Math.PI) / 180;
+      out.push(`<line x1="${n(fx - fanR * Math.cos(rad))}" y1="${n(cy - fanR * Math.sin(rad))}" x2="${n(fx + fanR * Math.cos(rad))}" y2="${n(cy + fanR * Math.sin(rad))}" stroke="${C.ghostHatch}" stroke-width="0.6"/>`);
     }
   }
   return out;

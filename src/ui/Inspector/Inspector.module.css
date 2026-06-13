@@ -143,6 +143,20 @@
   flex: 0 0 64px !important;
 }
 
+.ifaceVlan {
+  flex: 0 0 58px !important;
+}
+/* Hide number-input spinners — the field is narrow. */
+.ifaceVlan::-webkit-outer-spin-button,
+.ifaceVlan::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.ifaceVlan {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 .ifaceDel {
   flex: none;
   display: grid;

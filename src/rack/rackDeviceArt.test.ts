@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deviceFaceParts, RACK_ART_DEFS } from './rackDeviceArt';
+import { deviceFaceParts, deviceGhostParts, RACK_ART_DEFS } from './rackDeviceArt';
 import type { Device, DeviceType } from '@/model/types';
 
 const panel = { x: 100, y: 50, w: 560, h: 30 };
@@ -58,5 +58,67 @@ describe('rackDeviceArt — export-safe shared art', () => {
 
   it('handles a device with zero interfaces without crashing', () => {
     expect(() => deviceFaceParts(dev('switch', { interfaces: [] }), panel)).not.toThrow();
+  });
+});
+
+describe('deviceFaceParts — rear faceplate', () => {
+  it('full-depth gear shows a power+cooling rear, not a mirror of the front jacks', () => {
+    const front = join(deviceFaceParts(dev('switch'), panel, 'front'));
+    const rear = join(deviceFaceParts(dev('switch'), panel, 'rear'));
+    expect(rear).not.toBe(front);
+    expect(rear).toContain('<line'); // fan grille spokes
+    expect(rear).not.toContain('notch'); // no front RJ45 jacks on the rear
+    expect(rear).toContain('core-sw'); // name still labeled
+  });
+
+  it('shallow gear (patch panel) renders the same both faces', () => {
+    const front = join(deviceFaceParts(dev('patch-panel'), panel, 'front'));
+    const rear = join(deviceFaceParts(dev('patch-panel'), panel, 'rear'));
+    expect(rear).toBe(front);
+  });
+
+  it('defaults to the front face when not specified', () => {
+    expect(join(deviceFaceParts(dev('switch'), panel))).toBe(join(deviceFaceParts(dev('switch'), panel, 'front')));
+  });
+});
+
+describe('deviceFaceParts — lifecycle status overlay', () => {
+  it('draws nothing extra for active/unset, a dot for planned, a scrim for decommissioned', () => {
+    const base = join(deviceFaceParts(dev('switch'), panel));
+    const active = join(deviceFaceParts(dev('switch', { status: 'active' }), panel));
+    expect(active.length).toBe(base.length); // 'active' adds no overlay
+
+    const planned = join(deviceFaceParts(dev('switch', { status: 'planned' }), panel));
+    expect(planned).toContain('stroke-dasharray="5 3"'); // dashed "planned" outline
+    expect(planned).toContain('#3b82f6'); // planned status color
+
+    const decom = join(deviceFaceParts(dev('switch', { status: 'decommissioned' }), panel));
+    expect(decom).toContain('fill-opacity="0.42"'); // faded scrim
+    expect(decom).toContain('#ef4444'); // decommissioned status color
+  });
+});
+
+describe('deviceGhostParts — opposite-face back-of-chassis', () => {
+  it('labels the real face and the device name, var-free', () => {
+    const svg = join(deviceGhostParts(dev('switch', { name: 'sw-rear' }), panel, 'front'));
+    expect(svg).toContain('rear · sw-rear'); // viewing front → device is on the rear
+    expect(svg).not.toContain('var(');
+    expect(svg).not.toContain('url(#rkLedG)'); // no live link LEDs — it's a ghost
+  });
+
+  it('flips the label when viewing the rear face', () => {
+    const svg = join(deviceGhostParts(dev('server', { name: 'esxi-01' }), panel, 'rear'));
+    expect(svg).toContain('front · esxi-01');
+  });
+
+  it('escapes a hostile device name', () => {
+    const svg = join(deviceGhostParts(dev('switch', { name: 'a"<b' }), panel, 'front'));
+    expect(svg).not.toContain('<b');
+    expect(svg).toContain('&lt;');
+  });
+
+  it('emits a hatched slab (lines) without throwing', () => {
+    expect(() => deviceGhostParts(dev('switch'), panel, 'front')).not.toThrow();
+    expect(join(deviceGhostParts(dev('switch'), panel, 'front'))).toContain('<line');
   });
 });

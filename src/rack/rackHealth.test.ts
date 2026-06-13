@@ -81,6 +81,14 @@ describe('analyzeCabling — per-cable lint', () => {
     expect(codes(r.issues)).toContain('rack-media-mismatch');
   });
 
+  it('warns on VLAN mismatch, and stays quiet when both ends share a VLAN', () => {
+    const a = dev('A', { interfaces: [{ id: 'A-p1', name: 'p1', vlan: 10 }] });
+    const b = dev('B', { interfaces: [{ id: 'B-p2', name: 'p2', vlan: 20 }] });
+    expect(codes(analyzeCabling([a, b], [cable('1', 'A', 'B')]).issues)).toContain('rack-vlan-mismatch');
+    const b2 = dev('B', { interfaces: [{ id: 'B-p2', name: 'p2', vlan: 10 }] });
+    expect(codes(analyzeCabling([a, b2], [cable('1', 'A', 'B')]).issues)).not.toContain('rack-vlan-mismatch');
+  });
+
   it('warns when an endpoint is unmounted', () => {
     const a = dev('A');
     const b = dev('B', { rackId: undefined, ru: undefined });

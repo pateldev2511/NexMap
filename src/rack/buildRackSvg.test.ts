@@ -3,6 +3,7 @@ import {
   buildRackSvg,
   buildRackRowSvg,
   buildRackRowFacesSvg,
+  buildLabelSheetSvg,
   buildConnectionsTableSvg,
   composeExport,
   cableScheduleRows,
@@ -68,15 +69,23 @@ describe('cable schedule (E3)', () => {
   it('derives installer rows with device:port labels', () => {
     const rows = cableScheduleRows([sw, srv], [cable]);
     expect(rows).toEqual([
-      { color: '#22d3ee', label: 'uplink', from: 'core-sw:Gi1/0/1', to: 'esxi-01:vmnic0', lengthFt: '' },
+      { color: '#22d3ee', label: 'uplink', from: 'core-sw:Gi1/0/1', to: 'esxi-01:vmnic0', lengthFt: '', vlan: '' },
     ]);
   });
 
   it('falls back to ids when a name is missing, and CSV-quotes fields', () => {
     const csv = cableScheduleCsv([sw, srv], [cable]);
     const lines = csv.split('\n');
-    expect(lines[0]).toBe('Color,Label,From,To,Length (ft)');
-    expect(lines[1]).toBe('"#22d3ee","uplink","core-sw:Gi1/0/1","esxi-01:vmnic0",""');
+    expect(lines[0]).toBe('Color,Label,From,To,VLAN,Length (ft)');
+    expect(lines[1]).toBe('"#22d3ee","uplink","core-sw:Gi1/0/1","esxi-01:vmnic0","",""');
+  });
+
+  it('shows the VLAN when both ends agree, and "a/b" when they differ', () => {
+    const swV: Device = { ...sw, interfaces: [{ id: 'p1', name: 'Gi1/0/1', vlan: 10 }] };
+    const srvSame: Device = { ...srv, interfaces: [{ id: 'nic0', name: 'vmnic0', vlan: 10 }] };
+    expect(cableScheduleRows([swV, srvSame], [cable])[0]!.vlan).toBe('10');
+    const srvDiff: Device = { ...srv, interfaces: [{ id: 'nic0', name: 'vmnic0', vlan: 20 }] };
+    expect(cableScheduleRows([swV, srvDiff], [cable])[0]!.vlan).toBe('10/20');
   });
 });
 
@@ -131,7 +140,18 @@ describe('buildRackRowSvg — multiple racks in one canvas', () => {
 
     const frontOnly = buildRackRowFacesSvg([rack, rackB], [sw, srv, swB, rearDev], [], { showRear: false, background: '#fff' });
     expect(frontOnly).toContain('· front');
-    expect(frontOnly).not.toContain('· rear');
+    expect(frontOnly).not.toContain('U · rear'); // no rear FACE title (the ghost label is fine)
+    // rear-hidden front-only export GHOSTS the rear switch so its U isn't blank
+    expect(frontOnly).toContain('rear · rear-sw');
+    // ...but when both faces are stacked, no ghost is drawn (the real rear row is there)
+    expect(both).not.toContain('rear · rear-sw');
+  });
+
+  it('a focused single-rack export ghosts the opposite face by default', () => {
+    const rearSw: Device = { ...sw, id: 'rsw', name: 'rear-sw', side: 'rear' };
+    const frontView = buildRackSvg(rack, [sw, rearSw], [], { side: 'front' });
+    expect(frontView).toContain('rear · rear-sw'); // rear gear ghosted onto the front
+    expect(frontView).toContain('core-sw'); // real front device still drawn
   });
 });
 
@@ -167,5 +187,25 @@ describe('buildConnectionsTableSvg + composeExport (E2 export modes)', () => {
     const h = Number(both.match(/height="(\d+)"/)![1]);
     const rh = Number(rackSvg.match(/height="(\d+)"/)![1]);
     expect(h).toBeGreaterThan(rh);
+  });
+});
+
+describe('buildLabelSheetSvg — printable labels', () => {
+  it('emits a label per mounted device with name + rack/U, escaped, integer dims', () => {
+    const svg = buildLabelSheetSvg([rack], [sw, srv], {});
+    expect(svg).toContain('Rack labels · 2');
+    expect(svg).toContain('core-sw');
+    expect(svg).toContain('esxi-01');
+    expect(svg).toContain('U40'); // sw at U40
+    expect(svg).toContain('U36–U37'); // srv is 2U at U36
+    expect(svg).toContain('MDF &quot;Main&quot;'); // rack name escaped
+    const m = svg.match(/width="(\d+)" height="(\d+)"/);
+    expect(Number.isInteger(Number(m![1]))).toBe(true);
+  });
+
+  it('handles an empty rack without crashing', () => {
+    const svg = buildLabelSheetSvg([rack], [], {});
+    expect(svg).toContain('Rack labels · 0');
+    expect(svg).toContain('No mounted devices');
   });
 });

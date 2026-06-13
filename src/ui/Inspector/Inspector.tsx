@@ -6,6 +6,8 @@ import { nextFreeHost } from '@/lib/ipam';
 import { defaultDeviceName } from '@/model/schema';
 import { VENDORS, MODELS, ROLES } from '@/lib/deviceCatalog';
 import { MIN_LINK_WIDTH, MAX_LINK_WIDTH, DEFAULT_LINK_WIDTH } from '@/canvas/connector';
+import { parseVlanId, VLAN_MIN, VLAN_MAX } from '@/rack/vlan';
+import { catalogForType, catalogById, catalogSpecLabel } from '@/rack/rackCatalog';
 import {
   MIN_ICON_SCALE,
   MAX_ICON_SCALE,
@@ -78,6 +80,19 @@ function DeviceInspector({ device }: { device: Device }) {
     );
   }
 
+  /** Fill vendor/model/power/weight from a known catalog model in one undoable edit.
+   *  Deliberately does NOT change a placed device's U-span or rewire ports (safe). */
+  function applyModel(id: string) {
+    const m = catalogById(id);
+    if (!m) return;
+    updateDevice(
+      device.id,
+      { vendor: device.vendor, model: device.model, watts: device.watts, weightKg: device.weightKg },
+      { vendor: m.vendor, model: m.model, watts: m.watts || undefined, weightKg: m.weightKg || undefined },
+    );
+    endEdit();
+  }
+
   const mgmtErr = ipError(device.managementIp);
   const subnetCount = useProjectStore((s) => s.subnetsAll().length);
 
@@ -126,6 +141,21 @@ function DeviceInspector({ device }: { device: Device }) {
             ))}
           </select>
         </Field>
+        {catalogForType(device.type).length > 0 && (
+          <Field label="Hardware model">
+            <select
+              value=""
+              aria-label="Apply a catalog model"
+              title="Fill vendor, power, and weight from a known model"
+              onChange={(e) => { if (e.target.value) applyModel(e.target.value); }}
+            >
+              <option value="">Apply a known model…</option>
+              {catalogForType(device.type).map((m) => (
+                <option key={m.id} value={m.id}>{m.vendor} {m.model} ({catalogSpecLabel(m)})</option>
+              ))}
+            </select>
+          </Field>
+        )}
         <Field label="Vendor">
           <ComboBox
             value={device.vendor ?? ''}
@@ -235,6 +265,34 @@ function DeviceInspector({ device }: { device: Device }) {
       <RackFields device={device} set={set} endEdit={endEdit} />
 
       <div className={styles.group}>
+        <div className={styles.groupTitle}>Lifecycle & asset</div>
+        <Field label="Status">
+          <select
+            value={device.status ?? 'active'}
+            onChange={(e) => set('status', (e.target.value === 'active' ? undefined : e.target.value) as Device['status'])}
+            onBlur={endEdit}
+          >
+            <option value="active">Active</option>
+            <option value="planned">Planned</option>
+            <option value="maintenance">Maintenance</option>
+            <option value="decommissioned">Decommissioned</option>
+          </select>
+        </Field>
+        <Field label="Serial">
+          <input value={device.serial ?? ''} onChange={(e) => set('serial', e.target.value)} onBlur={endEdit} />
+        </Field>
+        <Field label="Asset tag">
+          <input value={device.assetTag ?? ''} onChange={(e) => set('assetTag', e.target.value)} onBlur={endEdit} />
+        </Field>
+        <Field label="Owner">
+          <input value={device.owner ?? ''} onChange={(e) => set('owner', e.target.value)} onBlur={endEdit} />
+        </Field>
+        <Field label="Warranty expiry">
+          <input type="date" value={device.warrantyExpiry ?? ''} onChange={(e) => set('warrantyExpiry', e.target.value)} onBlur={endEdit} />
+        </Field>
+      </div>
+
+      <div className={styles.group}>
         <div className={styles.groupTitle}>Location & Notes</div>
         <Field label="Location">
           <input
@@ -292,6 +350,18 @@ function InterfacesSection({ device }: { device: Device }) {
             placeholder="speed"
             aria-label="Interface speed"
             onChange={(e) => updateInterface(device.id, iface.id, { speed: e.target.value })}
+            onBlur={endEdit}
+          />
+          <input
+            className={styles.ifaceVlan}
+            value={iface.vlan ?? ''}
+            type="number"
+            min={VLAN_MIN}
+            max={VLAN_MAX}
+            placeholder="VLAN"
+            aria-label="Port VLAN id"
+            title="Access VLAN (1–4094)"
+            onChange={(e) => updateInterface(device.id, iface.id, { vlan: parseVlanId(e.target.value) })}
             onBlur={endEdit}
           />
           <button

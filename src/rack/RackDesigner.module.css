@@ -427,3 +427,105 @@
   color: #dc2626;
   font-size: 12px;
 }
+
+/* ── Rack templates (quick-start) ─────────────────────────────────────────── */
+.templatesWrap {
+  margin-top: 22px;
+  max-width: 640px;
+}
+.templateOverlay {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--chrome-bg) 70%, transparent);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 18px;
+  overflow: auto;
+  z-index: 20;
+}
+.templatePanel {
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  max-width: 640px;
+  width: 100%;
+}
+.templateHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--chrome-fg);
+  margin-bottom: 12px;
+}
+.templateTier {
+  margin-bottom: 14px;
+}
+.templateTierLabel {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--chrome-fg-muted);
+  margin-bottom: 6px;
+}
+.templateGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+}
+.templateCard {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+  padding: 9px 11px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 9px;
+  background: var(--canvas-bg, transparent);
+  color: var(--chrome-fg);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.templateCard:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.templateCard b {
+  font-size: 13px;
+  font-weight: 600;
+}
+.templateCard span {
+  font-size: 11px;
+  color: var(--chrome-fg-muted);
+  line-height: 1.35;
+}
+
+/* ── Fleet capacity strip (row view) ──────────────────────────────────────── */
+.capacityStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: center;
+  align-self: center;
+  margin-bottom: 14px;
+  padding: 7px 14px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  background: var(--chrome-bg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--chrome-fg-muted);
+}
+.capacityStrip b {
+  color: var(--chrome-fg);
+  font-weight: 700;
+}
+.capOver {
+  color: #dc2626 !important;
+  font-weight: 700;
+}

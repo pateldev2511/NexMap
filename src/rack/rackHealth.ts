@@ -137,6 +137,9 @@ export function analyzeCabling(devices: Device[], cables: RackCable[]): CablingR
     if (ia?.kind && ib?.kind && ia.kind.toLowerCase() !== ib.kind.toLowerCase()) {
       push('rack-media-mismatch', `Media mismatch: ${nameOf(c.aEnd.deviceId)}:${ia.name} is ${ia.kind} but ${nameOf(c.bEnd.deviceId)}:${ib.name} is ${ib.kind}.`, [c.id]);
     }
+    if (ia?.vlan != null && ib?.vlan != null && ia.vlan !== ib.vlan) {
+      push('rack-vlan-mismatch', `VLAN mismatch: ${nameOf(c.aEnd.deviceId)}:${ia.name} is VLAN ${ia.vlan} but ${nameOf(c.bEnd.deviceId)}:${ib.name} is VLAN ${ib.vlan} — the link won't pass that VLAN untagged.`, [c.id]);
+    }
     for (const [dev, end] of [[a, c.aEnd] as const, [b, c.bEnd] as const]) {
       if (dev && dev.rackId == null) {
         push('rack-endpoint-unmounted', `${nameOf(end.deviceId)} is cabled but not mounted in any rack.`, [c.id, end.deviceId]);

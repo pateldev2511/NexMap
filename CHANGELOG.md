@@ -8,6 +8,34 @@ minor/patch semantics are not yet enforced.
 
 ### Added
 
+- **Rack Designer Pro — power, planning, and at-a-glance ops (v0.5.0).** A big batch of
+  rack-designer upgrades:
+  - **Realistic power/weight budgets.** Every device now carries nominal watts + weight, so
+    the per-rack and new **fleet capacity strip** (`N racks · used/total U · free % · kW · kg`)
+    read real numbers instead of 0. UPS/PDU correctly count as power sources.
+  - **Pre-made templates.** Quick-start from 7 designs grouped Home / Office / Enterprise
+    (wall lab, media+NAS, office IDF, server room, enterprise core/compute/edge) — picker in
+    the empty state and a **Templates** toolbar button; applying one appends a fully-built,
+    named rack in a single undo.
+  - **Named vendor catalog.** ~32 real models (Cisco, Arista, Juniper, Dell, HPE, Palo Alto,
+    Fortinet, Synology, APC, …); the inspector's **Hardware model** picker auto-fills
+    vendor/model/power/weight.
+  - **Per-port VLAN tagging** with a VLAN-mismatch health check and a VLAN column in the
+    cable schedule (CSV + on-canvas table).
+  - **Auto cable length** estimated from rack geometry (vertical U + cross-rack travel +
+    slack, rounded to a stocked length) — one-click fill for every cable without a length.
+  - **Lifecycle + asset tracking.** Device status (planned / active / maintenance /
+    decommissioned) with a status tint on the gear, plus serial / asset tag / owner /
+    warranty fields.
+  - **Occupancy heatmap** — a per-U used/free track on each rail.
+  - **Color-by-attribute** — tint the whole fleet by status or owner, with a legend.
+  - **Opposite-face ghosts** — a full-depth chassis (switch/server/firewall/UPS) now shows a
+    muted back-of-chassis ghost on the opposite face and blocks the same U on both faces;
+    shallow gear (patch/blank) can still share a U front-to-back.
+  - **Rear-specific port art** — the rear of full-depth gear renders PSUs + fan grilles, not
+    a mirror of the front jacks.
+  - **Printable label sheet** export — a cut-out label per device (name, rack/U, model).
+
 - **Rack Designer v3 — default side-by-side canvas + realistic gear.** The designer now
   opens straight into the multi-rack canvas: every rack shown next to the others with
   **both faces (front + rear) side by side**, a **Hide rear** toggle, and `+ Rack` dropping
