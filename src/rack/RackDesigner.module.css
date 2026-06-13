@@ -504,3 +504,28 @@
   color: var(--chrome-fg-muted);
   line-height: 1.35;
 }
+
+/* ── Fleet capacity strip (row view) ──────────────────────────────────────── */
+.capacityStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: center;
+  align-self: center;
+  margin-bottom: 14px;
+  padding: 7px 14px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  background: var(--chrome-bg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--chrome-fg-muted);
+}
+.capacityStrip b {
+  color: var(--chrome-fg);
+  font-weight: 700;
+}
+.capOver {
+  color: #dc2626 !important;
+  font-weight: 700;
+}

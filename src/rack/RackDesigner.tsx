@@ -16,7 +16,7 @@ import {
   type ExportMode,
 } from './buildRackSvg';
 import { analyzeCabling } from './rackHealth';
-import { rackBudget } from './rackBudget';
+import { rackBudget, fleetBudget } from './rackBudget';
 import { slotOf, canFit, nearestFreeU, isFullDepth, orderRacks, type FitResult } from './rackModel';
 import { RACK_DEVICE_PRESETS, RACK_PRESET_GROUPS, type RackDevicePreset } from './rackDevicePresets';
 import { RACK_PRESETS, rackFieldsFromPreset, DEFAULT_RACK_PRESET } from './rackTypes';
@@ -450,6 +450,19 @@ export function RackDesigner() {
               onChange={(e) => setDeviceSearch(e.target.value)}
               aria-label="Search devices across racks"
             />
+            {(() => {
+              const f = fleetBudget(racks, devices);
+              const pct = f.totalU > 0 ? Math.round((f.usedU / f.totalU) * 100) : 0;
+              return (
+                <div className={styles.capacityStrip} role="status" aria-label="Fleet capacity">
+                  <span><b>{f.rackCount}</b> rack{f.rackCount === 1 ? '' : 's'}</span>
+                  <span><b>{f.usedU}</b>/{f.totalU}U used · <b>{f.freeU}</b> free ({pct}%)</span>
+                  <span><b>{(f.watts / 1000).toFixed(2)}</b> kW{f.maxWatts > 0 ? ` / ${(f.maxWatts / 1000).toFixed(2)} kW` : ''}</span>
+                  <span><b>{f.weightKg.toFixed(0)}</b> kg</span>
+                  {f.anyOver && <span className={styles.capOver}>⚠ over capacity</span>}
+                </div>
+              );
+            })()}
             <RackRow
               racks={racks}
               devices={devices}

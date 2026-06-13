@@ -54,3 +54,32 @@ export function rackBudget(rack: Rack, devices: Device[]): RackBudget {
     overWeight: rack.maxWeightKg != null && weightKg > rack.maxWeightKg,
   };
 }
+
+export interface FleetBudget {
+  rackCount: number;
+  totalU: number;
+  usedU: number;
+  freeU: number;
+  watts: number;
+  /** Sum of per-rack power caps (only racks that set one contribute). 0 if none capped. */
+  maxWatts: number;
+  weightKg: number;
+  /** Any rack over its power or weight cap. */
+  anyOver: boolean;
+}
+
+/** Aggregate capacity across a whole fleet of racks — drives the canvas capacity strip. Pure. */
+export function fleetBudget(racks: Rack[], devices: Device[]): FleetBudget {
+  let totalU = 0, usedU = 0, freeU = 0, watts = 0, maxWatts = 0, weightKg = 0, anyOver = false;
+  for (const rack of racks) {
+    const b = rackBudget(rack, devices);
+    totalU += rack.ruHeight;
+    usedU += b.usedU;
+    freeU += b.freeU;
+    watts += b.watts;
+    maxWatts += b.maxWatts ?? 0;
+    weightKg += b.weightKg;
+    if (b.overWatts || b.overWeight) anyOver = true;
+  }
+  return { rackCount: racks.length, totalU, usedU, freeU, watts, maxWatts, weightKg, anyOver };
+}
