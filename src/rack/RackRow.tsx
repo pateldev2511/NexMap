@@ -7,7 +7,9 @@
  * Per-rack U + power/weight budget is shown inline. (Cross-rack device moves are done via
  * the "Move to rack" control in the focused editor's selection panel.)
  */
+import { useRef, useState, useEffect } from 'react';
 import type { Device, Rack, RackCable } from '@/model/types';
+import { fit, zoomAt, zoomTo, type Viewport, IDENTITY } from './viewport';
 import {
   cabinetSize,
   bayOrigin,
@@ -141,9 +143,80 @@ export function RackRow({
     );
   };
 
+  // ── Pan / zoom viewport ─────────────────────────────────────────────────────
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [vp, setVp] = useState<Viewport>(IDENTITY);
+  const vpRef = useRef(vp);
+  vpRef.current = vp;
+  const pan = useRef({ active: false, sx: 0, sy: 0, tx: 0, ty: 0, moved: false });
+  const content = { w: width, h: height + 18 };
+  const rect = () => containerRef.current?.getBoundingClientRect();
+
+  function fitNow() {
+    const r = rect();
+    if (r) setVp(fit(content.w, content.h, r.width, r.height));
+  }
+  // Fit on first mount (content + container measured by then).
+  useEffect(() => {
+    fitNow();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Wheel-zoom toward the cursor (non-passive so we can preventDefault the page scroll).
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const r = el.getBoundingClientRect();
+      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+      setVp((v) => zoomAt(v, e.clientX - r.left, e.clientY - r.top, factor));
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  function onPointerDown(e: React.PointerEvent) {
+    if (e.button !== 0) return;
+    pan.current = { active: true, sx: e.clientX, sy: e.clientY, tx: vpRef.current.tx, ty: vpRef.current.ty, moved: false };
+    containerRef.current?.setPointerCapture?.(e.pointerId);
+  }
+  function onPointerMove(e: React.PointerEvent) {
+    if (!pan.current.active) return;
+    const dx = e.clientX - pan.current.sx;
+    const dy = e.clientY - pan.current.sy;
+    if (Math.abs(dx) + Math.abs(dy) > 4) pan.current.moved = true;
+    setVp((v) => ({ ...v, tx: pan.current.tx + dx, ty: pan.current.ty + dy }));
+  }
+  function onPointerUp(e: React.PointerEvent) {
+    pan.current.active = false;
+    containerRef.current?.releasePointerCapture?.(e.pointerId);
+  }
+  // If the pointer actually dragged, swallow the click so a pan doesn't also focus a rack.
+  function onClickCapture(e: React.MouseEvent) {
+    if (pan.current.moved) { e.stopPropagation(); pan.current.moved = false; }
+  }
+  const zoomStep = (k: number) => {
+    const r = rect();
+    setVp((v) => zoomTo(v, v.scale * k, r?.width ?? 800, r?.height ?? 600));
+  };
+
   return (
-    <div className={styles.rowScroll}>
-      <svg width={width} height={height + 18} className={styles.svg} role="img" aria-label="All racks">
+    <div
+      ref={containerRef}
+      className={styles.panCanvas}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onClickCapture={onClickCapture}
+    >
+      <svg
+        width={width}
+        height={height + 18}
+        className={styles.svg}
+        style={{ transformOrigin: '0 0', transform: `translate(${vp.tx}px, ${vp.ty}px) scale(${vp.scale})` }}
+        role="img"
+        aria-label="All racks"
+      >
         <g dangerouslySetInnerHTML={{ __html: RACK_ART_DEFS }} />
         {cols.map((c, i) => {
           const b = rackBudget(c.rack, devices);
@@ -185,6 +258,12 @@ export function RackRow({
           );
         })}
       </svg>
+      <div className={styles.zoomControls}>
+        <button onClick={() => zoomStep(1 / 1.2)} aria-label="Zoom out" title="Zoom out">−</button>
+        <span>{Math.round(vp.scale * 100)}%</span>
+        <button onClick={() => zoomStep(1.2)} aria-label="Zoom in" title="Zoom in">+</button>
+        <button onClick={fitNow} aria-label="Fit to screen" title="Fit to screen">⊡</button>
+      </div>
     </div>
   );
 }

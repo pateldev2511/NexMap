@@ -129,6 +129,12 @@ export interface Device {
   watts?: number;
   weightKg?: number;
   /**
+   * Which power feed(s) this device cords into (schema v3 additive): 'A' or 'B' = single-
+   * corded to that feed (a single point of failure); 'AB' = dual-corded / redundant PSUs
+   * (survives losing either feed). Absent → single feed 'A' (back-compat).
+   */
+  powerFeed?: 'A' | 'B' | 'AB';
+  /**
    * Lifecycle state (schema v3 additive). Absent → 'active'. Drives a status tint on the
    * rack art so planned/decommissioned gear reads differently from live gear.
    */

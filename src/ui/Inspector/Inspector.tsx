@@ -456,6 +456,18 @@ function RackFields({
               onBlur={endEdit}
             />
           </Field>
+          <Field label="Power feed">
+            <select
+              value={device.powerFeed ?? 'A'}
+              aria-label="Power feed"
+              title="Which power feed this device cords into (A+B = redundant PSUs)"
+              onChange={(e) => { set('powerFeed', e.target.value as Device['powerFeed']); endEdit(); }}
+            >
+              <option value="A">Feed A (single)</option>
+              <option value="B">Feed B (single)</option>
+              <option value="AB">A + B (redundant)</option>
+            </select>
+          </Field>
         </>
       )}
     </div>
