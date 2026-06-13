@@ -128,6 +128,17 @@ export interface Device {
   /** Power draw (watts) and weight (kg) for the rack power/weight budget. Optional. */
   watts?: number;
   weightKg?: number;
+  /**
+   * Lifecycle state (schema v3 additive). Absent → 'active'. Drives a status tint on the
+   * rack art so planned/decommissioned gear reads differently from live gear.
+   */
+  status?: 'planned' | 'active' | 'maintenance' | 'decommissioned';
+  /** Asset-tracking fields (schema v3 additive). Free-text, optional. */
+  serial?: string;
+  assetTag?: string;
+  owner?: string;
+  /** Warranty expiry as an ISO date string (YYYY-MM-DD). */
+  warrantyExpiry?: string;
   /** Locked devices can't be moved or deleted until unlocked. */
   locked?: boolean;
   /** Stacking order; higher renders on top. Default 0. */

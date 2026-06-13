@@ -61,6 +61,22 @@ describe('rackDeviceArt — export-safe shared art', () => {
   });
 });
 
+describe('deviceFaceParts — lifecycle status overlay', () => {
+  it('draws nothing extra for active/unset, a dot for planned, a scrim for decommissioned', () => {
+    const base = join(deviceFaceParts(dev('switch'), panel));
+    const active = join(deviceFaceParts(dev('switch', { status: 'active' }), panel));
+    expect(active.length).toBe(base.length); // 'active' adds no overlay
+
+    const planned = join(deviceFaceParts(dev('switch', { status: 'planned' }), panel));
+    expect(planned).toContain('stroke-dasharray="5 3"'); // dashed "planned" outline
+    expect(planned).toContain('#3b82f6'); // planned status color
+
+    const decom = join(deviceFaceParts(dev('switch', { status: 'decommissioned' }), panel));
+    expect(decom).toContain('fill-opacity="0.42"'); // faded scrim
+    expect(decom).toContain('#ef4444'); // decommissioned status color
+  });
+});
+
 describe('deviceGhostParts — opposite-face back-of-chassis', () => {
   it('labels the real face and the device name, var-free', () => {
     const svg = join(deviceGhostParts(dev('switch', { name: 'sw-rear' }), panel, 'front'));

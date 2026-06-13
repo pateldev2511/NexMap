@@ -29,6 +29,7 @@ import type {
 import { canFit, isFullDepth, type FitResult, type Slot } from '@/rack/rackModel';
 import { checkConnect, pruneCablesForInterfaces } from '@/rack/rackCables';
 import { presetByKey } from '@/rack/rackDevicePresets';
+import { estimateCableLengthFt } from '@/rack/cableLength';
 import { rackFieldsFromPreset, rackPresetById, DEFAULT_RACK_PRESET } from '@/rack/rackTypes';
 import type { RackTemplate } from '@/rack/rackTemplates';
 import {
@@ -421,6 +422,8 @@ export interface ProjectStore {
     label?: string,
   ): string | null;
   updateRackCable(id: string, before: Partial<RackCable>, after: Partial<RackCable>): void;
+  /** Estimate + fill length (ft) from rack geometry for every cable missing one. Returns count updated. */
+  autoLengthRackCables(): number;
   disconnectRackCable(id: string): void;
   rackCablesAll(): RackCable[];
   getRackCable(id: string): RackCable | undefined;
@@ -1930,6 +1933,24 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     },
     updateRackCable(id, before, after) {
       commit(new UpdateRackCableCommand(id, before, after));
+    },
+    autoLengthRackCables() {
+      const racks = [...model.racks.values()];
+      const cmds: Command[] = [];
+      for (const c of model.rackCables.values()) {
+        if (c.lengthFt != null) continue; // respect a length the user typed
+        const a = model.devices.get(c.aEnd.deviceId);
+        const b = model.devices.get(c.bEnd.deviceId);
+        if (!a || !b) continue;
+        const est = estimateCableLengthFt(a, b, racks);
+        if (est == null) continue;
+        cmds.push(new UpdateRackCableCommand(c.id, { lengthFt: undefined }, { lengthFt: est }));
+      }
+      if (!cmds.length) return 0;
+      history.dispatch(transaction('Auto-length cables', cmds), model);
+      history.commitCoalesceBoundary();
+      set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
+      return cmds.length;
     },
     disconnectRackCable(id) {
       commit(new DeleteRackCableCommand(id));

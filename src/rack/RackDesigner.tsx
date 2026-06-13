@@ -545,7 +545,19 @@ export function RackDesigner() {
           </div>
         )}
         <div className={styles.sec} style={{ flex: 1 }}>
-          <h3>Cable schedule · {cables.length}</h3>
+          <h3>
+            Cable schedule · {cables.length}
+            {cables.some((c) => c.lengthFt == null) && (
+              <button
+                className={styles.btn}
+                style={{ float: 'right', fontSize: 11 }}
+                title="Estimate length (ft) from rack geometry for every cable without one"
+                onClick={() => s().autoLengthRackCables()}
+              >
+                Auto-length
+              </button>
+            )}
+          </h3>
           {cables.length === 0 && (
             <div style={{ fontSize: 12, color: 'var(--chrome-fg-muted)' }}>No cables yet.</div>
           )}
@@ -563,6 +575,7 @@ export function RackDesigner() {
                 <span className={styles.sw} style={{ background: c.color }} />
                 <span className={styles.ep}>{a?.name}:{pn(a, c.aEnd.ifaceId)} → {b?.name}:{pn(b, c.bEnd.ifaceId)}</span>
                 {c.label && <span className={styles.lbl}>{c.label}</span>}
+                {c.lengthFt != null && <span className={styles.lbl}>{c.lengthFt}ft</span>}
                 <button
                   className={styles.x}
                   aria-label="Remove cable"

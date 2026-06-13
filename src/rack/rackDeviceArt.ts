@@ -196,5 +196,34 @@ export function deviceFaceParts(device: Device, panel: Rect): string[] {
       out.push(`<path d="M ${n(sx - 1.6)} ${n(panel.y + panel.h / 2)} h 3.2" stroke="${C.notch}" stroke-width="0.7"/>`);
     }
   }
+  out.push(...statusOverlay(device, panel));
+  return out;
+}
+
+/** Per-status colors for the lifecycle marker. 'active' has none (the default live state). */
+const STATUS_COLOR: Record<string, string> = {
+  planned: '#3b82f6',
+  maintenance: '#f59e0b',
+  decommissioned: '#ef4444',
+};
+
+/**
+ * Lifecycle tint drawn ON TOP of any device: a corner status dot, a dashed outline for
+ * 'planned', and a faded scrim for 'decommissioned'. 'active'/absent → nothing. Hex-only,
+ * so it rasterizes identically in the editor, the canvas, and the export.
+ */
+function statusOverlay(device: Device, p: Rect): string[] {
+  const status = device.status;
+  if (!status || status === 'active') return [];
+  const color = STATUS_COLOR[status] ?? '#3b82f6';
+  const out: string[] = [];
+  if (status === 'decommissioned') {
+    out.push(`<rect x="${n(p.x)}" y="${n(p.y)}" width="${n(p.w)}" height="${n(p.h)}" rx="3" fill="#0a0e12" fill-opacity="0.42"/>`);
+  }
+  if (status === 'planned') {
+    out.push(`<rect x="${n(p.x + 0.75)}" y="${n(p.y + 0.75)}" width="${n(p.w - 1.5)}" height="${n(p.h - 1.5)}" rx="3" fill="none" stroke="${color}" stroke-width="1.5" stroke-dasharray="5 3"/>`);
+  }
+  // corner status dot (top-left, opposite the chassis status LED)
+  out.push(`<circle cx="${n(p.x + 6)}" cy="${n(p.y + 6)}" r="3" fill="${color}" stroke="#0a0e12" stroke-width="0.6"/>`);
   return out;
 }

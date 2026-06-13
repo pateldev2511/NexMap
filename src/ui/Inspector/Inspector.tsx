@@ -236,6 +236,34 @@ function DeviceInspector({ device }: { device: Device }) {
       <RackFields device={device} set={set} endEdit={endEdit} />
 
       <div className={styles.group}>
+        <div className={styles.groupTitle}>Lifecycle & asset</div>
+        <Field label="Status">
+          <select
+            value={device.status ?? 'active'}
+            onChange={(e) => set('status', (e.target.value === 'active' ? undefined : e.target.value) as Device['status'])}
+            onBlur={endEdit}
+          >
+            <option value="active">Active</option>
+            <option value="planned">Planned</option>
+            <option value="maintenance">Maintenance</option>
+            <option value="decommissioned">Decommissioned</option>
+          </select>
+        </Field>
+        <Field label="Serial">
+          <input value={device.serial ?? ''} onChange={(e) => set('serial', e.target.value)} onBlur={endEdit} />
+        </Field>
+        <Field label="Asset tag">
+          <input value={device.assetTag ?? ''} onChange={(e) => set('assetTag', e.target.value)} onBlur={endEdit} />
+        </Field>
+        <Field label="Owner">
+          <input value={device.owner ?? ''} onChange={(e) => set('owner', e.target.value)} onBlur={endEdit} />
+        </Field>
+        <Field label="Warranty expiry">
+          <input type="date" value={device.warrantyExpiry ?? ''} onChange={(e) => set('warrantyExpiry', e.target.value)} onBlur={endEdit} />
+        </Field>
+      </div>
+
+      <div className={styles.group}>
         <div className={styles.groupTitle}>Location & Notes</div>
         <Field label="Location">
           <input
