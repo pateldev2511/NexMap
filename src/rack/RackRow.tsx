@@ -33,11 +33,12 @@ export interface RackRowProps {
   cables: RackCable[];
   activeRackId?: string;
   selectedId: string | null;
+  selectedIds?: Set<string>;
   searchHits: Set<string>;
   showRear: boolean;
   colorBy: ColorByMode;
   onFocusRack: (rackId: string) => void;
-  onSelect: (deviceId: string | null) => void;
+  onSelect: (deviceId: string | null, additive?: boolean) => void;
   onReorder: (rackId: string, dir: -1 | 1) => void;
   onMoveDeviceToRack?: (deviceId: string, rackId: string) => void;
 }
@@ -46,7 +47,7 @@ export interface RackRowProps {
 const FACE_GAP = 22;
 
 export function RackRow({
-  racks, devices, cables, activeRackId, selectedId, searchHits, showRear, colorBy,
+  racks, devices, cables, activeRackId, selectedId, selectedIds, searchHits, showRear, colorBy,
   onFocusRack, onSelect, onReorder, onMoveDeviceToRack,
 }: RackRowProps) {
   const [dragRackId, setDragRackId] = useState<string | null>(null);
@@ -179,7 +180,7 @@ export function RackRow({
         {devices.filter((d) => d.rackId === rack.id && d.ru != null && slotOf(d).side === face).map((d) => {
           const r = deviceRect(rack, d);
           const panel = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
-          const sel = d.id === selectedId;
+          const sel = d.id === selectedId || (selectedIds?.has(d.id) ?? false);
           const hit = searchHits.has(d.id);
           return (
             <g
@@ -191,7 +192,12 @@ export function RackRow({
                 e.dataTransfer.effectAllowed = 'move';
               }}
               onDragEnd={() => setDragRackId(null)}
-              onClick={(e) => { e.stopPropagation(); onSelect(d.id); onFocusRack(rack.id); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+                onSelect(d.id, additive);
+                if (!additive) onFocusRack(rack.id); // shift/cmd builds a selection without drilling in
+              }}
               style={{ cursor: 'grab' }}
             >
               <g dangerouslySetInnerHTML={{ __html: deviceFaceParts(d, panel, face).join('') }} />

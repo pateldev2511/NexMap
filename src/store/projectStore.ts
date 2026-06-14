@@ -32,6 +32,7 @@ import { presetByKey } from '@/rack/rackDevicePresets';
 import { catalogById } from '@/rack/rackCatalog';
 import { estimateCableLengthFt } from '@/rack/cableLength';
 import { proposePowerBalance } from '@/rack/rackPower';
+import { pickBulkPatch } from '@/rack/rackBulk';
 import { rackFieldsFromPreset, rackPresetById, DEFAULT_RACK_PRESET } from '@/rack/rackTypes';
 import type { RackTemplate } from '@/rack/rackTemplates';
 import {
@@ -429,6 +430,8 @@ export interface ProjectStore {
   autoLengthRackCables(): number;
   /** Rebalance A/B power by flipping single-corded gear to even the load. One undo. Returns devices moved. */
   balancePower(): number;
+  /** Stamp allowlisted fields (status/owner/assetTag/warranty/feed) onto many devices in one undo. Returns count changed. */
+  bulkUpdateDevices(ids: string[], patch: Partial<Device>): number;
   disconnectRackCable(id: string): void;
   rackCablesAll(): RackCable[];
   getRackCable(id: string): RackCable | undefined;
@@ -1975,6 +1978,32 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         (f) => new UpdateDeviceCommand(f.deviceId, { powerFeed: f.from }, { powerFeed: f.to }),
       );
       history.dispatch(transaction('Balance power feeds', cmds), model);
+      history.commitCoalesceBoundary();
+      set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
+      return cmds.length;
+    },
+
+    bulkUpdateDevices(ids, patch) {
+      const after = pickBulkPatch(patch);
+      const keys = Object.keys(after) as (keyof typeof after)[];
+      if (!keys.length) return 0;
+      const cmds: Command[] = [];
+      for (const id of ids) {
+        const d = model.devices.get(id);
+        if (!d) continue; // skip stale/unknown ids rather than aborting the batch
+        // Capture only the keys we change as `before` so undo restores exactly those.
+        const before: Partial<Device> = {};
+        let changed = false;
+        for (const k of keys) {
+          if (d[k] !== after[k]) {
+            (before as Record<string, unknown>)[k] = d[k];
+            changed = true;
+          }
+        }
+        if (changed) cmds.push(new UpdateDeviceCommand(id, before, after));
+      }
+      if (!cmds.length) return 0;
+      history.dispatch(transaction('Bulk edit devices', cmds), model);
       history.commitCoalesceBoundary();
       set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
       return cmds.length;

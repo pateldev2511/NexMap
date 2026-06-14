@@ -263,3 +263,47 @@ describe('cloneRack', () => {
     expect(s().rackCablesAll()).toHaveLength(1);
   });
 });
+
+describe('bulkUpdateDevices', () => {
+  it('stamps allowlisted fields on many devices in one undoable transaction', () => {
+    const a = s().addDeviceAt('switch', 0, 0);
+    const b = s().addDeviceAt('server', 0, 0);
+    const c = s().addDeviceAt('server', 0, 0);
+    const n = s().bulkUpdateDevices([a, b, c], { owner: 'Priya', status: 'maintenance' });
+    expect(n).toBe(3);
+    for (const id of [a, b, c]) {
+      expect(s().getDevice(id)).toMatchObject({ owner: 'Priya', status: 'maintenance' });
+    }
+    // one undo reverts ALL of them
+    s().undo();
+    for (const id of [a, b, c]) {
+      const d = s().getDevice(id)!;
+      expect(d.owner).toBeUndefined();
+      expect(d.status).toBeUndefined();
+    }
+  });
+
+  it('ignores non-allowlisted (geometry/identity) fields', () => {
+    const a = s().addDeviceAt('switch', 5, 7);
+    const before = s().getDevice(a)!;
+    const n = s().bulkUpdateDevices([a], { ru: 99, type: 'server', owner: 'Sam' } as never);
+    expect(n).toBe(1); // owner changed
+    const after = s().getDevice(a)!;
+    expect(after.owner).toBe('Sam');
+    expect(after.type).toBe(before.type); // type untouched
+    expect(after.ru).toBe(before.ru); // geometry untouched
+  });
+
+  it('skips unknown ids and returns 0 when nothing changes', () => {
+    const a = s().addDeviceAt('switch', 0, 0);
+    s().bulkUpdateDevices([a], { owner: 'Lee' });
+    // re-applying the same value changes nothing → no-op, count 0, no new undo entry
+    expect(s().bulkUpdateDevices([a, 'ghost-id'], { owner: 'Lee' })).toBe(0);
+  });
+
+  it('returns 0 for an empty selection or empty patch', () => {
+    const a = s().addDeviceAt('switch', 0, 0);
+    expect(s().bulkUpdateDevices([], { owner: 'X' })).toBe(0);
+    expect(s().bulkUpdateDevices([a], {})).toBe(0);
+  });
+});

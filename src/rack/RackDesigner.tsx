@@ -30,6 +30,7 @@ import { rackInsights, type RackInsight } from './rackInsights';
 import { rackHealthScore } from './rackHealthScore';
 import { bomCsv } from './rackBom';
 import { deviceMatchesQuery } from './rackSearch';
+import { hasBulkChanges } from './rackBulk';
 import { deviceFaceParts, RACK_ART_DEFS } from './rackDeviceArt';
 import type { Device } from '@/model/types';
 import styles from './RackDesigner.module.css';
@@ -128,6 +129,7 @@ export function RackDesigner() {
   const [search, setSearch] = useState('');
   const [deviceSearch, setDeviceSearch] = useState('');
   const [exportMode, setExportMode] = useState<ExportMode>('diagram');
+  const [bulkPatch, setBulkPatch] = useState<Partial<Device>>({});
   const [inspectorTab, setInspectorTab] = useState<'placement' | 'hardware' | 'power' | 'cabling' | 'asset'>('placement');
   const [rowReject, setRowReject] = useState<string | null>(null);
 
@@ -139,6 +141,7 @@ export function RackDesigner() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const cables = useMemo(() => s().rackCablesAll(), [rev]);
   const selectedId = [...selection][0] ?? null;
+  const multi = selection.size >= 2;
   const selected = selectedId ? devices.find((d) => d.id === selectedId) : undefined;
   const inRack = useMemo(() => devices.filter((d) => d.rackId === rack?.id), [devices, rack?.id]);
   const budget = useMemo(() => (rack ? rackBudget(rack, devices) : null), [rack, devices]);
@@ -367,6 +370,28 @@ export function RackDesigner() {
     if (d.rackId) setRackId(d.rackId);
     setSideState(slotOf(d).side);
     s().select([deviceId]);
+  }
+
+  /** Canvas device click: plain = focus one; shift/cmd/ctrl = toggle into a multi-selection. */
+  function selectDevice(id: string | null, additive?: boolean) {
+    if (!id) {
+      s().select([]);
+      return;
+    }
+    if (additive) {
+      const sel = new Set(selection);
+      if (sel.has(id)) sel.delete(id);
+      else sel.add(id);
+      s().select([...sel]);
+      return;
+    }
+    focusDevice(id);
+  }
+
+  function applyBulk() {
+    const n = s().bulkUpdateDevices([...selection], bulkPatch);
+    if (n > 0) setBulkPatch({});
+    return n;
   }
 
   function handleInsight(insight: RackInsight) {
@@ -697,11 +722,13 @@ export function RackDesigner() {
               cables={cables}
               activeRackId={rack.id}
               selectedId={selectedId}
+              selectedIds={selection}
               searchHits={searchHits}
               showRear={showRear}
               colorBy={colorBy}
               onFocusRack={(id) => { setRackId(id); setView('focus'); }}
-              onSelect={(id) => {
+              onSelect={(id, additive) => {
+                if (additive && id) { selectDevice(id, true); return; }
                 if (id) focusDevice(id);
                 else s().select([]);
               }}
@@ -743,16 +770,14 @@ export function RackDesigner() {
                 devices={devices}
                 cables={cables}
                 selectedId={selectedId}
+                selectedIds={selection}
                 selectedCableId={selCable}
                 side={side}
                 armed={armed != null}
                 reject={reject}
                 onPlaceAt={placeAt}
                 onDropPreset={dropPreset}
-                onSelect={(id) => {
-                  if (id) focusDevice(id);
-                  else s().select([]);
-                }}
+                onSelect={selectDevice}
                 onSelectCable={setSelCable}
                 onMoveTo={moveTo}
               />
@@ -764,8 +789,67 @@ export function RackDesigner() {
       {/* sidebar */}
       <div className={styles.side}>
         <div className={styles.sec}>
-          <h3>Selected device</h3>
-          {selected ? (
+          <h3>{multi ? `Bulk edit · ${selection.size} devices` : 'Selected device'}</h3>
+          {multi ? (
+            <div className={styles.inspectorPane}>
+              <p className={styles.bulkHint}>
+                Set a field on all {selection.size} selected devices at once. Leave a field
+                blank to keep it unchanged. One undo reverts the whole batch.
+              </p>
+              <div className={styles.field}>
+                <label>Status</label>
+                <select
+                  value={(bulkPatch.status as string) ?? ''}
+                  onChange={(e) => setBulkPatch((p) => ({ ...p, status: (e.target.value || undefined) as Device['status'] }))}
+                >
+                  <option value="">Keep unchanged…</option>
+                  <option value="active">Active</option>
+                  <option value="planned">Planned</option>
+                  <option value="maintenance">Maintenance</option>
+                  <option value="decommissioned">Decommissioned</option>
+                </select>
+              </div>
+              <div className={styles.field}>
+                <label>Power feed</label>
+                <select
+                  value={(bulkPatch.powerFeed as string) ?? ''}
+                  onChange={(e) => setBulkPatch((p) => ({ ...p, powerFeed: (e.target.value || undefined) as Device['powerFeed'] }))}
+                >
+                  <option value="">Keep unchanged…</option>
+                  <option value="A">Feed A (single)</option>
+                  <option value="B">Feed B (single)</option>
+                  <option value="AB">A + B (redundant)</option>
+                </select>
+              </div>
+              <div className={styles.field}>
+                <label>Owner</label>
+                <input
+                  value={(bulkPatch.owner as string) ?? ''}
+                  placeholder="Keep unchanged…"
+                  onChange={(e) => setBulkPatch((p) => ({ ...p, owner: e.target.value === '' ? undefined : e.target.value }))}
+                />
+              </div>
+              <div className={styles.field}>
+                <label>Warranty expiry</label>
+                <input
+                  type="date"
+                  value={(bulkPatch.warrantyExpiry as string) ?? ''}
+                  onChange={(e) => setBulkPatch((p) => ({ ...p, warrantyExpiry: e.target.value === '' ? undefined : e.target.value }))}
+                />
+              </div>
+              <div className={styles.rowBtns}>
+                <button
+                  className={`${styles.btn} ${styles.primary}`}
+                  disabled={!hasBulkChanges(bulkPatch)}
+                  onClick={applyBulk}
+                  title="Apply the set fields to every selected device (one undo)"
+                >
+                  Apply to {selection.size}
+                </button>
+                <button className={styles.btn} onClick={() => s().select([])}>Clear selection</button>
+              </div>
+            </div>
+          ) : selected ? (
             <>
               <div className={styles.deviceHero}>
                 <span className={styles.thumbWrap}><GearThumb device={selected} /></span>

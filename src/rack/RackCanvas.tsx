@@ -33,6 +33,7 @@ export function RackCanvas({
   devices,
   cables,
   selectedId,
+  selectedIds,
   selectedCableId,
   side,
   armed,
@@ -47,6 +48,8 @@ export function RackCanvas({
   devices: Device[];
   cables: RackCable[];
   selectedId: string | null;
+  /** Full multi-selection (for bulk edit highlight). Falls back to selectedId when absent. */
+  selectedIds?: Set<string>;
   /** Highlighted cable (from the schedule or a click), or null. */
   selectedCableId: string | null;
   /** Which mounting face to show. Devices on the other face are hidden. */
@@ -58,7 +61,7 @@ export function RackCanvas({
   onPlaceAt: (u: number) => void;
   /** A library chip was dragged + dropped onto a U (key = preset key). */
   onDropPreset: (key: string, u: number) => void;
-  onSelect: (id: string | null) => void;
+  onSelect: (id: string | null, additive?: boolean) => void;
   onSelectCable: (id: string | null) => void;
   onMoveTo: (id: string, u: number) => void;
 }) {
@@ -105,8 +108,10 @@ export function RackCanvas({
   const onDevDown = (e: React.PointerEvent, d: Device) => {
     if (armed) return; // placing — let the bay handle the click
     e.stopPropagation();
+    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+    onSelect(d.id, additive);
+    if (additive) return; // additive = building a multi-selection; don't start a drag/move
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
-    onSelect(d.id);
     drag.current = { id: d.id, startY: e.clientY, startRu: d.ru ?? 1 };
     setHoverU(d.ru ?? 1);
   };
@@ -124,7 +129,7 @@ export function RackCanvas({
   const renderPanel = (d: Device) => {
     const r = deviceRect(rack, d);
     const panel: Rect = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
-    const isSel = d.id === selectedId;
+    const isSel = d.id === selectedId || (selectedIds?.has(d.id) ?? false);
 
     // Jack/NIC centers feed cable endpoints; the shared art draws onto these same rects.
     const jacks = devicePortLayout(d, panel);
