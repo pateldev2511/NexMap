@@ -1100,6 +1100,13 @@
   background: #dc2626;
 }
 
+.marquee {
+  fill: color-mix(in srgb, var(--accent) 12%, transparent);
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
 .bulkHint {
   margin: 0 0 8px;
   font-size: 12px;

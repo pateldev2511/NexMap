@@ -22,6 +22,7 @@ export interface RejectInfo {
 import { slotOf } from './rackModel';
 import { deviceFaceParts, deviceOppositeFaceParts, devicePortLayout, rackShellParts, RACK_ART_DEFS } from './rackDeviceArt';
 import { cablePath } from './cablePath';
+import { normalizeRect, devicesInMarquee, MARQUEE_THRESHOLD, type Box } from './marquee';
 import styles from './RackDesigner.module.css';
 
 /**
@@ -41,6 +42,7 @@ export function RackCanvas({
   onPlaceAt,
   onDropPreset,
   onSelect,
+  onMarquee,
   onSelectCable,
   onMoveTo,
 }: {
@@ -62,6 +64,8 @@ export function RackCanvas({
   /** A library chip was dragged + dropped onto a U (key = preset key). */
   onDropPreset: (key: string, u: number) => void;
   onSelect: (id: string | null, additive?: boolean) => void;
+  /** Rubber-band selection result: device ids inside the box (additive when shift/cmd held). */
+  onMarquee?: (ids: string[], additive: boolean) => void;
   onSelectCable: (id: string | null) => void;
   onMoveTo: (id: string, u: number) => void;
 }) {
@@ -72,9 +76,23 @@ export function RackCanvas({
   const [hoverU, setHoverU] = useState<number | null>(null);
   const [dragU, setDragU] = useState<number | null>(null); // external drag-from-library
   const drag = useRef<{ id: string; startY: number; startRu: number } | null>(null);
+  // Marquee (rubber-band) selection. `pending` records the press; it only becomes a real
+  // marquee after crossing MARQUEE_THRESHOLD, so a plain empty click stays a click.
+  const marquee = useRef<{ sx: number; sy: number; active: boolean } | null>(null);
+  const justMarqueed = useRef(false);
+  const [marqueeBox, setMarqueeBox] = useState<Box | null>(null);
 
   const mounted = devices.filter((d) => d.rackId === rack.id && d.ru != null);
   const portCenters = new Map<string, { x: number; y: number }>(); // `${devId}:${ifaceId}`
+  const deviceRects: { id: string; box: Box }[] = []; // selectable device panels, in SVG space
+
+  /** Map a client point to SVG user-space coordinates (uniform scale via the viewBox). */
+  const clientToSvg = (clientX: number, clientY: number): { x: number; y: number } => {
+    const svg = svgRef.current;
+    if (!svg) return { x: 0, y: 0 };
+    const r = svg.getBoundingClientRect();
+    return { x: ((clientX - r.left) / r.width) * width, y: ((clientY - r.top) / r.height) * height };
+  };
 
   // Map a client Y to a 1-based U (U1 at bottom).
   const yToU = (clientY: number): number => {
@@ -92,13 +110,36 @@ export function RackCanvas({
       onSelectNudge(e);
       return;
     }
+    if (marquee.current) {
+      const p = clientToSvg(e.clientX, e.clientY);
+      if (!marquee.current.active) {
+        if (Math.abs(p.x - marquee.current.sx) + Math.abs(p.y - marquee.current.sy) <= MARQUEE_THRESHOLD) return;
+        marquee.current.active = true; // crossed the threshold → it's a real marquee, capture
+        svgRef.current?.setPointerCapture?.(e.pointerId);
+      }
+      setMarqueeBox(normalizeRect(marquee.current.sx, marquee.current.sy, p.x, p.y));
+      return;
+    }
     if (armed) setHoverU(yToU(e.clientY));
+  };
+
+  /** Press on empty canvas (devices stopPropagation, so this is bay/background). */
+  const onCanvasDown = (e: React.PointerEvent) => {
+    if (armed || e.button !== 0 || !onMarquee) return; // placing or no marquee consumer
+    const p = clientToSvg(e.clientX, e.clientY);
+    marquee.current = { sx: p.x, sy: p.y, active: false };
   };
   const onSelectNudge = (e: React.PointerEvent) => {
     if (!drag.current) return;
     setHoverU(yToU(e.clientY));
   };
   const onBayClick = (e: React.MouseEvent) => {
+    // A marquee just finished on this press — swallow the trailing click so it doesn't
+    // also clear the cable highlight.
+    if (justMarqueed.current) {
+      justMarqueed.current = false;
+      return;
+    }
     // Compute the U directly from the click, not from hover state — so a tap or a
     // click-without-prior-move still lands reliably.
     if (armed) onPlaceAt(yToU(e.clientY));
@@ -115,12 +156,20 @@ export function RackCanvas({
     drag.current = { id: d.id, startY: e.clientY, startRu: d.ru ?? 1 };
     setHoverU(d.ru ?? 1);
   };
-  const onDevUp = () => {
+  const onDevUp = (e?: React.PointerEvent) => {
     if (drag.current && hoverU != null) {
       onMoveTo(drag.current.id, hoverU);
     }
     drag.current = null;
     setHoverU(null);
+    if (marquee.current?.active && marqueeBox && onMarquee) {
+      const ids = devicesInMarquee(deviceRects, marqueeBox);
+      const additive = !!(e && (e.shiftKey || e.metaKey || e.ctrlKey));
+      onMarquee(ids, additive);
+      justMarqueed.current = true; // suppress the trailing click's cable-clear
+    }
+    marquee.current = null;
+    setMarqueeBox(null);
   };
 
   const cssVar = (name: string): string => `var(${name})`;
@@ -130,6 +179,7 @@ export function RackCanvas({
     const r = deviceRect(rack, d);
     const panel: Rect = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
     const isSel = d.id === selectedId || (selectedIds?.has(d.id) ?? false);
+    deviceRects.push({ id: d.id, box: { x: panel.x, y: panel.y, w: panel.w, h: panel.h } });
 
     // Jack/NIC centers feed cable endpoints; the shared art draws onto these same rects.
     const jacks = devicePortLayout(d, panel);
@@ -186,6 +236,7 @@ export function RackCanvas({
       width={width}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
+      onPointerDown={onCanvasDown}
       onPointerMove={onBayMove}
       onClick={onBayClick}
       onPointerUp={onDevUp}
@@ -326,6 +377,16 @@ export function RackCanvas({
             />
           )}
         </g>
+      )}
+      {marqueeBox && (
+        <rect
+          className={styles.marquee}
+          x={marqueeBox.x}
+          y={marqueeBox.y}
+          width={marqueeBox.w}
+          height={marqueeBox.h}
+          pointerEvents="none"
+        />
       )}
     </svg>
   );

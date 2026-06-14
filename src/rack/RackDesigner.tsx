@@ -778,6 +778,7 @@ export function RackDesigner() {
                 onPlaceAt={placeAt}
                 onDropPreset={dropPreset}
                 onSelect={selectDevice}
+                onMarquee={(ids, additive) => s().select(ids, additive)}
                 onSelectCable={setSelCable}
                 onMoveTo={moveTo}
               />

@@ -29,3 +29,40 @@ test('rack designer opens into the side-by-side canvas; +Rack in place; hide rea
   await page.getByRole('button', { name: /All racks/ }).click();
   await expect(row).toBeVisible();
 });
+
+test('focus view: marquee-drag on the canvas multi-selects devices and opens the bulk-edit panel', async ({ page }) => {
+  // Tall viewport so the full rack SVG is on-screen (a 42U rack is taller than the default 720).
+  await page.setViewportSize({ width: 1280, height: 1500 });
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto('/');
+  await page.getByRole('button', { name: /Rack designer/i }).first().click();
+
+  // Apply a template so the rack has gear to select.
+  await page.getByRole('button', { name: /Enterprise core \(42U\)/ }).click();
+  // Drill into the single-rack focus editor.
+  await page.getByRole('button', { name: /^Single rack$/ }).click();
+  const canvas = page.getByTestId('rack-canvas');
+  await expect(canvas).toBeVisible();
+
+  // Rubber-band a large box: start in the empty left rail margin (empty regardless of U
+  // occupancy, and a device pointerdown would stopPropagation anyway), drag across the gear.
+  const box = (await canvas.boundingBox())!;
+  const startX = box.x + 4; // left rail/frame, not a device panel
+  const startY = box.y + box.height * 0.15;
+  const endX = box.x + box.width * 0.85;
+  const endY = box.y + box.height * 0.8;
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + 6, startY + 8); // cross the marquee threshold
+  await page.mouse.move(endX, endY, { steps: 10 });
+  await page.mouse.up();
+
+  // The bulk-edit panel appears once the marquee grabbed 2+ devices.
+  await expect(page.getByRole('heading', { name: /Bulk edit · \d+ devices/ })).toBeVisible();
+
+  // Arbiter regression guard: a plain click on a single device drops back to single-select
+  // (the marquee gesture didn't hijack normal device clicks).
+  await page.locator('[role="button"][aria-label*="U"]').first().click();
+  await expect(page.getByRole('heading', { name: /^Selected device$/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Bulk edit · \d+ devices/ })).toHaveCount(0);
+});
