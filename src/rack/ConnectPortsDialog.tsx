@@ -71,14 +71,11 @@ export function ConnectPortsDialog({
       { deviceId: bDev, ifaceId: bPort },
       color,
       label.trim() || undefined,
+      lengthFt.trim() && Number.isFinite(Number(lengthFt)) && Number(lengthFt) > 0 ? Number(lengthFt) : undefined,
     );
     if (id == null) {
       setErr('That connection is invalid (same port, or a port is already cabled).');
       return;
-    }
-    const len = Number(lengthFt);
-    if (lengthFt.trim() && Number.isFinite(len) && len > 0) {
-      s().updateRackCable(id, { lengthFt: undefined }, { lengthFt: len });
     }
     onClose();
   };

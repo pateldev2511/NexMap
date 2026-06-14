@@ -6,7 +6,6 @@ import {
   deviceRect,
   uLabelCenterY,
   uToY,
-  portLayout,
   BAY_W,
   RAIL_PX,
   U_PX,
@@ -20,15 +19,14 @@ export interface RejectInfo {
   reason: string;
   pulseU: number | null;
 }
-import { panelKindFor } from './panelKind';
 import { slotOf } from './rackModel';
-import { deviceFaceParts, deviceGhostParts, RACK_ART_DEFS } from './rackDeviceArt';
+import { deviceFaceParts, deviceOppositeFaceParts, devicePortLayout, rackShellParts, RACK_ART_DEFS } from './rackDeviceArt';
+import { cablePath } from './cablePath';
 import styles from './RackDesigner.module.css';
 
 /**
- * Live SVG rack editor (eng-review A2: the interactive renderer). Shares geometry with
- * the export builder via rackLayout; uses themeable CSS-var colors + selection state.
- * Export forks the markup (literal hex) — this one optimizes for interaction.
+ * Live SVG rack editor. Shares the rack/device/cable drawing primitives used by export,
+ * while keeping interaction and selection state in React.
  */
 export function RackCanvas({
   rack,
@@ -126,14 +124,10 @@ export function RackCanvas({
   const renderPanel = (d: Device) => {
     const r = deviceRect(rack, d);
     const panel: Rect = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
-    const kind = panelKindFor(d.type);
-    const ports = (d.interfaces ?? []).map((i) => ({ id: i.id, name: i.name }));
     const isSel = d.id === selectedId;
 
-    // Jack centers feed cable endpoints; the shared art draws onto these same rects.
-    const jacks = kind === 'switch' || kind === 'patch' || kind === 'firewall'
-      ? portLayout(panel, ports)
-      : [];
+    // Jack/NIC centers feed cable endpoints; the shared art draws onto these same rects.
+    const jacks = devicePortLayout(d, panel);
     for (const j of jacks) {
       portCenters.set(`${d.id}:${j.ifaceId}`, { x: j.x + j.w / 2, y: j.y + j.h / 2 });
     }
@@ -160,15 +154,15 @@ export function RackCanvas({
     );
   };
 
-  /** A device on the OTHER face, drawn as a muted back-of-chassis ghost so its U doesn't
-   *  read as empty. Non-interactive; the real, editable panel lives on the opposite face. */
+  /** A device on the OTHER face. Full-depth gear shows its rear hardware; shallow gear
+   *  remains a muted occupancy hint. Non-interactive; editing lives on the mounted face. */
   const renderGhost = (d: Device) => {
     const r = deviceRect(rack, d);
     const panel: Rect = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
     return (
       <g key={`ghost-${d.id}`} pointerEvents="none" aria-hidden="true">
         <title>{`${d.name} — mounted on the ${slotOf(d).side} face`}</title>
-        <g dangerouslySetInnerHTML={{ __html: deviceGhostParts(d, panel, side).join('') }} />
+        <g dangerouslySetInnerHTML={{ __html: deviceOppositeFaceParts(d, panel, side).join('') }} />
       </g>
     );
   };
@@ -206,28 +200,30 @@ export function RackCanvas({
       }}
     >
       <g dangerouslySetInnerHTML={{ __html: RACK_ART_DEFS }} />
-      {/* cabinet frame + corner screws */}
-      <rect x={1} y={1} width={width - 2} height={height - 2} rx={12}
-        style={{ fill: 'var(--chrome-bg)', stroke: 'var(--chrome-border)', strokeWidth: 2 }} />
-      {[[8, 8], [width - 8, 8], [8, height - 8], [width - 8, height - 8]].map(([cx, cy], i) => (
-        <circle key={i} cx={cx} cy={cy} r={4} style={{ fill: 'var(--canvas-grid)', stroke: 'var(--chrome-border)' }} />
-      ))}
-      <text x={origin.x} y={origin.y - 3} fontFamily="var(--font-ui)" fontSize={13} fontWeight={700} style={{ fill: 'var(--chrome-fg)' }}>
-        {rack.name} · {rack.ruHeight}U · {side}
-      </text>
-
-      {/* bay + rails */}
-      <rect x={origin.x} y={origin.y} width={BAY_W} height={bayH} rx={4} style={{ fill: 'var(--canvas-grid)' }} />
-      {[origin.x + 1, origin.x + BAY_W - RAIL_PX - 1].map((rx, i) => (
-        <rect key={i} x={rx} y={origin.y + 4} width={RAIL_PX} height={bayH - 8} rx={2} style={{ fill: 'var(--chrome-border)' }} />
-      ))}
+      <g dangerouslySetInnerHTML={{
+        __html: rackShellParts({
+          rackName: rack.name,
+          ruHeight: rack.ruHeight,
+          face: side,
+          x: 0,
+          y: 0,
+          width,
+          height,
+          bayX: origin.x,
+          bayY: origin.y,
+          bayW: BAY_W,
+          bayH,
+          title: true,
+          active: true,
+        }).join(''),
+      }} />
 
       {/* U-number gutter */}
       {Array.from({ length: rack.ruHeight }, (_, i) => {
         const u = i + 1;
         return (
-          <text key={u} x={origin.x - 6} y={origin.y + uLabelCenterY(rack, u) + 3} textAnchor="end"
-            fontFamily="var(--font-mono)" fontSize={9} style={{ fill: 'var(--accent)' }}>{u}</text>
+          <text key={u} x={origin.x - 23} y={origin.y + uLabelCenterY(rack, u) + 3} textAnchor="end"
+            fontFamily="var(--font-mono)" fontSize={9} style={{ fill: '#64748b' }}>{u}</text>
         );
       })}
 
@@ -256,27 +252,27 @@ export function RackCanvas({
         if (!a || !b) return null;
         const sel = c.id === selectedCableId;
         const anySel = selectedCableId != null;
-        // Bow the control point sideways by a per-cable amount → parallels fan apart.
-        const bow = ((i % 6) - 2.5) * 18;
-        const mx = (a.x + b.x) / 2 + bow;
-        const my = (a.y + b.y) / 2;
-        const dPath = `M ${a.x.toFixed(1)} ${a.y.toFixed(1)} Q ${mx.toFixed(1)} ${my.toFixed(1)} ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
-        const op = anySel ? (sel ? 1 : 0.16) : 0.92;
-        const w = sel ? 4 : 2.5;
+        const { d: dPath, control } = cablePath(a, b, i, false);
+        const op = anySel ? (sel ? 1 : 0.16) : 0.94;
+        const w = sel ? 4.4 : 3.1;
         return (
           <g
             key={c.id}
             style={{ cursor: 'pointer' }}
             onClick={(e) => { e.stopPropagation(); onSelectCable(sel ? null : c.id); }}
           >
-            {/* halo under the colored stroke for separation at crossings */}
-            <path d={dPath} fill="none" stroke="var(--chrome-bg)" strokeWidth={w + 3} strokeLinecap="round" opacity={op} />
+            {/* layered cable: soft shadow, pale jacket highlight, colored core, plug ends */}
+            <path d={dPath} fill="none" stroke="#020617" strokeWidth={w + 5} strokeLinecap="round" opacity={op * 0.24} filter="url(#rkCableShadow)" />
+            <path d={dPath} fill="none" stroke="#f8fafc" strokeWidth={w + 2.4} strokeLinecap="round" opacity={op * 0.86} />
             <path d={dPath} fill="none" stroke={c.color} strokeWidth={w} strokeLinecap="round" opacity={op} />
-            <circle cx={a.x} cy={a.y} r={sel ? 4 : 3} fill={c.color} opacity={op} stroke="var(--chrome-bg)" strokeWidth={1} />
-            <circle cx={b.x} cy={b.y} r={sel ? 4 : 3} fill={c.color} opacity={op} stroke="var(--chrome-bg)" strokeWidth={1} />
+            <path d={dPath} fill="none" stroke="#ffffff" strokeWidth={0.9} strokeLinecap="round" opacity={op * 0.5} />
+            <circle cx={a.x} cy={a.y} r={sel ? 4.8 : 3.9} fill="#0f172a" opacity={op} stroke="#f8fafc" strokeWidth={1.1} />
+            <circle cx={b.x} cy={b.y} r={sel ? 4.8 : 3.9} fill="#0f172a" opacity={op} stroke="#f8fafc" strokeWidth={1.1} />
+            <circle cx={a.x} cy={a.y} r={sel ? 2.6 : 2.1} fill={c.color} opacity={op} />
+            <circle cx={b.x} cy={b.y} r={sel ? 2.6 : 2.1} fill={c.color} opacity={op} />
             {sel && c.label && (
               <text
-                x={mx} y={my - 5} textAnchor="middle"
+                x={control.x} y={control.y - 5} textAnchor="middle"
                 fontFamily="var(--font-mono)" fontSize={10}
                 stroke="var(--chrome-bg)" strokeWidth={3} paintOrder="stroke"
                 style={{ fill: 'var(--chrome-fg)' }}

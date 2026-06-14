@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { useProjectStore } from '@/store/projectStore';
 import { RACK_TEMPLATES, templatesByTier, RACK_TIERS } from './rackTemplates';
 import { presetByKey } from './rackDevicePresets';
+import { catalogById } from './rackCatalog';
 import { rackPresetById } from './rackTypes';
 import { isFullDepth, slotsCollide, type Slot } from './rackModel';
 
@@ -23,6 +24,11 @@ describe('rack templates — data integrity', () => {
         for (const dv of r.devices) {
           const p = presetByKey(dv.presetKey);
           expect(p, `device preset ${dv.presetKey}`).toBeTruthy();
+          if (dv.catalogId) {
+            const catalog = catalogById(dv.catalogId);
+            expect(catalog, `catalog model ${dv.catalogId}`).toBeTruthy();
+            expect(catalog!.type, `${dv.name} catalog type`).toBe(p!.type);
+          }
           const mount = p!.mount ?? 'rack';
           if (mount !== 'rail') {
             expect(dv.ru, `${dv.name} ru in bounds`).toBeGreaterThanOrEqual(1);
@@ -56,6 +62,8 @@ describe('applyRackTemplate (store)', () => {
     const sw = devs.find((d) => d.name === 'home-sw');
     expect(sw?.ru).toBe(5);
     expect(sw?.watts).toBeGreaterThan(0); // power spec populated from the preset
+    expect(sw?.vendor).toBe('Netgear');
+    expect(sw?.model).toBe('GS724T');
 
     s().undo();
     expect(s().racksAll()).toHaveLength(0);

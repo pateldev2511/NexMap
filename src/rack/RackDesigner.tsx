@@ -23,8 +23,15 @@ import { slotOf, canFit, nearestFreeU, isFullDepth, orderRacks, type FitResult }
 import { RACK_DEVICE_PRESETS, RACK_PRESET_GROUPS, type RackDevicePreset } from './rackDevicePresets';
 import { RACK_PRESETS, rackFieldsFromPreset, DEFAULT_RACK_PRESET } from './rackTypes';
 import { RackTemplatePicker } from './RackTemplatePicker';
+import { catalogById, catalogForType, catalogSpecLabel } from './rackCatalog';
 import type { RackTemplate } from './rackTemplates';
 import { COLOR_BY_MODES, colorByLegend, type ColorByMode } from './rackColorBy';
+import { rackInsights, type RackInsight } from './rackInsights';
+import { rackHealthScore } from './rackHealthScore';
+import { bomCsv } from './rackBom';
+import { deviceMatchesQuery } from './rackSearch';
+import { deviceFaceParts, RACK_ART_DEFS } from './rackDeviceArt';
+import type { Device } from '@/model/types';
 import styles from './RackDesigner.module.css';
 
 /** Human-readable reason for a rejected drop. */
@@ -40,6 +47,54 @@ function rejectReason(fit: FitResult): string {
     default:
       return 'Invalid slot';
   }
+}
+
+const PRESET_THUMB_CATALOG: Record<string, string> = {
+  'sw-48': 'arista-7050sx3-48',
+  'sw-24': 'cisco-c9300-24t',
+  'sw-16': 'ubnt-usw-pro-48',
+  'sw-8': 'netgear-gs724t',
+  'sw-4': 'netgear-gs724t',
+  'sw-core': 'cisco-n9336c',
+  router: 'cisco-isr4331',
+  firewall: 'forti-100f',
+  lb: 'f5-i2800',
+  wlc: 'cisco-c9800-40',
+  console: 'juniper-ex4300-48t',
+  'server-2u': 'dell-r750',
+  'server-1u': 'dell-r650',
+  blade: 'hpe-dl380-g11',
+  storage: 'dell-me5024',
+  ups: 'apc-srt2200',
+  psu: 'apc-srt2200',
+  'patch-24': 'panduit-24',
+  'patch-48': 'panduit-48',
+  fiber: 'panduit-24',
+};
+
+function GearThumb({ preset, device }: { preset?: RackDevicePreset; device?: Device }) {
+  const panelH = preset ? Math.max(22, Math.min(34, preset.span * 13)) : 28;
+  const panel = { x: 5, y: 5, w: 112, h: panelH };
+  const thumbModel = preset ? catalogById(PRESET_THUMB_CATALOG[preset.key] ?? '') : undefined;
+  const source: Device = device ?? {
+    id: `thumb-${preset?.key ?? 'device'}`,
+    kind: 'device',
+    type: preset?.type ?? 'generic',
+    name: preset?.label ?? 'Device',
+    ...(thumbModel ? { vendor: thumbModel.vendor, model: thumbModel.model } : {}),
+    x: 0,
+    y: 0,
+    width: 56,
+    height: 40,
+    layerId: 'thumb',
+    interfaces: Array.from({ length: Math.min(preset?.ports ?? 0, 48) }, (_, i) => ({ id: `p${i}`, name: preset?.portName(i) ?? `p${i}` })),
+  };
+  const face = device ? slotOf(device).side : 'front';
+  return (
+    <svg className={styles.gearThumb} viewBox={`0 0 122 ${panelH + 10}`} aria-hidden="true">
+      <g dangerouslySetInnerHTML={{ __html: RACK_ART_DEFS + deviceFaceParts(source, panel, face).join('') }} />
+    </svg>
+  );
 }
 
 /**
@@ -73,6 +128,8 @@ export function RackDesigner() {
   const [search, setSearch] = useState('');
   const [deviceSearch, setDeviceSearch] = useState('');
   const [exportMode, setExportMode] = useState<ExportMode>('diagram');
+  const [inspectorTab, setInspectorTab] = useState<'placement' | 'hardware' | 'power' | 'cabling' | 'asset'>('placement');
+  const [rowReject, setRowReject] = useState<string | null>(null);
 
   // Snapshot the store collections ONCE per revision. devicesAll()/rackCablesAll() each
   // return a fresh array, so memoizing them on `rev` is what makes every downstream memo
@@ -86,14 +143,24 @@ export function RackDesigner() {
   const inRack = useMemo(() => devices.filter((d) => d.rackId === rack?.id), [devices, rack?.id]);
   const budget = useMemo(() => (rack ? rackBudget(rack, devices) : null), [rack, devices]);
   const usedU = budget?.usedU ?? 0;
-  // Cross-rack device search → ids to highlight in the row view.
+  // Cross-rack device search → ids to highlight in the row view. Deep match: name, type,
+  // vendor, model, role, owner, asset tag, serial, status, mgmt IP, VLAN (rackSearch.ts).
   const searchHits = useMemo(() => {
-    const q = deviceSearch.trim().toLowerCase();
+    const q = deviceSearch.trim();
     if (!q) return new Set<string>();
-    return new Set(devices.filter((d) => d.rackId != null && (d.name.toLowerCase().includes(q) || d.type.toLowerCase().includes(q))).map((d) => d.id));
+    return new Set(devices.filter((d) => d.rackId != null && deviceMatchesQuery(d, q)).map((d) => d.id));
   }, [deviceSearch, devices]);
   // Physical-cabling health (warns, never blocks).
   const cabling = useMemo(() => analyzeCabling(devices, cables), [devices, cables]);
+  const insights = useMemo(
+    () => rackInsights({ racks, devices, cables, issues: cabling.issues, activeRackId: rack?.id, selectedDeviceId: selectedId }),
+    [racks, devices, cables, cabling.issues, rack?.id, selectedId],
+  );
+  // Rack health score for the focused rack's header chip (0-100 + biggest risk).
+  const health = useMemo(
+    () => (rack ? rackHealthScore(rack, devices, cables, cabling.issues) : null),
+    [rack, devices, cables, cabling.issues],
+  );
   // Device counts per face — surfaced on the Front/Rear toggle so flipping to an empty
   // face never looks like your gear vanished.
   const faceCounts = useMemo(() => {
@@ -111,8 +178,6 @@ export function RackDesigner() {
     if (next === side) return;
     setSideState(next);
     setSelCable(null);
-    // Clear a device selection that isn't on the new face (avoids a stale inspector).
-    if (selected && slotOf(selected).side !== next) s().select([]);
   }
 
   // Keyboard: ↑/↓ nudge selected device a U, Delete removes it, Esc clears. Declared
@@ -267,6 +332,88 @@ export function RackDesigner() {
     s().updateDevice(selected.id, { name: selected.name }, { name });
   }
 
+  function updateSelected<K extends keyof Device>(key: K, value: Device[K]) {
+    if (!selected) return;
+    s().updateDevice(
+      selected.id,
+      { [key]: selected[key] } as Partial<Device>,
+      { [key]: value } as Partial<Device>,
+    );
+  }
+
+  function commitSelectedEdit() {
+    s().endEdit();
+  }
+
+  function applyCatalogModel(modelId: string) {
+    if (!selected) return;
+    const model = catalogById(modelId);
+    if (!model) return;
+    s().updateDevice(
+      selected.id,
+      { vendor: selected.vendor, model: selected.model, watts: selected.watts, weightKg: selected.weightKg },
+      { vendor: model.vendor, model: model.model, watts: model.watts || undefined, weightKg: model.weightKg || undefined },
+    );
+    s().endEdit();
+  }
+
+  function deviceCableRows(deviceId: string) {
+    return cables.filter((c) => c.aEnd.deviceId === deviceId || c.bEnd.deviceId === deviceId);
+  }
+
+  function focusDevice(deviceId: string) {
+    const d = devices.find((x) => x.id === deviceId);
+    if (!d) return;
+    if (d.rackId) setRackId(d.rackId);
+    setSideState(slotOf(d).side);
+    s().select([deviceId]);
+  }
+
+  function handleInsight(insight: RackInsight) {
+    if (insight.action === 'auto-length') {
+      s().autoLengthRackCables();
+      return;
+    }
+    if (insight.action === 'add-asset-tag') {
+      if (insight.deviceId) focusDevice(insight.deviceId);
+      setInspectorTab('asset');
+      return;
+    }
+    if (insight.action === 'balance-power') {
+      // The imbalance insight is actionable: actually rebalance A/B. The single-corded
+      // insight is a hardware-redundancy problem a feed flip can't fix — just navigate.
+      if (insight.id === 'power-imbalance') {
+        const moved = s().balancePower();
+        if (moved === 0 && selectedId) setInspectorTab('power');
+      } else {
+        if (selectedId) setInspectorTab('power');
+      }
+      return;
+    }
+    if (insight.action === 'go-to-u' && insight.deviceId && insight.rackId && insight.targetU != null) {
+      const d = devices.find((x) => x.id === insight.deviceId);
+      const target = racks.find((r) => r.id === insight.rackId);
+      if (!d || !target) return;
+      const sl = slotOf(d);
+      s().placeInRack(insight.deviceId, insight.rackId, { ...sl, ru: insight.targetU });
+      setView('focus');
+      focusDevice(insight.deviceId);
+      return;
+    }
+    if (insight.action === 'review-health') {
+      const cableId = insight.objectIds?.find((id) => cables.some((c) => c.id === id));
+      const deviceId = insight.objectIds?.find((id) => devices.some((d) => d.id === id));
+      if (cableId) setSelCable(cableId);
+      if (deviceId) focusDevice(deviceId);
+      setInspectorTab('cabling');
+      return;
+    }
+    if (insight.rackId) {
+      setRackId(insight.rackId);
+      setView('row');
+    }
+  }
+
   /** Move a rack one slot left/right in the row by swapping `order` with its neighbor. */
   function reorderRack(id: string, dir: -1 | 1) {
     const i = racks.findIndex((r) => r.id === id);
@@ -283,23 +430,27 @@ export function RackDesigner() {
   /** Drop a device into another rack at the nearest free U (keeps its span/side/bay).
       Surfaces a rejection (and does NOT move) when the target rack has no room — never a
       silent no-op. On success, follow the device to its new rack so the move is visible. */
-  function moveDeviceToRack(deviceId: string, targetRackId: string) {
+  function moveDeviceToRack(deviceId: string, targetRackId: string, follow = true): boolean {
     const d = devices.find((x) => x.id === deviceId);
     const target = racks.find((r) => r.id === targetRackId);
-    if (!d || !target || d.rackId === targetRackId) return;
+    if (!d || !target || d.rackId === targetRackId) return false;
     const sl = slotOf(d);
     const occ = devices.filter((x) => x.rackId === targetRackId);
     const wanted = Math.max(1, Math.min(sl.ru, target.ruHeight - sl.ruSpan + 1));
     const u = nearestFreeU(target, occ, sl.ruSpan, wanted, sl.side, sl.bay, sl.depth);
     const showReject = (reason: string) => {
       setReject({ u: wanted, span: sl.ruSpan, reason, pulseU: null });
+      setRowReject(reason);
       window.setTimeout(() => setReject(null), 2400);
+      window.setTimeout(() => setRowReject(null), 2400);
     };
-    if (u == null) { showReject(`No room in ${target.name}`); return; }
+    if (u == null) { showReject(`No room in ${target.name}`); return false; }
     const fit = s().placeInRack(deviceId, targetRackId, { ...sl, ru: u });
-    if (!fit.ok) { showReject(rejectReason(fit)); return; }
-    setRackId(targetRackId);
+    if (!fit.ok) { showReject(rejectReason(fit)); return false; }
+    if (follow) setRackId(targetRackId);
+    setSideState(sl.side);
     s().select([deviceId]);
+    return true;
   }
 
   function cloneCurrentRack() {
@@ -342,68 +493,88 @@ export function RackDesigner() {
       .then(({ blob }) => downloadBlob(blob, `${exportName()}-labels.png`))
       .catch(() => undefined);
   }
+  function exportBom() {
+    // Fleet-wide bill of materials; works regardless of focus.
+    downloadBlob(new Blob([bomCsv(devices)], { type: 'text/csv' }), `${exportName()}-bom.csv`);
+  }
 
   return (
     <div className={styles.root}>
       <div className={styles.toolbar}>
-        <span className={styles.title}>Rack designer</span>
-        {view === 'focus' ? (
-          <button className={styles.btn} title="Back to the all-racks canvas" onClick={() => { setView('row'); s().select([]); }}>← All racks</button>
-        ) : (
-          <span className={styles.stat}>{racks.length} rack{racks.length === 1 ? '' : 's'} · click one to edit</span>
-        )}
-        <button className={styles.btn} onClick={createRack}>+ Rack</button>
-        <button className={`${styles.btn} ${showTemplates ? styles.primary : ''}`} title="Insert a pre-made rack template" onClick={() => setShowTemplates((v) => !v)}>Templates</button>
-        <button className={styles.btn} title="Duplicate the focused rack with its gear + cabling" onClick={cloneCurrentRack}>Clone</button>
-        {view === 'row' ? (
-          <>
-            <button className={`${styles.btn} ${!showRear ? styles.primary : ''}`} title="Show or hide the rear face of every rack" onClick={() => setShowRear((v) => !v)}>
-              {showRear ? 'Hide rear' : 'Show rear'}
-            </button>
-            <select value={colorBy} onChange={(e) => setColorBy(e.target.value as ColorByMode)} title="Tint devices by an attribute to scan the fleet">
-              {COLOR_BY_MODES.map((m) => <option key={m.value} value={m.value}>Color: {m.label}</option>)}
-            </select>
-          </>
-        ) : (
-          <>
-            <select value={rack.id} onChange={(e) => setRackId(e.target.value)} title="Jump to another rack">
-              {racks.map((r) => <option key={r.id} value={r.id}>{r.name} · {r.ruHeight}U</option>)}
-            </select>
-            <div className={styles.seg} title="Mounting face — devices on opposite faces don't collide.">
-              <button className={side === 'front' ? styles.on : ''} onClick={() => setSide('front')}>
-                Front{faceCounts.front > 0 && <span className={styles.badge}>{faceCounts.front}</span>}
+        <div className={styles.brandBlock}>
+          <span className={styles.title}>Rack designer</span>
+          <span>{view === 'row' ? `${racks.length} rack${racks.length === 1 ? '' : 's'} · row view` : `${rack.name} · ${side}`}</span>
+        </div>
+        <div className={styles.commandGroup} aria-label="Rack commands">
+          {view === 'focus' && (
+            <button className={styles.btn} title="Back to the all-racks canvas" onClick={() => setView('row')}>All racks</button>
+          )}
+          <button className={styles.btn} onClick={createRack}>+ Rack</button>
+          <button className={`${styles.btn} ${showTemplates ? styles.primary : ''}`} title="Insert a pre-made rack template" onClick={() => setShowTemplates((v) => !v)}>Templates</button>
+          <button className={styles.btn} title="Duplicate the focused rack with its gear + cabling" onClick={cloneCurrentRack}>Clone</button>
+        </div>
+        <div className={styles.commandGroup} aria-label="Plan and view controls">
+          <div className={styles.seg} title="Workspace view">
+            <button className={view === 'row' ? styles.on : ''} onClick={() => setView('row')}>Row view</button>
+            <button className={view === 'focus' ? styles.on : ''} onClick={() => setView('focus')}>Single rack</button>
+          </div>
+          {view === 'row' ? (
+            <>
+              <button className={`${styles.btn} ${!showRear ? styles.primary : ''}`} title="Show or hide the rear face of every rack" onClick={() => setShowRear((v) => !v)}>
+                {showRear ? 'Hide rear' : 'Show rear'}
               </button>
-              <button className={side === 'rear' ? styles.on : ''} onClick={() => setSide('rear')}>
-                Rear{faceCounts.rear > 0 && <span className={styles.badge}>{faceCounts.rear}</span>}
-              </button>
-            </div>
-            {armed && (armed.mount ?? 'rack') === 'rack' && (
-              <div className={styles.seg} title="Half-width bay: two devices share one U">
-                <button className={bay === 'full' ? styles.on : ''} onClick={() => setBay('full')}>Full</button>
-                <button className={bay === 'left' ? styles.on : ''} onClick={() => setBay('left')}>L</button>
-                <button className={bay === 'right' ? styles.on : ''} onClick={() => setBay('right')}>R</button>
+              <select value={colorBy} onChange={(e) => setColorBy(e.target.value as ColorByMode)} title="Tint devices by an attribute to scan the fleet">
+                {COLOR_BY_MODES.map((m) => <option key={m.value} value={m.value}>Color: {m.label}</option>)}
+              </select>
+            </>
+          ) : (
+            <>
+              <select value={rack.id} onChange={(e) => setRackId(e.target.value)} title="Jump to another rack">
+                {racks.map((r) => <option key={r.id} value={r.id}>{r.name} · {r.ruHeight}U</option>)}
+              </select>
+              <div className={styles.seg} title="Mounting face — devices on opposite faces don't collide.">
+                <button className={side === 'front' ? styles.on : ''} onClick={() => setSide('front')}>
+                  Front{faceCounts.front > 0 && <span className={styles.badge}>{faceCounts.front}</span>}
+                </button>
+                <button className={side === 'rear' ? styles.on : ''} onClick={() => setSide('rear')}>
+                  Rear{faceCounts.rear > 0 && <span className={styles.badge}>{faceCounts.rear}</span>}
+                </button>
               </div>
-            )}
-          </>
-        )}
-        <div className={styles.spacer} />
-        <span className={styles.stat} title="Used / total U (and power/weight if capped)">
-          {usedU} / {rack.ruHeight}U{budget && budget.maxWatts != null ? ` · ${budget.watts}/${budget.maxWatts}W` : ''}
+              {armed && (armed.mount ?? 'rack') === 'rack' && (
+                <div className={styles.seg} title="Half-width bay: two devices share one U">
+                  <button className={bay === 'full' ? styles.on : ''} onClick={() => setBay('full')}>Full</button>
+                  <button className={bay === 'left' ? styles.on : ''} onClick={() => setBay('left')}>L</button>
+                  <button className={bay === 'right' ? styles.on : ''} onClick={() => setBay('right')}>R</button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        <span className={styles.commandMetric} title="Used / total U (and power/weight if capped)">
+          <b>{usedU}</b>/{rack.ruHeight}U{budget && budget.maxWatts != null ? ` · ${budget.watts}/${budget.maxWatts}W` : ''}
           {budget && (budget.overWatts || budget.overWeight) ? ' ⚠' : ''}
         </span>
-        <select value={exportMode} onChange={(e) => setExportMode(e.target.value as ExportMode)} title="What to include in PNG/PDF export">
-          <option value="diagram">Diagram</option>
-          <option value="diagram+table">Diagram + table</option>
-          <option value="table-only">Table only</option>
-        </select>
-        <button className={styles.btn} onClick={exportCsv}>Cable CSV</button>
-        <button className={styles.btn} title="Printable label strips for every device" onClick={exportLabels}>Labels</button>
-        <button className={styles.btn} onClick={exportPdf}>PDF</button>
-        <button className={`${styles.btn} ${styles.primary}`} onClick={exportPng}>Export PNG</button>
+        <div className={styles.spacer} />
+        <div className={styles.commandGroup} aria-label="Export controls">
+          <select value={exportMode} onChange={(e) => setExportMode(e.target.value as ExportMode)} title="What to include in PNG/PDF export">
+            <option value="diagram">Diagram</option>
+            <option value="diagram+table">Diagram + table</option>
+            <option value="table-only">Table only</option>
+          </select>
+          <button className={styles.btn} title="Export the cable schedule as CSV" onClick={exportCsv}>CSV</button>
+          <button className={styles.btn} title="Bill of materials (qty by model, power, weight, cost) as CSV" onClick={exportBom}>BOM</button>
+          <button className={styles.btn} title="Printable label strips for every device" onClick={exportLabels}>Labels</button>
+          <button className={styles.btn} onClick={exportPdf}>PDF</button>
+          <button className={`${styles.btn} ${styles.primary}`} title="Export the visible rack view as PNG" onClick={exportPng}>PNG</button>
+        </div>
       </div>
 
       {/* library */}
       <div className={styles.lib}>
+        <div className={styles.panelTabs} aria-label="Rack library sections">
+          <button className={styles.activeTab}>Library</button>
+          <button onClick={() => setShowTemplates(true)}>Templates</button>
+        </div>
         <input
           className={styles.libSearch}
           placeholder="Search gear…"
@@ -411,6 +582,12 @@ export function RackDesigner() {
           onChange={(e) => setSearch(e.target.value)}
           aria-label="Search device library"
         />
+        <div className={styles.filterPills} aria-label="Gear filters">
+          <span>All</span>
+          <span>Compute</span>
+          <span>Network</span>
+          <span>Power</span>
+        </div>
         {RACK_PRESET_GROUPS.map((group) => {
           const items = RACK_DEVICE_PRESETS.filter(
             (p) => p.group === group && p.label.toLowerCase().includes(search.trim().toLowerCase()),
@@ -436,16 +613,25 @@ export function RackDesigner() {
                 aria-pressed={armed?.key === p.key}
                 title={`Click to arm, or drag onto a slot — ${p.label}`}
               >
-                <span className={styles.glyph}>
-                  {Array.from({ length: Math.min(6, Math.max(1, Math.round(p.ports / 8))) }, (_, i) => <i key={i} />)}
+                <span className={styles.thumbWrap}><GearThumb preset={p} /></span>
+                <span className={styles.chipText}>
+                  <b>{p.label}</b>
+                  <small>
+                    {p.span}U · {p.ports} port{p.ports === 1 ? '' : 's'}
+                    {p.watts > 0 ? ` · ${p.watts}W` : ''}
+                    {p.weightKg > 0 ? ` · ${p.weightKg}kg` : ''}
+                  </small>
                 </span>
-                <span>{p.label}</span>
-                <span className={styles.u}>{p.span}U</span>
+                <span className={styles.u}>{p.mount === 'rail' ? '0U' : `${p.span}U`}</span>
               </button>
             ))}
           </div>
           );
         })}
+        <div className={styles.dragHint}>
+          <b>Drag gear to rack</b>
+          <span>Best-fit slots and conflicts are highlighted as you place equipment.</span>
+        </div>
       </div>
 
       {/* canvas */}
@@ -459,41 +645,38 @@ export function RackDesigner() {
         )}
         {view === 'row' ? (
           <>
-            <input
-              className={styles.libSearch}
-              style={{ maxWidth: 280, alignSelf: 'center', marginBottom: 14 }}
-              placeholder="Find a device across all racks…"
-              value={deviceSearch}
-              onChange={(e) => setDeviceSearch(e.target.value)}
-              aria-label="Search devices across racks"
-            />
+            <div className={styles.workspaceHead}>
+              <div>
+                <h2>Rack row operations</h2>
+                <p>Drag devices between cabinets, scan capacity, and drill into any rack for port-level work.</p>
+              </div>
+              <input
+                className={styles.workspaceSearch}
+                placeholder="Find by name, model, owner, asset tag, serial, VLAN…"
+                value={deviceSearch}
+                onChange={(e) => setDeviceSearch(e.target.value)}
+                aria-label="Search devices across racks by name, model, owner, asset tag, serial, or VLAN"
+              />
+            </div>
             {(() => {
               const f = fleetBudget(racks, devices);
               const pct = f.totalU > 0 ? Math.round((f.usedU / f.totalU) * 100) : 0;
+              const pf = powerFeedAnalysis(devices);
               return (
                 <div className={styles.capacityStrip} role="status" aria-label="Fleet capacity">
-                  <span><b>{f.rackCount}</b> rack{f.rackCount === 1 ? '' : 's'}</span>
-                  <span><b>{f.usedU}</b>/{f.totalU}U used · <b>{f.freeU}</b> free ({pct}%)</span>
-                  <span><b>{(f.watts / 1000).toFixed(2)}</b> kW{f.maxWatts > 0 ? ` / ${(f.maxWatts / 1000).toFixed(2)} kW` : ''}</span>
-                  <span><b>{f.weightKg.toFixed(0)}</b> kg</span>
-                  {(() => {
-                    const pf = powerFeedAnalysis(devices);
-                    if (pf.normalA + pf.normalB <= 0) return null;
-                    return (
-                      <>
-                        <span title="Per-feed power load (dual-corded gear splits A/B)">⚡ A <b>{(pf.normalA / 1000).toFixed(2)}</b> · B <b>{(pf.normalB / 1000).toFixed(2)}</b> kW</span>
-                        {pf.singleCorded > 0 && (
-                          <span className={styles.capOver} title="Single-corded devices have no A/B power redundancy">
-                            ⚠ {pf.singleCorded} single-corded
-                          </span>
-                        )}
-                      </>
-                    );
-                  })()}
-                  {f.anyOver && <span className={styles.capOver}>⚠ over capacity</span>}
+                  <span><small>Racks</small><b>{f.rackCount}</b></span>
+                  <span><small>Space</small><b>{f.freeU}U</b><em>{f.usedU}/{f.totalU}U · {pct}% used</em></span>
+                  <span><small>Power</small><b>{(f.watts / 1000).toFixed(2)} kW</b><em>{f.maxWatts > 0 ? `/ ${(f.maxWatts / 1000).toFixed(2)} kW cap` : 'uncapped'}</em></span>
+                  <span><small>Weight</small><b>{f.weightKg.toFixed(0)} kg</b></span>
+                  {pf.normalA + pf.normalB > 0 && (
+                    <span><small>A/B Feed</small><b>A {(pf.normalA / 1000).toFixed(2)} · B {(pf.normalB / 1000).toFixed(2)}</b></span>
+                  )}
+                  {pf.singleCorded > 0 && <span className={styles.capOver}><small>Risk</small><b>{pf.singleCorded} single-corded</b></span>}
+                  {f.anyOver && <span className={styles.capOver}><small>Capacity</small><b>Over cap</b></span>}
                 </div>
               );
             })()}
+            {rowReject && <div className={styles.rowReject} role="status">{rowReject}</div>}
             {colorBy !== 'gear' && (() => {
               const legend = colorByLegend(devices, colorBy);
               if (legend.length === 0) return null;
@@ -512,97 +695,232 @@ export function RackDesigner() {
               racks={racks}
               devices={devices}
               cables={cables}
+              activeRackId={rack.id}
               selectedId={selectedId}
               searchHits={searchHits}
               showRear={showRear}
               colorBy={colorBy}
               onFocusRack={(id) => { setRackId(id); setView('focus'); }}
-              onSelect={(id) => s().select(id ? [id] : [])}
+              onSelect={(id) => {
+                if (id) focusDevice(id);
+                else s().select([]);
+              }}
               onReorder={reorderRack}
+              onMoveDeviceToRack={(deviceId, targetRackId) => moveDeviceToRack(deviceId, targetRackId, false)}
             />
           </>
         ) : (
-          <RackCanvas
-            rack={rack}
-            devices={devices}
-            cables={cables}
-            selectedId={selectedId}
-            selectedCableId={selCable}
-            side={side}
-            armed={armed != null}
-            reject={reject}
-            onPlaceAt={placeAt}
-            onDropPreset={dropPreset}
-            onSelect={(id) => s().select(id ? [id] : [])}
-            onSelectCable={setSelCable}
-            onMoveTo={moveTo}
-          />
+          <>
+            <div className={styles.workspaceHead}>
+              <div>
+                <h2>{rack.name} · {rack.ruHeight}U · {side}</h2>
+                <p>
+                  {armed
+                    ? `Place ${armed.label}: click a U slot or drag from the library.`
+                    : 'Select gear to manage placement, hardware, power, cabling, and asset fields.'}
+                </p>
+              </div>
+              <div className={styles.rackMiniStats}>
+                {health && (
+                  <span
+                    className={`${styles.healthChip} ${styles[`health_${health.band}`]}`}
+                    title={health.biggestRisk}
+                    aria-live="polite"
+                    aria-label={`Rack health ${health.score} of 100. ${health.biggestRisk}`}
+                  >
+                    <i className={styles.healthDot} aria-hidden="true" />
+                    <b>{health.score}</b>/100
+                  </span>
+                )}
+                <span><b>{usedU}</b> used</span>
+                <span><b>{budget?.freeU ?? 0}</b> free</span>
+                <span><b>{((budget?.watts ?? 0) / 1000).toFixed(2)}</b> kW</span>
+              </div>
+            </div>
+            <div className={styles.focusCanvasWrap}>
+              <RackCanvas
+                rack={rack}
+                devices={devices}
+                cables={cables}
+                selectedId={selectedId}
+                selectedCableId={selCable}
+                side={side}
+                armed={armed != null}
+                reject={reject}
+                onPlaceAt={placeAt}
+                onDropPreset={dropPreset}
+                onSelect={(id) => {
+                  if (id) focusDevice(id);
+                  else s().select([]);
+                }}
+                onSelectCable={setSelCable}
+                onMoveTo={moveTo}
+              />
+            </div>
+          </>
         )}
       </div>
 
       {/* sidebar */}
       <div className={styles.side}>
         <div className={styles.sec}>
-          <h3>{selected ? 'Selected device' : 'Nothing selected'}</h3>
+          <h3>Selected device</h3>
           {selected ? (
             <>
-              <input
-                className={styles.nameInput}
-                value={selected.name}
-                aria-label="Device name"
-                onChange={(e) => renameSelected(e.target.value)}
-                onBlur={() => s().endEdit()}
-              />
-              <div className={styles.kv}><span>Type</span><b>{selected.type}</b></div>
-              <div className={styles.kv}><span>Position</span><b>U{selected.ru} · {slotOf(selected).side}</b></div>
-              <div className={styles.kv}><span>Ports</span><b>{selected.interfaces?.length ?? 0}</b></div>
-              <div className={styles.rowBtns}>
-                <button className={styles.btn} title="Move up 1U (↑)" onClick={() => nudge(1)}>↑ U</button>
-                <button className={styles.btn} title="Move down 1U (↓)" onClick={() => nudge(-1)}>↓ U</button>
-                <button className={styles.btn} title="Unmount to the tray" onClick={() => { s().select([selected.id]); s().unmountFromRack(selected.id); }}>Unmount</button>
-                <button className={styles.btn} title="Delete (⌫)" onClick={deleteSelected}>Delete</button>
+              <div className={styles.deviceHero}>
+                <span className={styles.thumbWrap}><GearThumb device={selected} /></span>
+                <div>
+                  <input
+                    className={styles.nameInput}
+                    value={selected.name}
+                    aria-label="Device name"
+                    onChange={(e) => renameSelected(e.target.value)}
+                    onBlur={() => s().endEdit()}
+                  />
+                  <span>{selected.vendor || selected.model ? [selected.vendor, selected.model].filter(Boolean).join(' ') : selected.type}</span>
+                </div>
               </div>
-              {racks.length > 1 && (
-                <div className={styles.kv} style={{ marginTop: 6 }}>
-                  <span>Move to rack</span>
-                  <select
-                    value={selected.rackId ?? ''}
-                    onChange={(e) => moveDeviceToRack(selected.id, e.target.value)}
-                    aria-label="Move device to another rack"
+              <div className={styles.inspectorTabs} aria-label="Selected device sections">
+                {(['placement', 'hardware', 'power', 'cabling', 'asset'] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    className={inspectorTab === tab ? styles.activeTab : ''}
+                    onClick={() => setInspectorTab(tab)}
                   >
-                    {racks.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                  </select>
+                    {tab}
+                  </button>
+                ))}
+              </div>
+              {inspectorTab === 'placement' && (
+                <div className={styles.inspectorPane}>
+                  <div className={styles.kv}><span>Type</span><b>{selected.type}</b></div>
+                  <div className={styles.kv}><span>Position</span><b>U{selected.ru} · {slotOf(selected).side} · {slotOf(selected).bay}</b></div>
+                  <div className={styles.kv}><span>Ports</span><b>{selected.interfaces?.length ?? 0}</b></div>
+                  <div className={styles.rowBtns}>
+                    <button className={styles.btn} title="Move up 1U (↑)" onClick={() => nudge(1)}>↑ U</button>
+                    <button className={styles.btn} title="Move down 1U (↓)" onClick={() => nudge(-1)}>↓ U</button>
+                    <button className={styles.btn} title="Unmount to the tray" onClick={() => { s().select([selected.id]); s().unmountFromRack(selected.id); }}>Unmount</button>
+                    <button className={styles.btn} title="Delete (⌫)" onClick={deleteSelected}>Delete</button>
+                  </div>
+                  {racks.length > 1 && (
+                    <div className={styles.field}>
+                      <label>Move to rack</label>
+                      <select
+                        value={selected.rackId ?? ''}
+                        onChange={(e) => moveDeviceToRack(selected.id, e.target.value)}
+                        aria-label="Move device to another rack"
+                      >
+                        {racks.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      </select>
+                    </div>
+                  )}
                 </div>
               )}
-              <button className={styles.connectBtn} style={{ marginTop: 8 }} onClick={() => setConnecting(true)}>+ Cable a port…</button>
+              {inspectorTab === 'hardware' && (
+                <div className={styles.inspectorPane}>
+                  {catalogForType(selected.type).length > 0 && (
+                    <div className={styles.field}>
+                      <label>Hardware model</label>
+                      <select value="" aria-label="Apply a catalog model" onChange={(e) => { if (e.target.value) applyCatalogModel(e.target.value); }}>
+                        <option value="">Apply known model…</option>
+                        {catalogForType(selected.type).map((m) => (
+                          <option key={m.id} value={m.id}>{m.vendor} {m.model} ({catalogSpecLabel(m)})</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <div className={styles.field}><label>Vendor</label><input value={selected.vendor ?? ''} onChange={(e) => updateSelected('vendor', e.target.value)} onBlur={commitSelectedEdit} /></div>
+                  <div className={styles.field}><label>Model</label><input value={selected.model ?? ''} onChange={(e) => updateSelected('model', e.target.value)} onBlur={commitSelectedEdit} /></div>
+                  <div className={styles.field}><label>Role</label><input value={selected.role ?? ''} onChange={(e) => updateSelected('role', e.target.value)} onBlur={commitSelectedEdit} /></div>
+                </div>
+              )}
+              {inspectorTab === 'power' && (
+                <div className={styles.inspectorPane}>
+                  <div className={styles.field}><label>Watts</label><input type="number" value={selected.watts ?? ''} onChange={(e) => updateSelected('watts', (e.target.value === '' ? undefined : Number(e.target.value)) as Device['watts'])} onBlur={commitSelectedEdit} /></div>
+                  <div className={styles.field}><label>Weight (kg)</label><input type="number" value={selected.weightKg ?? ''} onChange={(e) => updateSelected('weightKg', (e.target.value === '' ? undefined : Number(e.target.value)) as Device['weightKg'])} onBlur={commitSelectedEdit} /></div>
+                  <div className={styles.field}>
+                    <label>Power feed</label>
+                    <select value={selected.powerFeed ?? 'A'} onChange={(e) => { updateSelected('powerFeed', e.target.value as Device['powerFeed']); commitSelectedEdit(); }}>
+                      <option value="A">Feed A (single)</option>
+                      <option value="B">Feed B (single)</option>
+                      <option value="AB">A + B (redundant)</option>
+                    </select>
+                  </div>
+                  {(() => {
+                    const pf = powerFeedAnalysis(devices);
+                    return <div className={styles.powerBalance}>A {(pf.normalA / 1000).toFixed(2)} kW · B {(pf.normalB / 1000).toFixed(2)} kW · {pf.singleCorded} single-corded</div>;
+                  })()}
+                </div>
+              )}
+              {inspectorTab === 'cabling' && (
+                <div className={styles.inspectorPane}>
+                  {deviceCableRows(selected.id).length === 0 && <div className={styles.emptyMicro}>No cables touch this device yet.</div>}
+                  {deviceCableRows(selected.id).map((c) => {
+                    const a = devices.find((d) => d.id === c.aEnd.deviceId);
+                    const b = devices.find((d) => d.id === c.bEnd.deviceId);
+                    const pn = (dev: typeof a, ifId: string) => dev?.interfaces?.find((i) => i.id === ifId)?.name ?? ifId;
+                    return (
+                      <div key={c.id} className={`${styles.cable} ${selCable === c.id ? styles.cableOn : ''}`} onClick={() => setSelCable(selCable === c.id ? null : c.id)}>
+                        <span className={styles.sw} style={{ background: c.color }} />
+                        <span className={styles.ep}>{a?.name}:{pn(a, c.aEnd.ifaceId)} → {b?.name}:{pn(b, c.bEnd.ifaceId)}</span>
+                        {c.lengthFt != null && <span className={styles.lbl}>{c.lengthFt}ft</span>}
+                      </div>
+                    );
+                  })}
+                  <button className={styles.connectBtn} onClick={() => setConnecting(true)}>+ Cable a port…</button>
+                </div>
+              )}
+              {inspectorTab === 'asset' && (
+                <div className={styles.inspectorPane}>
+                  <div className={styles.field}>
+                    <label>Status</label>
+                    <select value={selected.status ?? 'active'} onChange={(e) => { updateSelected('status', (e.target.value === 'active' ? undefined : e.target.value) as Device['status']); commitSelectedEdit(); }}>
+                      <option value="active">Active</option>
+                      <option value="planned">Planned</option>
+                      <option value="maintenance">Maintenance</option>
+                      <option value="decommissioned">Decommissioned</option>
+                    </select>
+                  </div>
+                  <div className={styles.field}><label>Serial</label><input value={selected.serial ?? ''} onChange={(e) => updateSelected('serial', e.target.value)} onBlur={commitSelectedEdit} /></div>
+                  <div className={styles.field}><label>Asset tag</label><input value={selected.assetTag ?? ''} onChange={(e) => updateSelected('assetTag', e.target.value)} onBlur={commitSelectedEdit} /></div>
+                  <div className={styles.field}><label>Owner</label><input value={selected.owner ?? ''} onChange={(e) => updateSelected('owner', e.target.value)} onBlur={commitSelectedEdit} /></div>
+                  <div className={styles.field}><label>Warranty expiry</label><input type="date" value={selected.warrantyExpiry ?? ''} onChange={(e) => updateSelected('warrantyExpiry', e.target.value)} onBlur={commitSelectedEdit} /></div>
+                  <div className={styles.field}><label>Notes</label><textarea value={selected.notes ?? ''} onChange={(e) => updateSelected('notes', e.target.value)} onBlur={commitSelectedEdit} /></div>
+                </div>
+              )}
             </>
           ) : (
-            <div style={{ fontSize: 12.5, color: 'var(--chrome-fg-muted)' }}>
+            <div className={styles.emptyMicro}>
               {armed
-                ? `Click a U slot to drop ${armed.label} — or drag it from the left.`
-                : 'Click a device to edit it. Pick or drag gear from the left to add. Arrow keys move, ⌫ deletes.'}
+                ? `Click a U slot to drop ${armed.label}, or drag it from the left.`
+                : 'Select gear to manage it, or drag equipment from the library to build the rack.'}
             </div>
           )}
         </div>
-        {cabling.issues.length > 0 && (
-          <div className={styles.sec}>
-            <h3>Cabling health · {cabling.issues.length}</h3>
-            {cabling.issues.slice(0, 8).map((iss) => (
-              <div
-                key={iss.id}
-                className={styles.healthIssue}
-                title="Click to select the cable/device"
-                onClick={() => { const id = iss.objectIds.find((o) => cables.some((c) => c.id === o)); if (id) setSelCable(id); else if (iss.objectIds[0]) s().select([iss.objectIds[0]]); }}
+        <div className={styles.sec}>
+          <h3>
+            Smart suggestions · {insights.length}
+            {cables.some((c) => c.lengthFt == null) && (
+              <button
+                className={styles.btn}
+                style={{ float: 'right', fontSize: 11 }}
+                title="Apply every non-destructive fix at once (currently: estimate missing cable lengths). One undo."
+                onClick={() => s().autoLengthRackCables()}
               >
-                <span className={styles.healthDot} />
-                {iss.message}
-              </div>
-            ))}
-            {cabling.issues.length > 8 && (
-              <div style={{ fontSize: 11, color: 'var(--chrome-fg-muted)', marginTop: 4 }}>+{cabling.issues.length - 8} more…</div>
+                Fix all safe
+              </button>
             )}
-          </div>
-        )}
+          </h3>
+          {insights.slice(0, 6).map((insight) => (
+            <div key={insight.id} className={`${styles.insight} ${styles[`insight_${insight.severity}`]}`}>
+              <div>
+                <b>{insight.title}</b>
+                <span>{insight.detail}</span>
+              </div>
+              <button className={styles.btn} onClick={() => handleInsight(insight)}>{insight.actionLabel}</button>
+            </div>
+          ))}
+        </div>
         <div className={styles.sec} style={{ flex: 1 }}>
           <h3>
             Cable schedule · {cables.length}
@@ -618,7 +936,7 @@ export function RackDesigner() {
             )}
           </h3>
           {cables.length === 0 && (
-            <div style={{ fontSize: 12, color: 'var(--chrome-fg-muted)' }}>No cables yet.</div>
+            <div className={styles.emptyMicro}>No cables yet.</div>
           )}
           {cables.map((c) => {
             const a = devices.find((d) => d.id === c.aEnd.deviceId);

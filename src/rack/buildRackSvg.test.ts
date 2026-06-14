@@ -140,17 +140,21 @@ describe('buildRackRowSvg — multiple racks in one canvas', () => {
 
     const frontOnly = buildRackRowFacesSvg([rack, rackB], [sw, srv, swB, rearDev], [], { showRear: false, background: '#fff' });
     expect(frontOnly).toContain('· front');
-    expect(frontOnly).not.toContain('U · rear'); // no rear FACE title (the ghost label is fine)
-    // rear-hidden front-only export GHOSTS the rear switch so its U isn't blank
-    expect(frontOnly).toContain('rear · rear-sw');
-    // ...but when both faces are stacked, no ghost is drawn (the real rear row is there)
+    expect(frontOnly).not.toContain('U · rear'); // no rear FACE title
+    // rear-hidden front-only export still hints rear gear so its U isn't blank
+    expect(frontOnly).toContain('rear-sw');
+    // ...but the old muted ghost label is not used for full-depth switch backs
+    expect(frontOnly).not.toContain('rear · rear-sw');
+    // ...and when both faces are stacked, the rear row has hardware context without ghost labels
+    expect(both).toContain('rear-sw');
     expect(both).not.toContain('rear · rear-sw');
   });
 
-  it('a focused single-rack export ghosts the opposite face by default', () => {
+  it('a focused single-rack export renders opposite full-depth gear as rear hardware by default', () => {
     const rearSw: Device = { ...sw, id: 'rsw', name: 'rear-sw', side: 'rear' };
     const frontView = buildRackSvg(rack, [sw, rearSw], [], { side: 'front' });
-    expect(frontView).toContain('rear · rear-sw'); // rear gear ghosted onto the front
+    expect(frontView).toContain('rear-sw'); // rear gear still occupies the front view
+    expect(frontView).not.toContain('rear · rear-sw'); // full-depth backs use hardware art
     expect(frontView).toContain('core-sw'); // real front device still drawn
   });
 });

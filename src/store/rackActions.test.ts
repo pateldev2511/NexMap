@@ -89,28 +89,40 @@ describe('rack cabling', () => {
   const setup = () => {
     const a = s().addDeviceAt('switch', 0, 0);
     const b = s().addDeviceAt('server', 0, 0);
-    return { a, b };
+    const pa = s().addInterface(a, 'Gi1/0/1')!;
+    const pa2 = s().addInterface(a, 'Gi1/0/2')!;
+    const pb = s().addInterface(b, 'vmnic0')!;
+    const pb2 = s().addInterface(b, 'vmnic1')!;
+    return { a, b, pa, pa2, pb, pb2 };
   };
 
   it('connects two ports and lists the cable', () => {
-    const { a, b } = setup();
-    const id = s().connectRackCable({ deviceId: a, ifaceId: 'p1' }, { deviceId: b, ifaceId: 'nic0' }, '#22d3ee', 'uplink');
+    const { a, b, pa, pb } = setup();
+    const id = s().connectRackCable({ deviceId: a, ifaceId: pa }, { deviceId: b, ifaceId: pb }, '#22d3ee', 'uplink', 12);
     expect(id).toBeTruthy();
     const all = s().rackCablesAll();
     expect(all).toHaveLength(1);
-    expect(all[0]).toMatchObject({ color: '#22d3ee', label: 'uplink' });
+    expect(all[0]).toMatchObject({ color: '#22d3ee', label: 'uplink', lengthFt: 12 });
+    s().undo();
+    expect(s().rackCablesAll()).toHaveLength(0);
   });
 
   it('refuses a port that is already cabled, and a self-cable', () => {
-    const { a, b } = setup();
-    s().connectRackCable({ deviceId: a, ifaceId: 'p1' }, { deviceId: b, ifaceId: 'nic0' }, '#fff');
-    expect(s().connectRackCable({ deviceId: a, ifaceId: 'p1' }, { deviceId: b, ifaceId: 'nic1' }, '#fff')).toBeNull();
-    expect(s().connectRackCable({ deviceId: a, ifaceId: 'p9' }, { deviceId: a, ifaceId: 'p9' }, '#fff')).toBeNull();
+    const { a, b, pa, pb, pb2 } = setup();
+    s().connectRackCable({ deviceId: a, ifaceId: pa }, { deviceId: b, ifaceId: pb }, '#fff');
+    expect(s().connectRackCable({ deviceId: a, ifaceId: pa }, { deviceId: b, ifaceId: pb2 }, '#fff')).toBeNull();
+    expect(s().connectRackCable({ deviceId: a, ifaceId: pa }, { deviceId: a, ifaceId: pa }, '#fff')).toBeNull();
+  });
+
+  it('rejects endpoints that do not resolve to real interfaces', () => {
+    const { a, b, pa } = setup();
+    expect(s().connectRackCable({ deviceId: a, ifaceId: pa }, { deviceId: b, ifaceId: 'missing' }, '#fff')).toBeNull();
+    expect(s().rackCablesAll()).toHaveLength(0);
   });
 
   it('disconnect removes the cable and is undoable', () => {
-    const { a, b } = setup();
-    const id = s().connectRackCable({ deviceId: a, ifaceId: 'p1' }, { deviceId: b, ifaceId: 'nic0' }, '#fff')!;
+    const { a, b, pa, pb } = setup();
+    const id = s().connectRackCable({ deviceId: a, ifaceId: pa }, { deviceId: b, ifaceId: pb }, '#fff')!;
     s().disconnectRackCable(id);
     expect(s().rackCablesAll()).toHaveLength(0);
     s().undo();
@@ -122,7 +134,9 @@ describe('CRITICAL cascade — delete device removes its cables, undo restores',
   it('cascade-prunes on device delete and restores on undo', () => {
     const a = s().addDeviceAt('switch', 0, 0);
     const b = s().addDeviceAt('server', 0, 0);
-    s().connectRackCable({ deviceId: a, ifaceId: 'p1' }, { deviceId: b, ifaceId: 'nic0' }, '#fff');
+    const pa = s().addInterface(a, 'Gi1/0/1')!;
+    const pb = s().addInterface(b, 'vmnic0')!;
+    s().connectRackCable({ deviceId: a, ifaceId: pa }, { deviceId: b, ifaceId: pb }, '#fff');
     expect(s().rackCablesAll()).toHaveLength(1);
 
     s().select([a]);
@@ -140,7 +154,9 @@ describe('CRITICAL cascade — prune on interface re-population (E5)', () => {
   it('drops cables whose port no longer exists after regenerating a device port set', () => {
     const a = s().addDeviceAt('switch', 0, 0);
     const b = s().addDeviceAt('server', 0, 0);
-    s().connectRackCable({ deviceId: a, ifaceId: 'p1' }, { deviceId: b, ifaceId: 'nic0' }, '#fff');
+    const pa = s().addInterface(a, 'Gi1/0/1')!;
+    const pb = s().addInterface(b, 'vmnic0')!;
+    s().connectRackCable({ deviceId: a, ifaceId: pa }, { deviceId: b, ifaceId: pb }, '#fff');
     // Regenerate switch ports: p1 is gone, only p2/p3 remain.
     s().pruneInterfaceCables(a, ['p2', 'p3']);
     expect(s().rackCablesAll()).toHaveLength(0);
@@ -152,8 +168,10 @@ describe('CRITICAL cascade — prune on interface re-population (E5)', () => {
   it('keeps cables whose ports still exist', () => {
     const a = s().addDeviceAt('switch', 0, 0);
     const b = s().addDeviceAt('server', 0, 0);
-    s().connectRackCable({ deviceId: a, ifaceId: 'p1' }, { deviceId: b, ifaceId: 'nic0' }, '#fff');
-    s().pruneInterfaceCables(a, ['p1', 'p2']);
+    const pa = s().addInterface(a, 'Gi1/0/1')!;
+    const pb = s().addInterface(b, 'vmnic0')!;
+    s().connectRackCable({ deviceId: a, ifaceId: pa }, { deviceId: b, ifaceId: pb }, '#fff');
+    s().pruneInterfaceCables(a, [pa, 'p2']);
     expect(s().rackCablesAll()).toHaveLength(1);
   });
 });

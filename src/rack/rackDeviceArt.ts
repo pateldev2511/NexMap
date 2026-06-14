@@ -15,20 +15,42 @@
  */
 import type { Device } from '@/model/types';
 import { escapeXml } from '@/io/export/buildSvg';
-import { portLayout, type Rect } from './rackLayout';
+import { portLayout, type Rect, type PortRect } from './rackLayout';
 import { panelKindFor } from './panelKind';
 import { isFullDepth } from './rackModel';
+import { rackPhotoSkinParts } from './rackPhotoSkins';
 
 /** Shared gradient defs. Include ONCE per SVG document (root). */
 export const RACK_ART_DEFS = [
   '<defs>',
+  '<filter id="rkSoftShadow" x="-20%" y="-20%" width="140%" height="145%">',
+  '<feDropShadow dx="0" dy="8" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.22"/></filter>',
+  '<filter id="rkDeviceShadow" x="-8%" y="-35%" width="116%" height="170%">',
+  '<feDropShadow dx="0" dy="1.4" stdDeviation="1.2" flood-color="#020617" flood-opacity="0.52"/></filter>',
+  '<filter id="rkCableShadow" x="-18%" y="-60%" width="136%" height="220%">',
+  '<feDropShadow dx="0" dy="2.2" stdDeviation="2" flood-color="#0f172a" flood-opacity="0.34"/></filter>',
+  '<linearGradient id="rkRackFrame" x1="0" y1="0" x2="0" y2="1">',
+  '<stop offset="0" stop-color="#202832"/><stop offset="0.18" stop-color="#111821"/>',
+  '<stop offset="0.72" stop-color="#0c1118"/><stop offset="1" stop-color="#252d37"/></linearGradient>',
+  '<linearGradient id="rkRackBay" x1="0" y1="0" x2="1" y2="0">',
+  '<stop offset="0" stop-color="#0b1017"/><stop offset="0.08" stop-color="#1c2430"/>',
+  '<stop offset="0.5" stop-color="#111821"/><stop offset="0.92" stop-color="#1c2430"/><stop offset="1" stop-color="#0b1017"/></linearGradient>',
+  '<linearGradient id="rkRail" x1="0" y1="0" x2="1" y2="0">',
+  '<stop offset="0" stop-color="#05080c"/><stop offset="0.35" stop-color="#2c3540"/>',
+  '<stop offset="0.55" stop-color="#121820"/><stop offset="1" stop-color="#05080c"/></linearGradient>',
   '<linearGradient id="rkMetal" x1="0" y1="0" x2="0" y2="1">',
-  '<stop offset="0" stop-color="#3a4250"/><stop offset="0.5" stop-color="#262d38"/>',
-  '<stop offset="0.52" stop-color="#2e3744"/><stop offset="1" stop-color="#1b2129"/></linearGradient>',
+  '<stop offset="0" stop-color="#4a5360"/><stop offset="0.1" stop-color="#262f3a"/>',
+  '<stop offset="0.48" stop-color="#151d27"/><stop offset="0.52" stop-color="#2f3946"/><stop offset="1" stop-color="#111821"/></linearGradient>',
+  '<linearGradient id="rkBrushed" x1="0" y1="0" x2="1" y2="0">',
+  '<stop offset="0" stop-color="#111821"/><stop offset="0.18" stop-color="#3b4653"/>',
+  '<stop offset="0.5" stop-color="#202936"/><stop offset="0.82" stop-color="#465260"/><stop offset="1" stop-color="#141b24"/></linearGradient>',
   '<linearGradient id="rkSheen" x1="0" y1="0" x2="0" y2="1">',
   '<stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/><stop offset="0.28" stop-color="#ffffff" stop-opacity="0"/></linearGradient>',
   '<linearGradient id="rkPatch" x1="0" y1="0" x2="0" y2="1">',
-  '<stop offset="0" stop-color="#cdd6e0"/><stop offset="0.5" stop-color="#aab4c0"/><stop offset="1" stop-color="#8e98a4"/></linearGradient>',
+  '<stop offset="0" stop-color="#d8e0ea"/><stop offset="0.14" stop-color="#84909d"/>',
+  '<stop offset="0.52" stop-color="#aeb8c4"/><stop offset="1" stop-color="#66717f"/></linearGradient>',
+  '<linearGradient id="rkLCD" x1="0" y1="0" x2="1" y2="1">',
+  '<stop offset="0" stop-color="#0f766e"/><stop offset="0.5" stop-color="#042f2e"/><stop offset="1" stop-color="#14b8a6"/></linearGradient>',
   '<radialGradient id="rkLedG" cx="0.5" cy="0.4" r="0.6">',
   '<stop offset="0" stop-color="#b6ffce"/><stop offset="0.4" stop-color="#34d399"/><stop offset="1" stop-color="#0f7a4d"/></radialGradient>',
   '<radialGradient id="rkLedA" cx="0.5" cy="0.4" r="0.6">',
@@ -40,6 +62,8 @@ const C = {
   chassisBd: '#0a0e12',
   text: '#e7edf4',
   textMut: '#9fb0c2',
+  badge: '#111827',
+  badgeBd: '#334155',
   jack: '#0a1119',
   jackBd: '#566372',
   notch: '#05080c',
@@ -55,9 +79,129 @@ const C = {
   ghostBd: '#39424f',
   ghostHatch: '#2c343f',
   ghostText: '#6b7787',
+  rackBolt: '#647282',
+  rackBoltCore: '#111827',
 } as const;
 
 const n = (v: number) => v.toFixed(1);
+
+export interface RackShellOptions {
+  rackName: string;
+  ruHeight: number;
+  face: 'front' | 'rear';
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  bayX: number;
+  bayY: number;
+  bayW: number;
+  bayH: number;
+  active?: boolean;
+  title?: boolean;
+}
+
+/** Photo-style rack cabinet shell shared by live SVG and export. */
+export function rackShellParts({
+  rackName,
+  ruHeight,
+  face,
+  x,
+  y,
+  width,
+  height,
+  bayX,
+  bayY,
+  bayW,
+  bayH,
+  active = false,
+  title = true,
+}: RackShellOptions): string[] {
+  const out: string[] = [];
+  if (title) {
+    out.push(`<text x="${n(bayX)}" y="${n(Math.max(10, y - 5))}" font-family="ui-sans-serif,system-ui,sans-serif" font-size="13" font-weight="800" fill="#111827">${escapeXml(rackName)} · ${ruHeight}U · ${face}</text>`);
+  }
+  out.push(`<rect x="${n(x + 10)}" y="${n(y + height - 9)}" width="${n(width - 20)}" height="11" rx="5.5" fill="#020617" fill-opacity="0.16"/>`);
+  out.push(`<rect x="${n(x + 1)}" y="${n(y + 1)}" width="${n(width - 2)}" height="${n(height - 2)}" rx="12" fill="url(#rkRackFrame)" stroke="${active ? '#2563eb' : '#243142'}" stroke-width="${active ? '2.4' : '1.6'}" filter="url(#rkSoftShadow)"/>`);
+  out.push(`<rect x="${n(x + 8)}" y="${n(y + 9)}" width="${n(width - 16)}" height="${n(height - 18)}" rx="8" fill="#05080c" opacity="0.72"/>`);
+  out.push(`<rect x="${n(bayX)}" y="${n(bayY)}" width="${n(bayW)}" height="${n(bayH)}" rx="4" fill="url(#rkRackBay)" stroke="#283442" stroke-width="1"/>`);
+
+  const railW = 16;
+  for (const railX of [bayX - railW + 2, bayX + bayW - 2]) {
+    out.push(`<rect x="${n(railX)}" y="${n(bayY - 3)}" width="${railW}" height="${n(bayH + 6)}" rx="4" fill="url(#rkRail)" stroke="#05080c" stroke-width="0.9"/>`);
+    const holeStep = Math.max(12, bayH / Math.max(1, ruHeight));
+    for (let i = 0; i < ruHeight; i++) {
+      const cy = bayY + holeStep * i + holeStep / 2;
+      if (cy < bayY + 5 || cy > bayY + bayH - 5) continue;
+      out.push(`<circle cx="${n(railX + railW / 2)}" cy="${n(cy)}" r="1.65" fill="${C.rackBoltCore}" stroke="${C.rackBolt}" stroke-width="0.55"/>`);
+    }
+  }
+
+  const screwPoints: Array<[number, number]> = [
+    [x + 11, y + 11],
+    [x + width - 11, y + 11],
+    [x + 11, y + height - 11],
+    [x + width - 11, y + height - 11],
+  ];
+  for (const [cx, cy] of screwPoints) {
+    out.push(`<circle cx="${n(cx)}" cy="${n(cy)}" r="4.1" fill="#111827" stroke="#3b4654" stroke-width="1"/>`);
+    out.push(`<path d="M ${n(cx - 2)} ${n(cy)} h 4" stroke="#657286" stroke-width="0.7"/>`);
+  }
+
+  // Small feet like the reference cabinets, only visible at the bottom.
+  out.push(`<rect x="${n(x + 18)}" y="${n(y + height - 2)}" width="12" height="6" rx="1.5" fill="#05080c"/>`);
+  out.push(`<rect x="${n(x + width - 30)}" y="${n(y + height - 2)}" width="12" height="6" rx="1.5" fill="#05080c"/>`);
+  return out;
+}
+
+/** Shared visible port layout so drawn ports and cable endpoints stay aligned. */
+export function devicePortLayout(device: Device, panel: Rect): PortRect[] {
+  const ports = (device.interfaces ?? []).map((i) => ({ id: i.id, name: i.name }));
+  const kind = panelKindFor(device.type);
+  if (ports.length === 0) return [];
+  if (kind === 'server') {
+    const reservedRight = Math.min(panel.w * 0.42, 260);
+    return portLayout(panel, ports, {
+      gap: 3,
+      nameZone: Math.min(88, panel.w * 0.18),
+      rightInset: reservedRight,
+      maxJack: 12,
+    });
+  }
+  if (kind === 'psu' || kind === 'cable-mgr' || kind === 'blank') return [];
+  return portLayout(panel, ports);
+}
+
+function labelParts(device: Device, p: Rect): string[] {
+  const vendorModel = [device.vendor, device.model].filter(Boolean).join(' ');
+  const primary = vendorModel || device.name;
+  const secondary = vendorModel ? device.name : '';
+  const max = Math.max(10, Math.min(12, p.h * 0.23));
+  const out = [
+    `<text x="${n(p.x + 8)}" y="${n(p.y + Math.min(p.h / 2 + 4, 18))}" font-family="ui-monospace,Menlo,monospace" font-size="${n(max)}" font-weight="800" fill="${C.text}">${escapeXml(primary)}</text>`,
+  ];
+  if (secondary && p.h >= 44) {
+    out.push(`<text x="${n(p.x + 8)}" y="${n(p.y + Math.min(p.h - 9, 34))}" font-family="ui-monospace,Menlo,monospace" font-size="8.5" fill="${C.textMut}">${escapeXml(secondary)}</text>`);
+  }
+  return out;
+}
+
+function ventSlats(x: number, y: number, w: number, h: number, count: number): string[] {
+  const out: string[] = [];
+  const gap = w / count;
+  for (let i = 0; i < count; i++) {
+    out.push(`<rect x="${n(x + i * gap + gap * 0.28)}" y="${n(y)}" width="${n(Math.max(1.2, gap * 0.36))}" height="${n(h)}" rx="0.8" fill="${C.vent}"/>`);
+  }
+  return out;
+}
+
+function fan(cx: number, cy: number, r: number): string {
+  const blades = [0, 45, 90, 135].map((a) => {
+    const rad = (a * Math.PI) / 180;
+    return `<line x1="${n(cx - r * 0.82 * Math.cos(rad))}" y1="${n(cy - r * 0.82 * Math.sin(rad))}" x2="${n(cx + r * 0.82 * Math.cos(rad))}" y2="${n(cy + r * 0.82 * Math.sin(rad))}" stroke="#475569" stroke-width="0.8"/>`;
+  }).join('');
+  return `<circle cx="${n(cx)}" cy="${n(cy)}" r="${n(r)}" fill="#0a0f16" stroke="#475569" stroke-width="1"/>${blades}<circle cx="${n(cx)}" cy="${n(cy)}" r="${n(r * 0.28)}" fill="#64748b"/>`;
+}
 
 /** A realistic RJ45 jack at (x,y,w,h): dark cavity + bottom-center clip notch + link/act LEDs. */
 function rj45(x: number, y: number, w: number, h: number): string {
@@ -77,9 +221,11 @@ function chassis(device: Device, p: Rect, opts: { faceplate?: string; led?: stri
   const fill = opts.faceplate ?? 'url(#rkMetal)';
   const led = opts.led ?? 'url(#rkLedG)';
   return (
-    `<rect x="${n(p.x)}" y="${n(p.y)}" width="${n(p.w)}" height="${n(p.h)}" rx="3" fill="${fill}" stroke="${C.chassisBd}" stroke-width="1"/>` +
-    `<rect x="${n(p.x + 1)}" y="${n(p.y + 1)}" width="${n(p.w - 2)}" height="${n(Math.min(p.h * 0.42, 16))}" rx="2.5" fill="url(#rkSheen)"/>` +
-    `<text x="${n(p.x + 8)}" y="${n(p.y + p.h / 2 + 4)}" font-family="ui-monospace,Menlo,monospace" font-size="10" font-weight="700" fill="${C.text}">${escapeXml(device.name)}</text>` +
+    `<rect x="${n(p.x)}" y="${n(p.y)}" width="${n(p.w)}" height="${n(p.h)}" rx="3" fill="#020617" fill-opacity="0.36" transform="translate(0 1.2)"/>` +
+    `<rect x="${n(p.x)}" y="${n(p.y)}" width="${n(p.w)}" height="${n(p.h)}" rx="3" fill="${fill}" stroke="${C.chassisBd}" stroke-width="1" filter="url(#rkDeviceShadow)"/>` +
+    `<rect x="${n(p.x + 1.3)}" y="${n(p.y + 1.2)}" width="${n(p.w - 2.6)}" height="${n(Math.min(p.h * 0.34, 13))}" rx="2.5" fill="url(#rkSheen)"/>` +
+    `<rect x="${n(p.x + 0.8)}" y="${n(p.y + p.h - 2.2)}" width="${n(p.w - 1.6)}" height="1.2" fill="#64748b" fill-opacity="0.28"/>` +
+    labelParts(device, p).join('') +
     `<circle cx="${n(p.x + p.w - 6)}" cy="${n(p.y + 6)}" r="2.5" fill="${led}"/>`
   );
 }
@@ -120,23 +266,36 @@ export function deviceGhostParts(device: Device, panel: Rect, viewingFace: 'fron
 }
 
 /**
+ * Art for a rack-mounted device seen from the opposite aisle.
+ * Full-depth devices get their real rear panel; shallow gear falls back to the muted
+ * occupancy ghost because it does not physically span the cabinet depth.
+ */
+export function deviceOppositeFaceParts(device: Device, panel: Rect, viewingFace: 'front' | 'rear'): string[] {
+  if (!isFullDepth(device.type)) return deviceGhostParts(device, panel, viewingFace);
+  return deviceFaceParts(device, panel, 'rear');
+}
+
+/**
  * Front-panel art for one device in ABSOLUTE coords (panel rect already positioned).
  * Returns SVG element strings; the consumer joins + wraps them.
  */
 export function deviceFaceParts(device: Device, panel: Rect, face: 'front' | 'rear' = 'front'): string[] {
+  const photoSkin = rackPhotoSkinParts(device, panel, face);
+  if (photoSkin.length > 0) return [...photoSkin, ...statusOverlay(device, panel)];
+
   // The rear of a full-depth chassis is power + cooling, not a mirror of the front jacks.
   if (face === 'rear' && isFullDepth(device.type)) {
     return [...rearFaceParts(device, panel), ...statusOverlay(device, panel)];
   }
   const kind = panelKindFor(device.type);
-  const ports = (device.interfaces ?? []).map((i) => ({ id: i.id, name: i.name }));
   const out: string[] = [];
 
   if (kind === 'switch' || kind === 'firewall') {
     out.push(chassis(device, panel));
-    for (const j of portLayout(panel, ports)) out.push(rj45(j.x, j.y, j.w, j.h));
+    out.push(...ventSlats(panel.x + 62, panel.y + Math.max(4, panel.h * 0.22), 24, Math.max(8, panel.h * 0.5), 6));
+    for (const j of devicePortLayout(device, panel)) out.push(rj45(j.x, j.y, j.w, j.h));
     // SFP+ uplink cages on the right edge
-    const cageW = 40;
+    const cageW = Math.min(44, panel.w * 0.09);
     const cageX = panel.x + panel.w - cageW - 6;
     for (let i = 0; i < 2; i++) {
       const cy = panel.y + panel.h / 2 - 9 + i * 11;
@@ -150,7 +309,7 @@ export function deviceFaceParts(device: Device, panel: Rect, face: 'front' | 're
     }
   } else if (kind === 'patch') {
     out.push(chassis(device, panel, { faceplate: 'url(#rkPatch)', led: '#3a4654' }));
-    const jacks = portLayout(panel, ports);
+    const jacks = devicePortLayout(device, panel);
     jacks.forEach((j, i) => {
       out.push(`<rect x="${n(j.x)}" y="${n(j.y)}" width="${n(j.w)}" height="${n(j.h)}" rx="1" fill="#1b222b" stroke="#5b6573" stroke-width="0.7"/>`);
       out.push(`<rect x="${n(j.x + j.w / 2 - j.w * 0.17)}" y="${n(j.y + j.h - 2)}" width="${n(j.w * 0.34)}" height="2" fill="${C.notch}"/>`);
@@ -159,22 +318,31 @@ export function deviceFaceParts(device: Device, panel: Rect, face: 'front' | 're
     });
   } else if (kind === 'server') {
     out.push(chassis(device, panel));
-    // drive-bay array on the right with handle rail + activity LED
-    const bays = 6;
-    const bw = 13;
-    const gap = 3;
-    const totalW = bays * bw + (bays - 1) * gap;
-    const startX = panel.x + panel.w - 12 - totalW;
-    for (let i = 0; i < bays; i++) {
-      const bx = startX + i * (bw + gap);
-      const by = panel.y + 5;
-      const bh = panel.h - 10;
-      out.push(`<rect x="${n(bx)}" y="${n(by)}" width="${bw}" height="${n(bh)}" rx="2" fill="${C.drive}" stroke="${C.driveBd}" stroke-width="0.75"/>`);
-      out.push(`<rect x="${n(bx + 2.5)}" y="${n(by + 4)}" width="2.5" height="${n(bh - 8)}" rx="1.2" fill="${C.driveRail}"/>`);
-      out.push(`<circle cx="${n(bx + bw - 3.5)}" cy="${n(by + bh - 4)}" r="1.4" fill="url(#rkLedG)"/>`);
+    const tall = panel.h >= 52;
+    const driveCols = tall ? 8 : 6;
+    const driveRows = tall ? 2 : 1;
+    const driveAreaW = Math.min(panel.w * 0.36, tall ? 220 : 112);
+    const driveAreaX = panel.x + panel.w - driveAreaW - 11;
+    const driveGap = 3;
+    const bw = (driveAreaW - (driveCols - 1) * driveGap) / driveCols;
+    const bh = Math.max(12, (panel.h - 14 - (driveRows - 1) * driveGap) / driveRows);
+    for (let row = 0; row < driveRows; row++) {
+      for (let col = 0; col < driveCols; col++) {
+        const bx = driveAreaX + col * (bw + driveGap);
+        const by = panel.y + 7 + row * (bh + driveGap);
+        out.push(`<rect x="${n(bx)}" y="${n(by)}" width="${n(bw)}" height="${n(bh)}" rx="2" fill="${C.drive}" stroke="${C.driveBd}" stroke-width="0.75"/>`);
+        out.push(`<rect x="${n(bx + 2.2)}" y="${n(by + 3)}" width="${n(Math.max(2, bw * 0.15))}" height="${n(bh - 6)}" rx="1" fill="${C.driveRail}"/>`);
+        out.push(`<circle cx="${n(bx + bw - 3.5)}" cy="${n(by + bh - 3.5)}" r="1.35" fill="url(#rkLedG)"/>`);
+      }
     }
-    // status LCD + power button near the name
-    out.push(`<rect x="${n(panel.x + 8)}" y="${n(panel.y + panel.h - 11)}" width="34" height="8" rx="1.5" fill="#0a1119" stroke="#34d399" stroke-width="0.6"/>`);
+    const fanR = Math.min(tall ? 15 : 8, panel.h * 0.28);
+    const fanY = panel.y + panel.h / 2;
+    const fanStart = driveAreaX - (tall ? 78 : 58);
+    for (let i = 0; i < (tall ? 2 : 1); i++) out.push(fan(fanStart + i * (fanR * 2 + 8), fanY, fanR));
+    out.push(...ventSlats(panel.x + 78, panel.y + panel.h - 12, Math.max(22, driveAreaX - panel.x - 170), 7, 12));
+    for (const j of devicePortLayout(device, panel)) out.push(rj45(j.x, j.y, j.w, j.h));
+    // status LCD + recessed power button near the label, similar to enterprise servers.
+    out.push(`<rect x="${n(panel.x + 8)}" y="${n(panel.y + panel.h - 11)}" width="34" height="8" rx="1.5" fill="url(#rkLCD)" stroke="#2dd4bf" stroke-width="0.6"/>`);
     out.push(`<circle cx="${n(panel.x + 54)}" cy="${n(panel.y + panel.h - 7)}" r="3.4" fill="${C.cage}" stroke="${C.jackBd}" stroke-width="0.75"/>`);
   } else if (kind === 'psu') {
     out.push(chassis(device, panel));
@@ -241,29 +409,30 @@ function statusOverlay(device: Device, p: Rect): string[] {
 function rearFaceParts(device: Device, p: Rect): string[] {
   const out = [chassis(device, p, { led: 'url(#rkLedG)' })];
 
-  // two PSU modules on the right, each with a power inlet + status LED
-  const psuW = 42;
+  // redundant hot-swap PSU modules on the right, each with a power inlet + status LED
+  const psuW = Math.min(52, p.w * 0.12);
   const gap = 6;
-  const psuH = Math.min(p.h - 8, 26);
+  const psuH = Math.min(p.h - 8, p.h >= 54 ? 34 : 26);
   const psuY = p.y + (p.h - psuH) / 2;
   for (let i = 0; i < 2; i++) {
     const px = p.x + p.w - 8 - (i + 1) * psuW - i * gap;
-    out.push(`<rect x="${n(px)}" y="${n(psuY)}" width="${psuW}" height="${n(psuH)}" rx="2" fill="${C.vent}" stroke="${C.cageBd}" stroke-width="0.8"/>`);
-    out.push(`<rect x="${n(px + psuW / 2 - 6)}" y="${n(psuY + psuH / 2 - 4)}" width="12" height="8" rx="1" fill="${C.notch}" stroke="${C.jackBd}" stroke-width="0.6"/>`);
+    out.push(`<rect x="${n(px)}" y="${n(psuY)}" width="${n(psuW)}" height="${n(psuH)}" rx="2" fill="${C.vent}" stroke="${C.cageBd}" stroke-width="0.8"/>`);
+    out.push(`<rect x="${n(px + psuW / 2 - 7)}" y="${n(psuY + psuH / 2 - 5)}" width="14" height="10" rx="1" fill="${C.notch}" stroke="${C.jackBd}" stroke-width="0.6"/>`);
+    out.push(`<path d="M ${n(px + psuW / 2 - 3.6)} ${n(psuY + psuH / 2 - 1)} h 7.2 M ${n(px + psuW / 2)} ${n(psuY + psuH / 2 - 4)} v 8" stroke="#475569" stroke-width="0.7"/>`);
     out.push(`<circle cx="${n(px + 6)}" cy="${n(psuY + 5)}" r="1.6" fill="url(#rkLedG)"/>`);
+    out.push(...ventSlats(px + 5, psuY + psuH - 8, psuW - 10, 4, 6));
   }
 
-  // fan grilles (center): rings + hub + spokes
-  const fanR = Math.min(p.h * 0.34, 11);
+  // fan grilles and I/O bay (center/left), as seen from a real rear rack face.
+  const fanR = Math.min(p.h * 0.34, p.h >= 54 ? 14 : 11);
   const cy = p.y + p.h / 2;
-  for (let i = 0; i < 2; i++) {
-    const fx = p.x + 64 + i * (fanR * 2 + 8);
-    out.push(`<circle cx="${n(fx)}" cy="${n(cy)}" r="${n(fanR)}" fill="none" stroke="${C.ghostHatch}" stroke-width="1.1"/>`);
-    out.push(`<circle cx="${n(fx)}" cy="${n(cy)}" r="${n(fanR * 0.3)}" fill="${C.ghostHatch}"/>`);
-    for (const a of [0, 60, 120]) {
-      const rad = (a * Math.PI) / 180;
-      out.push(`<line x1="${n(fx - fanR * Math.cos(rad))}" y1="${n(cy - fanR * Math.sin(rad))}" x2="${n(fx + fanR * Math.cos(rad))}" y2="${n(cy + fanR * Math.sin(rad))}" stroke="${C.ghostHatch}" stroke-width="0.6"/>`);
-    }
-  }
+  const fanCount = p.h >= 54 ? 4 : 2;
+  for (let i = 0; i < fanCount; i++) out.push(fan(p.x + 58 + i * (fanR * 2 + 7), cy, fanR));
+  const ioX = p.x + 12;
+  const ioY = p.y + Math.max(5, p.h * 0.18);
+  out.push(`<rect x="${n(ioX)}" y="${n(ioY)}" width="34" height="${n(Math.max(14, p.h * 0.36))}" rx="2" fill="#0a1119" stroke="${C.cageBd}" stroke-width="0.8"/>`);
+  out.push(`<rect x="${n(ioX + 5)}" y="${n(ioY + 4)}" width="11" height="8" rx="1.2" fill="${C.jack}" stroke="${C.jackBd}" stroke-width="0.6"/>`);
+  out.push(`<rect x="${n(ioX + 19)}" y="${n(ioY + 4)}" width="10" height="8" rx="1.2" fill="${C.notch}" stroke="${C.jackBd}" stroke-width="0.6"/>`);
+  out.push(`<path d="M ${n(ioX + 6)} ${n(ioY + Math.max(14, p.h * 0.36) - 5)} h 23" stroke="#64748b" stroke-width="1"/>`);
   return out;
 }

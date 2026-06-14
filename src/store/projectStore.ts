@@ -29,7 +29,9 @@ import type {
 import { canFit, isFullDepth, type FitResult, type Slot } from '@/rack/rackModel';
 import { checkConnect, pruneCablesForInterfaces } from '@/rack/rackCables';
 import { presetByKey } from '@/rack/rackDevicePresets';
+import { catalogById } from '@/rack/rackCatalog';
 import { estimateCableLengthFt } from '@/rack/cableLength';
+import { proposePowerBalance } from '@/rack/rackPower';
 import { rackFieldsFromPreset, rackPresetById, DEFAULT_RACK_PRESET } from '@/rack/rackTypes';
 import type { RackTemplate } from '@/rack/rackTemplates';
 import {
@@ -420,10 +422,13 @@ export interface ProjectStore {
     bEnd: RackCableEnd,
     color: string,
     label?: string,
+    lengthFt?: number,
   ): string | null;
   updateRackCable(id: string, before: Partial<RackCable>, after: Partial<RackCable>): void;
   /** Estimate + fill length (ft) from rack geometry for every cable missing one. Returns count updated. */
   autoLengthRackCables(): number;
+  /** Rebalance A/B power by flipping single-corded gear to even the load. One undo. Returns devices moved. */
+  balancePower(): number;
   disconnectRackCable(id: string): void;
   rackCablesAll(): RackCable[];
   getRackCable(id: string): RackCable | undefined;
@@ -1850,11 +1855,13 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         for (const td of tr.devices) {
           const p = presetByKey(td.presetKey);
           if (!p) continue;
+          const catalog = td.catalogId ? catalogById(td.catalogId) : undefined;
           const interfaces = p.ports > 0
             ? Array.from({ length: p.ports }, (_, i) => createInterface(p.portName(i)))
             : [];
           const dev = createDevice(p.type, -9999, -9999, firstLayerId(), {
             ...(td.name ? { name: td.name } : {}),
+            ...(catalog ? { vendor: catalog.vendor, model: catalog.model } : {}),
             interfaces,
             rackId: rack.id,
             ru: td.ru,
@@ -1862,8 +1869,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
             mount: p.mount ?? 'rack',
             side: td.side ?? 'front',
             bay: 'full',
-            ...(p.watts ? { watts: p.watts } : {}),
-            ...(p.weightKg ? { weightKg: p.weightKg } : {}),
+            ...((catalog?.watts ?? p.watts) ? { watts: catalog?.watts ?? p.watts } : {}),
+            ...((catalog?.weightKg ?? p.weightKg) ? { weightKg: catalog?.weightKg ?? p.weightKg } : {}),
           });
           newDevices.push(dev);
           cmds.push(new AddDeviceCommand(dev));
@@ -1923,10 +1930,18 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       );
       history.commitCoalesceBoundary();
     },
-    connectRackCable(aEnd, bEnd, color, label) {
+    connectRackCable(aEnd, bEnd, color, label, lengthFt) {
       const existing = [...model.rackCables.values()];
+      const hasEnd = (end: RackCableEnd) => {
+        const d = model.devices.get(end.deviceId);
+        return (d?.interfaces ?? []).some((iface) => iface.id === end.ifaceId);
+      };
+      if (!hasEnd(aEnd) || !hasEnd(bEnd)) return null;
       if (!checkConnect(existing, aEnd, bEnd).ok) return null;
-      const cable = createRackCable(aEnd, bEnd, color, label ? { label } : {});
+      const cable = createRackCable(aEnd, bEnd, color, {
+        ...(label ? { label } : {}),
+        ...(lengthFt != null && Number.isFinite(lengthFt) && lengthFt > 0 ? { lengthFt } : {}),
+      });
       commit(new AddRackCableCommand(cable));
       history.commitCoalesceBoundary();
       return cable.id;
@@ -1948,6 +1963,18 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       }
       if (!cmds.length) return 0;
       history.dispatch(transaction('Auto-length cables', cmds), model);
+      history.commitCoalesceBoundary();
+      set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
+      return cmds.length;
+    },
+
+    balancePower() {
+      const proposal = proposePowerBalance([...model.devices.values()]);
+      if (!proposal.flips.length) return 0;
+      const cmds: Command[] = proposal.flips.map(
+        (f) => new UpdateDeviceCommand(f.deviceId, { powerFeed: f.from }, { powerFeed: f.to }),
+      );
+      history.dispatch(transaction('Balance power feeds', cmds), model);
       history.commitCoalesceBoundary();
       set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
       return cmds.length;

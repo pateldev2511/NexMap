@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deviceFaceParts, deviceGhostParts, RACK_ART_DEFS } from './rackDeviceArt';
+import { deviceFaceParts, deviceGhostParts, deviceOppositeFaceParts, RACK_ART_DEFS } from './rackDeviceArt';
 import type { Device, DeviceType } from '@/model/types';
 
 const panel = { x: 100, y: 50, w: 560, h: 30 };
@@ -120,5 +120,20 @@ describe('deviceGhostParts — opposite-face back-of-chassis', () => {
   it('emits a hatched slab (lines) without throwing', () => {
     expect(() => deviceGhostParts(dev('switch'), panel, 'front')).not.toThrow();
     expect(join(deviceGhostParts(dev('switch'), panel, 'front'))).toContain('<line');
+  });
+});
+
+describe('deviceOppositeFaceParts — realistic opposite aisle', () => {
+  it('renders full-depth devices as rear hardware instead of a muted ghost label', () => {
+    const svg = join(deviceOppositeFaceParts(dev('server', { name: 'esxi-01' }), { ...panel, h: 84 }, 'rear'));
+    expect(svg).toContain('esxi-01');
+    expect(svg).toContain('url(#rkLedG)');
+    expect(svg).not.toContain('front · esxi-01');
+  });
+
+  it('keeps shallow opposite-face gear as a ghost occupancy hint', () => {
+    const svg = join(deviceOppositeFaceParts(dev('patch-panel', { name: 'patch-rear' }), panel, 'front'));
+    expect(svg).toContain('rear · patch-rear');
+    expect(svg).not.toContain('url(#rkLedG)');
   });
 });

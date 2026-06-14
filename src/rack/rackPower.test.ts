@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { powerFeedAnalysis } from './rackPower';
+import { powerFeedAnalysis, proposePowerBalance } from './rackPower';
 import type { Device } from '@/model/types';
 
 const dev = (over: Partial<Device>): Device => ({
@@ -48,5 +48,60 @@ describe('powerFeedAnalysis', () => {
     expect(a.failoverB).toBe(500);
     // If B dies, A carries: dual full (400) + A-only (200) = 600
     expect(a.failoverA).toBe(600);
+  });
+});
+
+describe('proposePowerBalance', () => {
+  it('moves single-corded gear to even out a lopsided fleet', () => {
+    // All three on A (300W); moving one 100W device to B closes the gap.
+    const p = proposePowerBalance([
+      dev({ id: 'x', watts: 100, powerFeed: 'A' }),
+      dev({ id: 'y', watts: 100, powerFeed: 'A' }),
+      dev({ id: 'z', watts: 100, powerFeed: 'A' }),
+    ]);
+    expect(p.beforeDiff).toBe(300);
+    expect(p.afterDiff).toBe(100); // 200 vs 100
+    expect(p.flips).toHaveLength(1);
+    expect(p.flips[0]!.from).toBe('A');
+    expect(p.flips[0]!.to).toBe('B');
+    expect(p.movedWatts).toBe(100);
+  });
+
+  it('proposes nothing when already balanced', () => {
+    const p = proposePowerBalance([
+      dev({ watts: 100, powerFeed: 'A' }),
+      dev({ watts: 100, powerFeed: 'B' }),
+    ]);
+    expect(p.beforeDiff).toBe(0);
+    expect(p.afterDiff).toBe(0);
+    expect(p.flips).toHaveLength(0);
+    expect(p.movedWatts).toBe(0);
+  });
+
+  it('never moves dual-corded (AB) gear and still reports it as not redundant-fixing', () => {
+    const p = proposePowerBalance([
+      dev({ id: 'ab', watts: 1000, powerFeed: 'AB' }),
+      dev({ id: 's', watts: 50, powerFeed: 'A' }),
+    ]);
+    // AB splits 500/500; the lone single-corded 50W can't be split, gap is 50, no flip helps.
+    expect(p.flips.find((f) => f.deviceId === 'ab')).toBeUndefined();
+    expect(p.afterDiff).toBe(50);
+    expect(p.remainingSingleCorded).toBe(1); // balancing never adds redundancy
+  });
+
+  it('is a no-op for an empty / zero-watt fleet', () => {
+    expect(proposePowerBalance([]).flips).toHaveLength(0);
+    const p = proposePowerBalance([dev({ watts: 0, powerFeed: 'A' }), dev({})]);
+    expect(p.flips).toHaveLength(0);
+    expect(p.beforeDiff).toBe(0);
+  });
+
+  it('is deterministic — same fleet yields the same proposal', () => {
+    const fleet = [
+      dev({ id: 'a', watts: 300, powerFeed: 'A' }),
+      dev({ id: 'b', watts: 120, powerFeed: 'A' }),
+      dev({ id: 'c', watts: 80, powerFeed: 'A' }),
+    ];
+    expect(proposePowerBalance(fleet)).toEqual(proposePowerBalance(fleet));
   });
 });

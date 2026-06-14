@@ -128,6 +128,8 @@ export interface Device {
   /** Power draw (watts) and weight (kg) for the rack power/weight budget. Optional. */
   watts?: number;
   weightKg?: number;
+  /** Unit list price (USD) for the bill-of-materials cost rollup (schema v3 additive). Optional. */
+  priceUsd?: number;
   /**
    * Which power feed(s) this device cords into (schema v3 additive): 'A' or 'B' = single-
    * corded to that feed (a single point of failure); 'AB' = dual-corded / redundant PSUs

@@ -14,45 +14,32 @@ import {
   rowLayout,
   deviceRect,
   uLabelCenterY,
-  portLayout,
   BAY_W,
-  RAIL_PX,
-  FRAME_PAD,
   U_PX,
   type Rect,
   type RackPlacement,
 } from './rackLayout';
-import { slotOf, orderRacks } from './rackModel';
-import { deviceFaceParts, deviceGhostParts, RACK_ART_DEFS } from './rackDeviceArt';
+import { isFullDepth, slotOf, orderRacks } from './rackModel';
+import { deviceFaceParts, deviceOppositeFaceParts, devicePortLayout, rackShellParts, RACK_ART_DEFS } from './rackDeviceArt';
+import { cablePath } from './cablePath';
 
-/** Literal-hex CABINET-CHROME palette (device colors now live in rackDeviceArt.ts). */
+/** Literal-hex export palette for labels, tables, and U numbers. */
 const C = {
-  frame: '#ffffff',
-  frameBd: '#b9c4d0',
-  screw: '#cdd6e0',
-  rail: '#c4ccd6',
-  railHole: '#9aa6b2',
   uNum: '#0e7490',
-  bayBg: '#eef2f7',
   title: '#15212e',
 } as const;
-
-function rect(r: Rect, fill: string, extra = ''): string {
-  return `<rect x="${r.x.toFixed(1)}" y="${r.y.toFixed(1)}" width="${r.w.toFixed(1)}" height="${r.h.toFixed(1)}" fill="${fill}" ${extra}/>`;
-}
 
 // Device front-panel art now lives in the shared rackDeviceArt.ts (Studio Realism), used
 // identically by the live editor, the multi-rack canvas, and this export renderer.
 
 /** Center point of a cabled port in ABSOLUTE row coords (offsetX shifts the cabinet). */
 function portCenter(rack: Rack, device: Device, ifaceId: string, offsetX = 0): { x: number; y: number } | null {
-  const ports = (device.interfaces ?? []).map((i) => ({ id: i.id, name: i.name }));
   const panel = deviceRect(rack, device);
   const origin = bayOrigin(offsetX);
-  const layout = portLayout(panel, ports);
+  const layout = devicePortLayout(device, { x: origin.x + panel.x, y: origin.y + panel.y, w: panel.w, h: panel.h });
   const p = layout.find((l) => l.ifaceId === ifaceId);
   if (!p) return null;
-  return { x: origin.x + p.x + p.w / 2, y: origin.y + p.y + p.h / 2 };
+  return { x: p.x + p.w / 2, y: p.y + p.h / 2 };
 }
 
 export interface BuildRackSvgOptions {
@@ -61,11 +48,12 @@ export interface BuildRackSvgOptions {
   /** Which mounting face to render. Default 'front'. */
   side?: 'front' | 'rear';
   /**
-   * Also draw opposite-face gear as muted "ghosts" so a full-depth chassis on the other
-   * side still reads as occupying its U. Default true for a single-face render; the
-   * both-faces composition turns it off (both faces are already drawn for real).
+   * Also draw opposite-face gear so the hidden side still reads as occupying its U.
+   * Full-depth devices render as real rear hardware; shallow devices stay as muted hints.
    */
   ghostOpposite?: boolean;
+  /** Draw only full-depth backs from the opposite face; used when both front/rear are shown. */
+  showFullDepthBacks?: boolean;
 }
 
 /** Render one cabinet (frame, bay, U labels, on-face devices) at its row offset. */
@@ -74,52 +62,49 @@ function renderCabinet(
   mounted: Device[],
   face: 'front' | 'rear',
   ghostOpposite = false,
+  showFullDepthBacks = false,
 ): string[] {
   const { rack, offsetX, size } = placement;
   const origin = bayOrigin(offsetX);
   const left = offsetX;
-  const right = offsetX + size.width;
   const { height } = size;
   const parts: string[] = [];
 
-  // cabinet frame + corner screws + title
-  parts.push(`<rect x="${left + 1}" y="1" width="${size.width - 2}" height="${height - 2}" rx="12" fill="${C.frame}" stroke="${C.frameBd}" stroke-width="2"/>`);
-  for (const [cx, cy] of [
-    [left + 8, 8],
-    [right - 8, 8],
-    [left + 8, height - 8],
-    [right - 8, height - 8],
-  ]) {
-    parts.push(`<circle cx="${cx}" cy="${cy}" r="4" fill="${C.screw}" stroke="${C.railHole}" stroke-width="1"/>`);
-  }
-  parts.push(
-    `<text x="${origin.x}" y="${FRAME_PAD - 2}" font-family="ui-sans-serif,system-ui,sans-serif" font-size="13" font-weight="700" fill="${C.title}">${escapeXml(rack.name)} · ${rack.ruHeight}U · ${face}</text>`,
-  );
-
-  // bay background + mounting rails
   const bayH = rack.ruHeight * U_PX;
-  parts.push(rect({ x: origin.x, y: origin.y, w: BAY_W, h: bayH }, C.bayBg, `rx="4"`));
-  for (const railX of [origin.x + 1, origin.x + BAY_W - RAIL_PX - 1]) {
-    parts.push(rect({ x: railX, y: origin.y + 4, w: RAIL_PX, h: bayH - 8 }, C.rail, `rx="2"`));
-  }
+  parts.push(...rackShellParts({
+    rackName: rack.name,
+    ruHeight: rack.ruHeight,
+    face,
+    x: left,
+    y: 0,
+    width: size.width,
+    height,
+    bayX: origin.x,
+    bayY: origin.y,
+    bayW: BAY_W,
+    bayH,
+    title: true,
+  }));
 
   // U-number gutter (top→bottom labels, U1 at the bottom)
   for (let u = 1; u <= rack.ruHeight; u++) {
     const y = origin.y + uLabelCenterY(rack, u) + 3;
     parts.push(
-      `<text x="${(origin.x - 6).toFixed(1)}" y="${y.toFixed(1)}" text-anchor="end" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="${C.uNum}">${u}</text>`,
+      `<text x="${(origin.x - 23).toFixed(1)}" y="${y.toFixed(1)}" text-anchor="end" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="${C.uNum}">${u}</text>`,
     );
   }
 
-  // opposite-face ghosts first (behind), so the U doesn't read as empty for back-mounted gear
-  if (ghostOpposite) {
+  // Opposite-face context first (behind), so the U doesn't read as empty. When both faces
+  // are exported, only full-depth devices span into the opposite aisle.
+  if (ghostOpposite || showFullDepthBacks) {
     for (const d of mounted) {
       if (d.rackId !== rack.id || d.ru == null) continue;
       const s = slotOf(d);
       if (s.side === face || s.mount === 'rail') continue;
+      if (!ghostOpposite && !isFullDepth(d.type)) continue;
       const r = deviceRect(rack, d);
       const panel: Rect = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
-      parts.push(...deviceGhostParts(d, panel, face));
+      parts.push(...deviceOppositeFaceParts(d, panel, face));
     }
   }
   // devices on the requested face — realistic art from the shared generator
@@ -162,7 +147,8 @@ export function buildRackRowSvg(
   const ghostOpposite = opts.ghostOpposite ?? false;
   const parts: string[] = [RACK_ART_DEFS];
   if (opts.background) parts.push(`<rect x="0" y="0" width="${width}" height="${height}" fill="${escapeXml(opts.background)}"/>`);
-  for (const p of placements) parts.push(...renderCabinet(p, devices, face, ghostOpposite));
+  const showFullDepthBacks = opts.showFullDepthBacks ?? false;
+  for (const p of placements) parts.push(...renderCabinet(p, devices, face, ghostOpposite, showFullDepthBacks));
 
   // cables (global pass — both endpoints resolved with their own cabinet offset)
   const endPoint = (deviceId: string, ifaceId: string): { x: number; y: number } | null => {
@@ -177,23 +163,21 @@ export function buildRackRowSvg(
     const color = escapeXml(c.color);
     if (pa && pb) {
       const crossRack = placeOf.get(c.aEnd.deviceId) !== placeOf.get(c.bEnd.deviceId);
-      let d: string;
-      if (crossRack) {
-        // Arc up and over the gap between cabinets.
-        const my = Math.min(pa.y, pb.y) - 40 - (i % 5) * 12;
-        const mx = (pa.x + pb.x) / 2;
-        d = `M ${pa.x.toFixed(1)} ${pa.y.toFixed(1)} Q ${mx.toFixed(1)} ${my.toFixed(1)} ${pb.x.toFixed(1)} ${pb.y.toFixed(1)}`;
-      } else {
-        const bow = ((i % 6) - 2.5) * 18;
-        const mx = (pa.x + pb.x) / 2 + bow;
-        const my = (pa.y + pb.y) / 2;
-        d = `M ${pa.x.toFixed(1)} ${pa.y.toFixed(1)} Q ${mx.toFixed(1)} ${my.toFixed(1)} ${pb.x.toFixed(1)} ${pb.y.toFixed(1)}`;
+      const { d, control } = cablePath(pa, pb, i, crossRack);
+      parts.push(`<path d="${d}" fill="none" stroke="#020617" stroke-width="7" stroke-linecap="round" opacity="0.22" filter="url(#rkCableShadow)"/>`);
+      parts.push(`<path d="${d}" fill="none" stroke="#f8fafc" stroke-width="5.2" stroke-linecap="round" opacity="0.82"/>`);
+      parts.push(`<path d="${d}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round"/>`);
+      parts.push(`<path d="${d}" fill="none" stroke="#ffffff" stroke-width="0.8" stroke-linecap="round" opacity="0.45"/>`);
+      if (c.label) {
+        parts.push(`<rect x="${(control.x - 28).toFixed(1)}" y="${(control.y - 13).toFixed(1)}" width="56" height="18" rx="5" fill="#ffffff" stroke="#bfdbfe" stroke-width="1"/>`);
+        parts.push(`<text x="${control.x.toFixed(1)}" y="${(control.y - 1).toFixed(1)}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="8.5" font-weight="700" fill="#2563eb">${escapeXml(c.label)}</text>`);
       }
-      parts.push(`<path d="${d}" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" opacity="0.9"/>`);
-      parts.push(`<path d="${d}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round"/>`);
     }
     for (const p of [pa, pb]) {
-      if (p) parts.push(`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" fill="${color}" stroke="#ffffff" stroke-width="1"/>`);
+      if (p) {
+        parts.push(`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3.8" fill="#0f172a" stroke="#f8fafc" stroke-width="1"/>`);
+        parts.push(`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2" fill="${color}"/>`);
+      }
     }
   });
 
@@ -431,11 +415,16 @@ export function buildRackRowFacesSvg(
   cables: RackCable[],
   opts: { showRear: boolean; background?: string | null },
 ): string {
-  // Rear hidden → ghost rear gear onto the front row. Rear shown → both rows are drawn for
-  // real, so neither needs ghosts.
-  const front = buildRackRowSvg(racks, devices, cables, { background: opts.background, side: 'front', ghostOpposite: !opts.showRear });
+  // Rear hidden → hint all rear gear on the front row. Rear shown → draw full-depth backs
+  // on both rows so the rear aisle reads like physical hardware, without duplicating shallow gear.
+  const front = buildRackRowSvg(racks, devices, cables, {
+    background: opts.background,
+    side: 'front',
+    ghostOpposite: !opts.showRear,
+    showFullDepthBacks: opts.showRear,
+  });
   if (!opts.showRear) return front;
-  const rear = buildRackRowSvg(racks, devices, cables, { background: opts.background, side: 'rear', ghostOpposite: false });
+  const rear = buildRackRowSvg(racks, devices, cables, { background: opts.background, side: 'rear', showFullDepthBacks: true });
   return vstackSvg(front, rear, opts.background);
 }
 

@@ -12,7 +12,7 @@ test('rack designer opens into the side-by-side canvas; +Rack in place; hide rea
 
   // +Rack drops another cabinet in place (still the canvas)
   await page.getByRole('button', { name: /^\+ Rack$/ }).click();
-  await expect(page.getByText(/2 racks · click one to edit/)).toBeVisible();
+  await expect(page.getByText(/2 racks · row view/)).toBeVisible();
 
   // hide-rear toggle flips the label
   const hideRear = page.getByRole('button', { name: /Hide rear/ });

@@ -20,16 +20,18 @@ import {
   FRAME_PAD,
   RACK_GUTTER,
 } from './rackLayout';
-import { slotOf } from './rackModel';
+import { isFullDepth, slotOf } from './rackModel';
 import { rackBudget, occupiedUnits } from './rackBudget';
-import { deviceFaceParts, deviceGhostParts, RACK_ART_DEFS } from './rackDeviceArt';
+import { deviceFaceParts, deviceOppositeFaceParts, devicePortLayout, rackShellParts, RACK_ART_DEFS } from './rackDeviceArt';
 import { deviceColorBy, type ColorByMode } from './rackColorBy';
+import { cablePath } from './cablePath';
 import styles from './RackDesigner.module.css';
 
 export interface RackRowProps {
   racks: Rack[];
   devices: Device[];
   cables: RackCable[];
+  activeRackId?: string;
   selectedId: string | null;
   searchHits: Set<string>;
   showRear: boolean;
@@ -37,15 +39,17 @@ export interface RackRowProps {
   onFocusRack: (rackId: string) => void;
   onSelect: (deviceId: string | null) => void;
   onReorder: (rackId: string, dir: -1 | 1) => void;
+  onMoveDeviceToRack?: (deviceId: string, rackId: string) => void;
 }
 
 /** Gap between the front and rear columns of the SAME rack (tighter than between racks). */
 const FACE_GAP = 22;
 
 export function RackRow({
-  racks, devices, cables, selectedId, searchHits, showRear, colorBy,
-  onFocusRack, onSelect, onReorder,
+  racks, devices, cables, activeRackId, selectedId, searchHits, showRear, colorBy,
+  onFocusRack, onSelect, onReorder, onMoveDeviceToRack,
 }: RackRowProps) {
+  const [dragRackId, setDragRackId] = useState<string | null>(null);
   // Front (and optionally rear) column per rack, laid out left-to-right.
   let x = 0;
   let height = 0;
@@ -59,9 +63,10 @@ export function RackRow({
   });
   const width = Math.max(0, x - RACK_GUTTER);
 
-  // deviceId → its face-column origin offset + center, for cable routing. Rear devices are
-  // only placed (and only cabled) when the rear face is shown.
-  const center = new Map<string, { x: number; y: number }>();
+  // `${deviceId}:${ifaceId}` → visible port/NIC center, for cable routing. Rear devices are
+  // only cabled when the rear face is shown.
+  const portCenter = new Map<string, { x: number; y: number }>();
+  const deviceCenter = new Map<string, { x: number; y: number }>();
   const rackOf = new Map<string, string>();
   for (const c of cols) {
     for (const d of devices) {
@@ -71,7 +76,11 @@ export function RackRow({
       const colX = isRear ? c.rearX : c.frontX;
       const origin = bayOrigin(colX);
       const r = deviceRect(c.rack, d);
-      center.set(d.id, { x: origin.x + r.x + r.w / 2, y: origin.y + r.y + r.h / 2 });
+      const panel = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
+      deviceCenter.set(d.id, { x: panel.x + panel.w / 2, y: panel.y + panel.h / 2 });
+      for (const j of devicePortLayout(d, panel)) {
+        portCenter.set(`${d.id}:${j.ifaceId}`, { x: j.x + j.w / 2, y: j.y + j.h / 2 });
+      }
       rackOf.set(d.id, c.rack.id);
     }
   }
@@ -83,16 +92,60 @@ export function RackRow({
     return (
       // Whole face is a click target → drill into the focused editor. Device clicks
       // stopPropagation and select instead.
-      <g key={`${rack.id}-${face}`} data-rack-face={`${rack.id}-${face}`} onClick={() => onFocusRack(rack.id)} style={{ cursor: 'pointer' }}>
-        <rect
-          x={originX + 1} y={1} width={size.width - 2} height={size.height - 2} rx={10}
-          fill="var(--chrome-bg)" stroke="var(--chrome-border)" strokeWidth={1.5}
-        />
-        <rect x={origin.x} y={origin.y} width={BAY_W} height={bayH} rx={4} fill="var(--canvas-bg)" stroke="var(--chrome-border)" />
-        <text x={origin.x} y={FRAME_PAD - 2} fontSize={11} fontWeight={700} fill="var(--chrome-fg)">{rack.name} · {face}</text>
+      <g
+        key={`${rack.id}-${face}`}
+        data-rack-face={`${rack.id}-${face}`}
+        onClick={() => onFocusRack(rack.id)}
+        onDragOver={(e) => {
+          if (!e.dataTransfer.types.includes('text/rack-device')) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          setDragRackId(rack.id);
+        }}
+        onDragLeave={() => setDragRackId((id) => (id === rack.id ? null : id))}
+        onDrop={(e) => {
+          const deviceId = e.dataTransfer.getData('text/rack-device');
+          setDragRackId(null);
+          if (!deviceId) return;
+          e.preventDefault();
+          onMoveDeviceToRack?.(deviceId, rack.id);
+        }}
+        style={{ cursor: 'pointer' }}
+      >
+        <g dangerouslySetInnerHTML={{
+          __html: rackShellParts({
+            rackName: rack.name,
+            ruHeight: rack.ruHeight,
+            face,
+            x: originX,
+            y: 0,
+            width: size.width,
+            height: size.height,
+            bayX: origin.x,
+            bayY: origin.y,
+            bayW: BAY_W,
+            bayH,
+            active: rack.id === activeRackId,
+            title: true,
+          }).join(''),
+        }} />
+        {dragRackId === rack.id && (
+          <rect
+            x={originX + 5}
+            y={5}
+            width={size.width - 10}
+            height={size.height - 10}
+            rx={8}
+            fill="color-mix(in srgb, var(--accent) 10%, transparent)"
+            stroke="var(--accent)"
+            strokeDasharray="7 4"
+            strokeWidth={2}
+            pointerEvents="none"
+          />
+        )}
         {/* U ticks (every 5) */}
         {Array.from({ length: rack.ruHeight }, (_, k) => k + 1).filter((u) => u % 5 === 0 || u === 1).map((u) => (
-          <text key={u} x={origin.x - 6} y={origin.y + uLabelCenterY(rack, u) + 3} textAnchor="end" fontSize={8} fontFamily="var(--font-mono)" fill="var(--chrome-fg-muted)">{u}</text>
+          <text key={u} x={origin.x - 23} y={origin.y + uLabelCenterY(rack, u) + 3} textAnchor="end" fontSize={8} fontFamily="var(--font-mono)" fill="#64748b">{u}</text>
         ))}
         {/* occupancy heatmap — a per-U track on the left edge: filled = used, faint = free */}
         {(() => {
@@ -100,23 +153,27 @@ export function RackRow({
           return Array.from({ length: rack.ruHeight }, (_, k) => k + 1).map((u) => (
             <rect
               key={`heat-${u}`}
-              x={origin.x - 3.5}
+              x={origin.x - 10.5}
               y={origin.y + uLabelCenterY(rack, u) - U_PX / 2 + 0.5}
               width={2.5}
               height={U_PX - 1}
-              fill={occ.has(u) ? 'var(--accent)' : 'var(--chrome-border)'}
+              fill={occ.has(u) ? '#22c55e' : '#475569'}
               fillOpacity={occ.has(u) ? 0.6 : 0.22}
             />
           ));
         })()}
-        {/* When the rear column is hidden, ghost rear gear onto the front so its U doesn't
-            read as empty (full-depth chassis occupy both faces). */}
-        {face === 'front' && !showRear && devices
-          .filter((d) => d.rackId === rack.id && d.ru != null && slotOf(d).side === 'rear' && slotOf(d).mount !== 'rail')
+        {/* Opposite-face context: when both faces are visible, only full-depth gear spans
+            into the other aisle; when rear is hidden, rear-mounted gear is hinted on front. */}
+        {devices
+          .filter((d) => {
+            if (d.rackId !== rack.id || d.ru == null || slotOf(d).side === face || slotOf(d).mount === 'rail') return false;
+            if (!showRear) return face === 'front';
+            return isFullDepth(d.type);
+          })
           .map((d) => {
             const r = deviceRect(rack, d);
             const panel = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
-            return <g key={`ghost-${d.id}`} pointerEvents="none" dangerouslySetInnerHTML={{ __html: deviceGhostParts(d, panel, 'front').join('') }} />;
+            return <g key={`opposite-${d.id}`} pointerEvents="none" dangerouslySetInnerHTML={{ __html: deviceOppositeFaceParts(d, panel, face).join('') }} />;
           })}
         {/* devices on this face — realistic shared art + select/search overlay */}
         {devices.filter((d) => d.rackId === rack.id && d.ru != null && slotOf(d).side === face).map((d) => {
@@ -125,7 +182,18 @@ export function RackRow({
           const sel = d.id === selectedId;
           const hit = searchHits.has(d.id);
           return (
-            <g key={d.id} onClick={(e) => { e.stopPropagation(); onSelect(d.id); onFocusRack(rack.id); }} style={{ cursor: 'pointer' }}>
+            <g
+              key={d.id}
+              {...({ draggable: true } as Record<string, unknown>)}
+              onDragStart={(e) => {
+                e.stopPropagation();
+                e.dataTransfer.setData('text/rack-device', d.id);
+                e.dataTransfer.effectAllowed = 'move';
+              }}
+              onDragEnd={() => setDragRackId(null)}
+              onClick={(e) => { e.stopPropagation(); onSelect(d.id); onFocusRack(rack.id); }}
+              style={{ cursor: 'grab' }}
+            >
               <g dangerouslySetInnerHTML={{ __html: deviceFaceParts(d, panel, face).join('') }} />
               {colorBy !== 'gear' && (() => {
                 const tint = deviceColorBy(d, colorBy);
@@ -248,17 +316,21 @@ export function RackRow({
 
         {/* cables — intra-rack bow, cross-rack arc up and over the gap */}
         {cables.map((c, idx) => {
-          const pa = center.get(c.aEnd.deviceId);
-          const pb = center.get(c.bEnd.deviceId);
+          const pa = portCenter.get(`${c.aEnd.deviceId}:${c.aEnd.ifaceId}`) ?? deviceCenter.get(c.aEnd.deviceId);
+          const pb = portCenter.get(`${c.bEnd.deviceId}:${c.bEnd.ifaceId}`) ?? deviceCenter.get(c.bEnd.deviceId);
           if (!pa || !pb) return null;
           const crossRack = rackOf.get(c.aEnd.deviceId) !== rackOf.get(c.bEnd.deviceId);
-          const mx = (pa.x + pb.x) / 2 + (crossRack ? 0 : ((idx % 6) - 2.5) * 14);
-          const my = crossRack ? Math.min(pa.y, pb.y) - 36 - (idx % 5) * 10 : (pa.y + pb.y) / 2;
-          const d = `M ${pa.x} ${pa.y} Q ${mx} ${my} ${pb.x} ${pb.y}`;
+          const { d } = cablePath(pa, pb, idx, crossRack);
           return (
             <g key={c.id} pointerEvents="none">
-              <path d={d} fill="none" stroke="var(--chrome-bg)" strokeWidth={4} strokeLinecap="round" opacity={0.85} />
-              <path d={d} fill="none" stroke={c.color} strokeWidth={2} strokeLinecap="round" />
+              <path d={d} fill="none" stroke="#020617" strokeWidth={7} strokeLinecap="round" opacity={0.22} filter="url(#rkCableShadow)" />
+              <path d={d} fill="none" stroke="#f8fafc" strokeWidth={5.2} strokeLinecap="round" opacity={0.82} />
+              <path d={d} fill="none" stroke={c.color} strokeWidth={3} strokeLinecap="round" />
+              <path d={d} fill="none" stroke="#ffffff" strokeWidth={0.8} strokeLinecap="round" opacity={0.45} />
+              <circle cx={pa.x} cy={pa.y} r={3.8} fill="#0f172a" stroke="#f8fafc" strokeWidth={1} />
+              <circle cx={pb.x} cy={pb.y} r={3.8} fill="#0f172a" stroke="#f8fafc" strokeWidth={1} />
+              <circle cx={pa.x} cy={pa.y} r={2} fill={c.color} />
+              <circle cx={pb.x} cy={pb.y} r={2} fill={c.color} />
             </g>
           );
         })}
