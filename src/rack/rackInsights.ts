@@ -7,6 +7,7 @@
 import type { Device, Rack, RackCable, ValidationIssue } from '@/model/types';
 import { fleetBudget, rackBudget } from './rackBudget';
 import { powerFeedAnalysis } from './rackPower';
+import { airflowViolations } from './rackAirflow';
 import { nearestFreeU, slotOf } from './rackModel';
 
 export type RackInsightSeverity = 'ok' | 'info' | 'warn' | 'error';
@@ -149,6 +150,24 @@ export function rackInsights({
       actionLabel: 'Review issue',
       objectIds: first.objectIds,
     });
+  }
+
+  if (activeRack) {
+    const inActive = devices.filter((d) => d.rackId === activeRack.id);
+    const viol = airflowViolations(inActive);
+    if (viol.length > 0) {
+      const dir = viol[0]!.dominant === 'front-to-rear' ? 'front→rear' : 'rear→front';
+      insights.push({
+        id: `airflow-${activeRack.id}`,
+        title: `${viol.length} device${viol.length === 1 ? '' : 's'} fight the airflow`,
+        detail: `Reversed vs the rack's ${dir} flow — exhaust blows into neighbours' intake (hot-aisle risk).`,
+        severity: 'warn',
+        action: 'review-rack',
+        actionLabel: 'Review',
+        rackId: activeRack.id,
+        deviceId: viol[0]!.deviceId,
+      });
+    }
   }
 
   if (selected) {

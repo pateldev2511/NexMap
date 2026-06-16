@@ -938,6 +938,18 @@ export function RackDesigner() {
                   <div className={styles.field}><label>Vendor</label><input value={selected.vendor ?? ''} onChange={(e) => updateSelected('vendor', e.target.value)} onBlur={commitSelectedEdit} /></div>
                   <div className={styles.field}><label>Model</label><input value={selected.model ?? ''} onChange={(e) => updateSelected('model', e.target.value)} onBlur={commitSelectedEdit} /></div>
                   <div className={styles.field}><label>Role</label><input value={selected.role ?? ''} onChange={(e) => updateSelected('role', e.target.value)} onBlur={commitSelectedEdit} /></div>
+                  <div className={styles.field}>
+                    <label>Airflow</label>
+                    <select
+                      value={selected.airflow ?? 'front-to-rear'}
+                      aria-label="Airflow direction"
+                      onChange={(e) => { updateSelected('airflow', (e.target.value === 'front-to-rear' ? undefined : e.target.value) as Device['airflow']); commitSelectedEdit(); }}
+                    >
+                      <option value="front-to-rear">Front → rear (standard)</option>
+                      <option value="rear-to-front">Rear → front (reversed)</option>
+                      <option value="side">Side / passive</option>
+                    </select>
+                  </div>
                   {(() => {
                     const photo = isRasterPhotoDataUri(selected.extra?.rackPhotoDataUri)
                       ? (selected.extra!.rackPhotoDataUri as string)

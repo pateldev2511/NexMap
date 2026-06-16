@@ -130,6 +130,8 @@ export interface Device {
   weightKg?: number;
   /** Unit list price (USD) for the bill-of-materials cost rollup (schema v3 additive). Optional. */
   priceUsd?: number;
+  /** Airflow direction for hot-aisle hinting (schema v3 additive). Absent → front-to-rear. */
+  airflow?: 'front-to-rear' | 'rear-to-front' | 'side';
   /**
    * Which power feed(s) this device cords into (schema v3 additive): 'A' or 'B' = single-
    * corded to that feed (a single point of failure); 'AB' = dual-corded / redundant PSUs
