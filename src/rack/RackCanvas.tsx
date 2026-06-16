@@ -23,6 +23,7 @@ import { slotOf } from './rackModel';
 import { deviceFaceParts, deviceOppositeFaceParts, devicePortLayout, rackShellParts, RACK_ART_DEFS } from './rackDeviceArt';
 import { cablePath } from './cablePath';
 import { normalizeRect, devicesInMarquee, MARQUEE_THRESHOLD, type Box } from './marquee';
+import { portAt, portCenter, type PortTarget } from './portHit';
 import styles from './RackDesigner.module.css';
 
 /**
@@ -43,6 +44,7 @@ export function RackCanvas({
   onDropPreset,
   onSelect,
   onMarquee,
+  onConnectPorts,
   onSelectCable,
   onMoveTo,
 }: {
@@ -66,6 +68,8 @@ export function RackCanvas({
   onSelect: (id: string | null, additive?: boolean) => void;
   /** Rubber-band selection result: device ids inside the box (additive when shift/cmd held). */
   onMarquee?: (ids: string[], additive: boolean) => void;
+  /** Drag-to-cable: a cable was dragged from one port to another. */
+  onConnectPorts?: (a: { deviceId: string; ifaceId: string }, b: { deviceId: string; ifaceId: string }) => void;
   onSelectCable: (id: string | null) => void;
   onMoveTo: (id: string, u: number) => void;
 }) {
@@ -81,10 +85,16 @@ export function RackCanvas({
   const marquee = useRef<{ sx: number; sy: number; active: boolean } | null>(null);
   const justMarqueed = useRef(false);
   const [marqueeBox, setMarqueeBox] = useState<Box | null>(null);
+  // Drag-to-cable: a press on a port arms a cable; it only becomes a drag after crossing the
+  // threshold (so a tap on a jack still selects the device), then release on another port
+  // connects them.
+  const cableDrag = useRef<{ source: PortTarget; devId: string; additive: boolean; sx: number; sy: number; active: boolean } | null>(null);
+  const [cablePt, setCablePt] = useState<{ x: number; y: number } | null>(null);
 
   const mounted = devices.filter((d) => d.rackId === rack.id && d.ru != null);
   const portCenters = new Map<string, { x: number; y: number }>(); // `${devId}:${ifaceId}`
   const deviceRects: { id: string; box: Box }[] = []; // selectable device panels, in SVG space
+  const ports: PortTarget[] = []; // every visible jack, in SVG space, for drag-to-cable hit-testing
 
   /** Map a client point to SVG user-space coordinates (uniform scale via the viewBox). */
   const clientToSvg = (clientX: number, clientY: number): { x: number; y: number } => {
@@ -106,6 +116,15 @@ export function RackCanvas({
   };
 
   const onBayMove = (e: React.PointerEvent) => {
+    if (cableDrag.current) {
+      const p = clientToSvg(e.clientX, e.clientY);
+      if (!cableDrag.current.active) {
+        if (Math.abs(p.x - cableDrag.current.sx) + Math.abs(p.y - cableDrag.current.sy) <= MARQUEE_THRESHOLD) return;
+        cableDrag.current.active = true;
+      }
+      setCablePt(p);
+      return;
+    }
     if (drag.current) {
       onSelectNudge(e);
       return;
@@ -150,6 +169,17 @@ export function RackCanvas({
     if (armed) return; // placing — let the bay handle the click
     e.stopPropagation();
     const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+    // Arbiter priority: a press on a port (jack) ARMS a cable drag, beating device-move. It
+    // only becomes a real drag past the threshold (onBayMove); a tap falls through to select.
+    if (onConnectPorts) {
+      const p = clientToSvg(e.clientX, e.clientY);
+      const hit = portAt(ports, p.x, p.y);
+      if (hit) {
+        cableDrag.current = { source: hit, devId: d.id, additive, sx: p.x, sy: p.y, active: false };
+        svgRef.current?.setPointerCapture?.(e.pointerId); // capture on SVG so moves track across devices
+        return;
+      }
+    }
     onSelect(d.id, additive);
     if (additive) return; // additive = building a multi-selection; don't start a drag/move
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
@@ -157,6 +187,25 @@ export function RackCanvas({
     setHoverU(d.ru ?? 1);
   };
   const onDevUp = (e?: React.PointerEvent) => {
+    if (cableDrag.current) {
+      const cd = cableDrag.current;
+      if (cd.active && onConnectPorts) {
+        const p = e ? clientToSvg(e.clientX, e.clientY) : null;
+        const target = p ? portAt(ports, p.x, p.y) : null;
+        if (target && !(target.deviceId === cd.source.deviceId && target.ifaceId === cd.source.ifaceId)) {
+          onConnectPorts(
+            { deviceId: cd.source.deviceId, ifaceId: cd.source.ifaceId },
+            { deviceId: target.deviceId, ifaceId: target.ifaceId },
+          );
+        }
+        justMarqueed.current = true; // a real drag happened — swallow the trailing click
+      } else {
+        onSelect(cd.devId, cd.additive); // tap on a jack → just select the device
+      }
+      cableDrag.current = null;
+      setCablePt(null);
+      return;
+    }
     if (drag.current && hoverU != null) {
       onMoveTo(drag.current.id, hoverU);
     }
@@ -185,6 +234,7 @@ export function RackCanvas({
     const jacks = devicePortLayout(d, panel);
     for (const j of jacks) {
       portCenters.set(`${d.id}:${j.ifaceId}`, { x: j.x + j.w / 2, y: j.y + j.h / 2 });
+      ports.push({ deviceId: d.id, ifaceId: j.ifaceId, x: j.x, y: j.y, w: j.w, h: j.h });
     }
 
     return (
@@ -387,6 +437,23 @@ export function RackCanvas({
           height={marqueeBox.h}
           pointerEvents="none"
         />
+      )}
+      {cablePt && cableDrag.current?.active && (
+        <g pointerEvents="none">
+          {ports.map((pt, i) => {
+            const c = portCenter(pt);
+            return <circle key={`pt-${i}`} cx={c.x} cy={c.y} r={3} fill="var(--accent)" opacity={0.55} />;
+          })}
+          <line
+            x1={portCenter(cableDrag.current.source).x}
+            y1={portCenter(cableDrag.current.source).y}
+            x2={cablePt.x}
+            y2={cablePt.y}
+            stroke="var(--accent)"
+            strokeWidth={2}
+            strokeDasharray="5 3"
+          />
+        </g>
       )}
     </svg>
   );

@@ -5,7 +5,7 @@ import { rasterize, downloadBlob } from '@/io/export/raster';
 import { buildPdfBlob } from '@/io/export/pdf';
 import { RackCanvas, type RejectInfo } from './RackCanvas';
 import { RackRow } from './RackRow';
-import { ConnectPortsDialog } from './ConnectPortsDialog';
+import { ConnectPortsDialog, CABLE_COLORS } from './ConnectPortsDialog';
 import {
   buildRackSvg,
   buildRackRowFacesSvg,
@@ -800,6 +800,12 @@ export function RackDesigner() {
                 onDropPreset={dropPreset}
                 onSelect={selectDevice}
                 onMarquee={(ids, additive) => s().select(ids, additive)}
+                onConnectPorts={(a, b) => {
+                  // Cycle the default palette so consecutive drag-cables aren't all one color.
+                  const color = CABLE_COLORS[cables.length % CABLE_COLORS.length]!;
+                  const id = s().connectRackCable(a, b, color);
+                  if (id) setSelCable(id);
+                }}
                 onSelectCable={setSelCable}
                 onMoveTo={moveTo}
               />

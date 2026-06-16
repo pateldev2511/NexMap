@@ -96,3 +96,8 @@ test('hardware tab: upload a device photo via the dropzone, then remove it', asy
   await remove.click();
   await expect(page.getByText(/Drop a photo or click/)).toBeVisible();
 });
+
+// NOTE: drag-port-to-port cabling is verified by portHit.ts unit tests + the no-regression
+// guards above (taps still select, marquee still works) + a live browser check. A coordinate
+// driven e2e is intentionally omitted: jacks are tiny raw <rect>s with no stable selectors,
+// so a mouse-coordinate drag is inherently flaky. See the rack ops-cockpit plan, Milestone D.
