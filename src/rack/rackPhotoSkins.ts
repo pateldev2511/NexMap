@@ -9,6 +9,7 @@
 import type { Device } from '@/model/types';
 import { escapeXml } from '@/io/export/buildSvg';
 import { portLayout, type Rect } from './rackLayout';
+import { isRasterPhotoDataUri } from './rackPhotoUpload';
 
 type RackFace = 'front' | 'rear';
 type SkinFamily =
@@ -72,8 +73,9 @@ function dataUriForFace(device: Device, face: RackFace): string | null {
     ? ['rackPhotoFrontDataUri', 'rackPhotoDataUri']
     : ['rackPhotoRearDataUri', 'rackPhotoDataUri'];
   for (const key of keys) {
-    const value = extra[key];
-    if (typeof value === 'string' && /^data:image\/(?:png|jpe?g|webp|gif|svg\+xml);/i.test(value)) return value;
+    // Raster data-URIs only — svg+xml/gif are rejected so untrusted SVG never reaches the
+    // export's Image() path (see rackPhotoUpload.ts; matches the upload validator).
+    if (isRasterPhotoDataUri(extra[key])) return extra[key] as string;
   }
   return null;
 }

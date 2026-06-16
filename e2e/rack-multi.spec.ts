@@ -66,3 +66,33 @@ test('focus view: marquee-drag on the canvas multi-selects devices and opens the
   await expect(page.getByRole('heading', { name: /^Selected device$/ })).toBeVisible();
   await expect(page.getByRole('heading', { name: /Bulk edit · \d+ devices/ })).toHaveCount(0);
 });
+
+test('hardware tab: upload a device photo via the dropzone, then remove it', async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto('/');
+  await page.getByRole('button', { name: /Rack designer/i }).first().click();
+  await page.getByRole('button', { name: /Enterprise core \(42U\)/ }).click();
+  await page.getByRole('button', { name: /^Single rack$/ }).click();
+
+  // Select a device and open the Hardware tab.
+  await page.locator('[role="button"][aria-label*="U"]').first().click();
+  await page.getByRole('button', { name: /^hardware$/ }).click();
+
+  // The dropzone is shown when no photo is set.
+  await expect(page.getByText(/Drop a photo or click/)).toBeVisible();
+
+  // Upload a tiny valid PNG to the hidden file input.
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  // Scope to the dropzone's own input (the toolbar's Open button also has a file input).
+  await page.locator('label:has-text("Drop a photo") input[type="file"]').setInputFiles({ name: 'gear.png', mimeType: 'image/png', buffer: png });
+
+  // The thumbnail + Remove replace the dropzone.
+  await expect(page.getByRole('img', { name: /photo/ })).toBeVisible();
+  const remove = page.getByRole('button', { name: /^Remove$/ });
+  await expect(remove).toBeVisible();
+  await remove.click();
+  await expect(page.getByText(/Drop a photo or click/)).toBeVisible();
+});

@@ -1107,6 +1107,44 @@
   stroke-dasharray: 4 3;
 }
 
+.photoDrop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: 56px;
+  padding: 8px 10px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--chrome-border));
+  border-radius: 6px;
+  background: var(--canvas-bg);
+  color: var(--chrome-fg-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.photoDrop:hover {
+  border-color: var(--accent);
+  color: var(--chrome-fg);
+}
+.photoRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.photoThumb {
+  width: 64px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--chrome-border);
+  background: #05080c;
+}
+.fieldError {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #dc2626;
+}
+
 .bulkHint {
   margin: 0 0 8px;
   font-size: 12px;

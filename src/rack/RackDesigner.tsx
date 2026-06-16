@@ -31,6 +31,7 @@ import { rackHealthScore } from './rackHealthScore';
 import { bomCsv } from './rackBom';
 import { deviceMatchesQuery } from './rackSearch';
 import { hasBulkChanges } from './rackBulk';
+import { validatePhoto, isRasterPhotoDataUri, PHOTO_ACCEPT } from './rackPhotoUpload';
 import { deviceFaceParts, RACK_ART_DEFS } from './rackDeviceArt';
 import type { Device } from '@/model/types';
 import styles from './RackDesigner.module.css';
@@ -130,6 +131,7 @@ export function RackDesigner() {
   const [deviceSearch, setDeviceSearch] = useState('');
   const [exportMode, setExportMode] = useState<ExportMode>('diagram');
   const [bulkPatch, setBulkPatch] = useState<Partial<Device>>({});
+  const [photoError, setPhotoError] = useState<string | null>(null);
   const [inspectorTab, setInspectorTab] = useState<'placement' | 'hardware' | 'power' | 'cabling' | 'asset'>('placement');
   const [rowReject, setRowReject] = useState<string | null>(null);
 
@@ -392,6 +394,25 @@ export function RackDesigner() {
     const n = s().bulkUpdateDevices([...selection], bulkPatch);
     if (n > 0) setBulkPatch({});
     return n;
+  }
+
+  /** Validate + read a chosen photo file into a data-URI and store it on the selected device. */
+  function onPhotoFile(file: File | undefined | null) {
+    if (!file || !selected) return;
+    const v = validatePhoto(file.type, file.size);
+    if (!v.ok) {
+      setPhotoError(v.error ?? 'Invalid image.');
+      return;
+    }
+    setPhotoError(null);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const uri = typeof reader.result === 'string' ? reader.result : '';
+      if (isRasterPhotoDataUri(uri)) s().setDevicePhoto(selected.id, uri);
+      else setPhotoError('Could not read that image.');
+    };
+    reader.onerror = () => setPhotoError('Could not read that image.');
+    reader.readAsDataURL(file);
   }
 
   function handleInsight(insight: RackInsight) {
@@ -917,6 +938,38 @@ export function RackDesigner() {
                   <div className={styles.field}><label>Vendor</label><input value={selected.vendor ?? ''} onChange={(e) => updateSelected('vendor', e.target.value)} onBlur={commitSelectedEdit} /></div>
                   <div className={styles.field}><label>Model</label><input value={selected.model ?? ''} onChange={(e) => updateSelected('model', e.target.value)} onBlur={commitSelectedEdit} /></div>
                   <div className={styles.field}><label>Role</label><input value={selected.role ?? ''} onChange={(e) => updateSelected('role', e.target.value)} onBlur={commitSelectedEdit} /></div>
+                  {(() => {
+                    const photo = isRasterPhotoDataUri(selected.extra?.rackPhotoDataUri)
+                      ? (selected.extra!.rackPhotoDataUri as string)
+                      : null;
+                    return (
+                      <div className={styles.field}>
+                        <label>Photo</label>
+                        {photo ? (
+                          <div className={styles.photoRow}>
+                            <img className={styles.photoThumb} src={photo} alt={`${selected.name} photo`} />
+                            <button
+                              className={styles.btn}
+                              onClick={() => { s().setDevicePhoto(selected.id, null); setPhotoError(null); }}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ) : (
+                          <label className={styles.photoDrop}>
+                            <span>Drop a photo or click — PNG/JPEG/WebP, ≤512 KB</span>
+                            <input
+                              type="file"
+                              accept={PHOTO_ACCEPT}
+                              hidden
+                              onChange={(e) => { onPhotoFile(e.target.files?.[0]); e.target.value = ''; }}
+                            />
+                          </label>
+                        )}
+                        {photoError && <span className={styles.fieldError} role="alert">{photoError}</span>}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
               {inspectorTab === 'power' && (

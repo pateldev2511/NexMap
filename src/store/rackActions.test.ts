@@ -307,3 +307,24 @@ describe('bulkUpdateDevices', () => {
     expect(s().bulkUpdateDevices([a], {})).toBe(0);
   });
 });
+
+describe('setDevicePhoto', () => {
+  const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==';
+  it('stores a raster photo data-URI on extra and clears it, both undoable', () => {
+    const a = s().addDeviceAt('server', 0, 0);
+    s().setDevicePhoto(a, PNG);
+    expect(s().getDevice(a)!.extra?.rackPhotoDataUri).toBe(PNG);
+    s().undo();
+    expect(s().getDevice(a)!.extra?.rackPhotoDataUri).toBeUndefined();
+
+    s().setDevicePhoto(a, PNG);
+    s().setDevicePhoto(a, null); // remove
+    expect(s().getDevice(a)!.extra?.rackPhotoDataUri).toBeUndefined();
+    s().undo(); // undo the remove → photo back
+    expect(s().getDevice(a)!.extra?.rackPhotoDataUri).toBe(PNG);
+  });
+
+  it('does nothing for an unknown device id', () => {
+    expect(() => s().setDevicePhoto('ghost', PNG)).not.toThrow();
+  });
+});

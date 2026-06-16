@@ -432,6 +432,8 @@ export interface ProjectStore {
   balancePower(): number;
   /** Stamp allowlisted fields (status/owner/assetTag/warranty/feed) onto many devices in one undo. Returns count changed. */
   bulkUpdateDevices(ids: string[], patch: Partial<Device>): number;
+  /** Set or clear a device's uploaded photo (extra.rackPhotoDataUri). One undo. */
+  setDevicePhoto(deviceId: string, dataUri: string | null): void;
   disconnectRackCable(id: string): void;
   rackCablesAll(): RackCable[];
   getRackCable(id: string): RackCable | undefined;
@@ -2007,6 +2009,20 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       history.commitCoalesceBoundary();
       set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
       return cmds.length;
+    },
+
+    setDevicePhoto(deviceId, dataUri) {
+      const d = model.devices.get(deviceId);
+      if (!d) return;
+      const nextExtra = { ...(d.extra ?? {}) };
+      if (dataUri) nextExtra.rackPhotoDataUri = dataUri;
+      else delete nextExtra.rackPhotoDataUri;
+      const after = Object.keys(nextExtra).length ? nextExtra : undefined;
+      // Boundary so each photo set/remove is its own undo step (UpdateDeviceCommand otherwise
+      // coalesces consecutive same-device edits).
+      history.dispatch(new UpdateDeviceCommand(deviceId, { extra: d.extra }, { extra: after }), model);
+      history.commitCoalesceBoundary();
+      set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
     },
     disconnectRackCable(id) {
       commit(new DeleteRackCableCommand(id));
