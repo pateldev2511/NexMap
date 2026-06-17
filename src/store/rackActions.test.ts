@@ -306,6 +306,19 @@ describe('bulkUpdateDevices', () => {
     expect(s().bulkUpdateDevices([], { owner: 'X' })).toBe(0);
     expect(s().bulkUpdateDevices([a], {})).toBe(0);
   });
+
+  it('assigns sequential asset tags in one undoable transaction', () => {
+    const a = s().addDeviceAt('switch', 0, 0);
+    const b = s().addDeviceAt('server', 0, 0);
+    const n = s().bulkPrefixAssetTags([a, b], 'DC1-R01');
+    expect(n).toBe(2);
+    expect(s().getDevice(a)!.assetTag).toBe('DC1-R01-001');
+    expect(s().getDevice(b)!.assetTag).toBe('DC1-R01-002');
+
+    s().undo();
+    expect(s().getDevice(a)!.assetTag).toBeUndefined();
+    expect(s().getDevice(b)!.assetTag).toBeUndefined();
+  });
 });
 
 describe('setDevicePhoto', () => {

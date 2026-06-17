@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import type { Device } from '@/model/types';
 import { isPortCabled } from './rackCables';
+import { estimateCableLengthFt } from './cableLength';
 import styles from './RackDesigner.module.css';
 
 /** Contrast-safe 8-swatch cable palette (the locked manual-color decision). */
@@ -10,15 +11,19 @@ export const CABLE_COLORS = [
   '#7c3aed', '#06b6d4', '#6b7280', '#111827',
 ] as const;
 
+export type CableSeedEnd = { deviceId: string; ifaceId?: string };
+
 /**
  * List-first port cabling (eng + design decision). Pick source device+port, dest
  * device+port, color, optional label/length. Fully keyboard-operable; no pixel-hunting.
  */
 export function ConnectPortsDialog({
   rackId,
+  initialA,
   onClose,
 }: {
   rackId: string;
+  initialA?: CableSeedEnd;
   onClose: () => void;
 }) {
   const s = useProjectStore.getState;
@@ -42,9 +47,15 @@ export function ConnectPortsDialog({
   const cables = s().rackCablesAll();
 
   const inCurrent = devices.filter((d) => d.rackId === rackId);
-  const [aDev, setADev] = useState(inCurrent[0]?.id ?? devices[0]?.id ?? '');
-  const [aPort, setAPort] = useState('');
-  const [bDev, setBDev] = useState(inCurrent[1]?.id ?? devices[1]?.id ?? devices[0]?.id ?? '');
+  const initialDevice = initialA && devices.some((d) => d.id === initialA.deviceId) ? initialA.deviceId : '';
+  const [aDev, setADev] = useState(initialDevice || inCurrent[0]?.id || devices[0]?.id || '');
+  const [aPort, setAPort] = useState(initialA?.ifaceId ?? '');
+  const [bDev, setBDev] = useState(
+    inCurrent.find((d) => d.id !== (initialDevice || inCurrent[0]?.id))?.id
+      ?? devices.find((d) => d.id !== (initialDevice || devices[0]?.id))?.id
+      ?? devices[0]?.id
+      ?? '',
+  );
   const [bPort, setBPort] = useState('');
   const [color, setColor] = useState<string>(CABLE_COLORS[0]);
   const [label, setLabel] = useState('');
@@ -57,7 +68,18 @@ export function ConnectPortsDialog({
       id: i.id,
       name: i.name,
       used: isPortCabled(cables, devId, i.id),
-    }));
+    })).sort((a, b) => Number(a.used) - Number(b.used) || a.name.localeCompare(b.name));
+  };
+
+  const aDevice = devices.find((d) => d.id === aDev);
+  const bDevice = devices.find((d) => d.id === bDev);
+  const suggestedLabel = aDevice && bDevice ? `${aDevice.name} to ${bDevice.name}` : '';
+  const suggestedLength = aDevice && bDevice ? estimateCableLengthFt(aDevice, bDevice, racks) : null;
+  const canUseSuggestions = Boolean(suggestedLabel || suggestedLength != null);
+
+  const useSuggestions = () => {
+    if (suggestedLabel && !label.trim()) setLabel(suggestedLabel);
+    if (suggestedLength != null && !lengthFt.trim()) setLengthFt(String(suggestedLength));
   };
 
   const submit = () => {
@@ -108,7 +130,7 @@ export function ConnectPortsDialog({
         <option value="">Select port…</option>
         {portsOf(dev).map((p) => (
           <option key={p.id} value={p.id} disabled={p.used}>
-            {p.name}{p.used ? ' (cabled)' : ''}
+            {p.name}{p.used ? ' (cabled)' : ' (available)'}
           </option>
         ))}
       </select>
@@ -143,12 +165,24 @@ export function ConnectPortsDialog({
               </div>
               <div className={styles.field}>
                 <label>Label (optional)</label>
-                <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. uplink" />
+                <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={suggestedLabel || 'e.g. uplink'} />
               </div>
               <div className={styles.field}>
                 <label>Length in ft (optional — recommended for cross-rack runs)</label>
-                <input value={lengthFt} onChange={(e) => setLengthFt(e.target.value)} inputMode="numeric" placeholder="e.g. 10" />
+                <input
+                  value={lengthFt}
+                  onChange={(e) => setLengthFt(e.target.value)}
+                  inputMode="numeric"
+                  placeholder={suggestedLength != null ? String(suggestedLength) : 'e.g. 10'}
+                />
               </div>
+              {canUseSuggestions && (
+                <div className={styles.fieldHint}>
+                  Suggested run: {suggestedLabel || 'selected endpoints'}
+                  {suggestedLength != null ? `, ${suggestedLength} ft` : ''}
+                  <button className={styles.btn} onClick={useSuggestions}>Use suggestions</button>
+                </div>
+              )}
               {err && <div className={styles.err}>{err}</div>}
             </>
           )}

@@ -5,7 +5,7 @@ import { rasterize, downloadBlob } from '@/io/export/raster';
 import { buildPdfBlob } from '@/io/export/pdf';
 import { RackCanvas, type RejectInfo } from './RackCanvas';
 import { RackRow } from './RackRow';
-import { ConnectPortsDialog, CABLE_COLORS } from './ConnectPortsDialog';
+import { ConnectPortsDialog, CABLE_COLORS, type CableSeedEnd } from './ConnectPortsDialog';
 import {
   buildRackSvg,
   buildRackRowFacesSvg,
@@ -33,6 +33,7 @@ import { deviceMatchesQuery } from './rackSearch';
 import { hasBulkChanges } from './rackBulk';
 import { validatePhoto, isRasterPhotoDataUri, PHOTO_ACCEPT } from './rackPhotoUpload';
 import { deviceFaceParts, RACK_ART_DEFS } from './rackDeviceArt';
+import { estimateCableLengthFt } from './cableLength';
 import type { Device } from '@/model/types';
 import styles from './RackDesigner.module.css';
 
@@ -99,6 +100,36 @@ function GearThumb({ preset, device }: { preset?: RackDevicePreset; device?: Dev
   );
 }
 
+const INSIGHT_GROUPS = ['Critical', 'Planning', 'Inventory', 'Cabling'] as const;
+type InsightGroup = (typeof INSIGHT_GROUPS)[number];
+
+function insightGroup(insight: RackInsight): InsightGroup {
+  if (insight.severity === 'error') return 'Critical';
+  if (insight.action === 'auto-length' || insight.action === 'review-health') return 'Cabling';
+  if (insight.action === 'add-asset-tag' || /asset|owner|serial|warranty|inventory/i.test(`${insight.title} ${insight.detail}`)) {
+    return 'Inventory';
+  }
+  return 'Planning';
+}
+
+function missingInventoryFields(d: Device): string[] {
+  const missing: string[] = [];
+  if (!d.assetTag) missing.push('asset tag');
+  if (!d.owner) missing.push('owner');
+  if (!d.serial) missing.push('serial');
+  if (!d.vendor || !d.model) missing.push('model');
+  if (!d.warrantyExpiry) missing.push('warranty');
+  return missing;
+}
+
+function inventoryCompleteness(devices: Device[]) {
+  const mounted = devices.filter((d) => d.rackId != null);
+  const total = mounted.length * 5;
+  if (total === 0) return { pct: 100, missing: 0, mounted: 0 };
+  const missing = mounted.reduce((sum, d) => sum + missingInventoryFields(d).length, 0);
+  return { pct: Math.round(((total - missing) / total) * 100), missing, mounted: mounted.length };
+}
+
 /**
  * Rack elevation designer (schema v3). Replaces the toy RackView. Click a library
  * preset to arm it, click a U slot to drop (auto-populated ports), click a device to
@@ -120,6 +151,7 @@ export function RackDesigner() {
   const [showRear, setShowRear] = useState(true);
   const [armed, setArmed] = useState<RackDevicePreset | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [connectingFrom, setConnectingFrom] = useState<CableSeedEnd | undefined>();
   const [newType, setNewType] = useState<string>(DEFAULT_RACK_PRESET.id);
   const [reject, setReject] = useState<RejectInfo | null>(null);
   const [side, setSideState] = useState<'front' | 'rear'>('front');
@@ -131,6 +163,8 @@ export function RackDesigner() {
   const [deviceSearch, setDeviceSearch] = useState('');
   const [exportMode, setExportMode] = useState<ExportMode>('diagram');
   const [bulkPatch, setBulkPatch] = useState<Partial<Device>>({});
+  const [assetPrefix, setAssetPrefix] = useState('');
+  const [exportOpen, setExportOpen] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [inspectorTab, setInspectorTab] = useState<'placement' | 'hardware' | 'power' | 'cabling' | 'asset'>('placement');
   const [rowReject, setRowReject] = useState<string | null>(null);
@@ -177,6 +211,20 @@ export function RackDesigner() {
     }
     return { front, rear };
   }, [inRack]);
+  const inventory = useMemo(() => inventoryCompleteness(devices), [devices]);
+  const selectedMissing = useMemo(() => (selected ? missingInventoryFields(selected) : []), [selected]);
+  const groupedInsights = useMemo(() => {
+    const groups = new Map<InsightGroup, RackInsight[]>();
+    for (const key of INSIGHT_GROUPS) groups.set(key, []);
+    for (const insight of insights) groups.get(insightGroup(insight))!.push(insight);
+    return groups;
+  }, [insights]);
+  const bestArmedU = useMemo(() => {
+    if (!rack || !armed) return null;
+    const useBay = (armed.mount ?? 'rack') === 'rail' ? 'full' : bay;
+    const depth = isFullDepth(armed.type) ? 'full' : 'shallow';
+    return nearestFreeU(rack, inRack, armed.span, Math.min(21, rack.ruHeight), side, useBay, depth);
+  }, [armed, bay, inRack, rack, side]);
 
   /** Switch faces and drop any selection that belongs to the face we're leaving. */
   function setSide(next: 'front' | 'rear') {
@@ -396,6 +444,25 @@ export function RackDesigner() {
     return n;
   }
 
+  function assignAssetTags() {
+    const n = s().bulkPrefixAssetTags([...selection], assetPrefix);
+    if (n > 0) setAssetPrefix('');
+    return n;
+  }
+
+  function openConnectFromSelected() {
+    if (selected) setConnectingFrom({ deviceId: selected.id });
+    else setConnectingFrom(undefined);
+    setInspectorTab('cabling');
+    setConnecting(true);
+  }
+
+  function focusFirstMissingAsset() {
+    const target = devices.find((d) => d.rackId != null && !d.assetTag);
+    if (target) focusDevice(target.id);
+    setInspectorTab('asset');
+  }
+
   /** Validate + read a chosen photo file into a data-URI and store it on the selected device. */
   function onPhotoFile(file: File | undefined | null) {
     if (!file || !selected) return;
@@ -506,26 +573,26 @@ export function RackDesigner() {
   }
 
   /** Build the export SVG honoring the row/focus view and the chosen export mode. */
-  function exportSvg(background: string): string {
+  function exportSvg(background: string, mode: ExportMode = exportMode): string {
     const rackSvg =
       view === 'row'
         ? buildRackRowFacesSvg(racks, devices, cables, { showRear, background })
         : buildRackSvg(rack!, devices, cables, { background, side });
-    if (exportMode === 'diagram') return rackSvg;
+    if (mode === 'diagram') return rackSvg;
     const tableSvg = buildConnectionsTableSvg(cableScheduleRows(devices, cables), { background, title: 'Connections' });
-    return composeExport(rackSvg, tableSvg, exportMode, background);
+    return composeExport(rackSvg, tableSvg, mode, background);
   }
   const exportName = () => (view === 'row' ? 'all-racks' : rack?.name ?? 'rack');
 
-  function exportPng() {
+  function exportPng(mode: ExportMode = exportMode) {
     if (!rack) return;
-    rasterize(exportSvg('#0c1015'), { scale: 2, mimeType: 'image/png', background: null })
+    rasterize(exportSvg('#0c1015', mode), { scale: 2, mimeType: 'image/png', background: null })
       .then(({ blob }) => downloadBlob(blob, `${exportName()}.png`))
       .catch(() => undefined);
   }
-  function exportPdf() {
+  function exportPdf(mode: ExportMode = exportMode) {
     if (!rack) return;
-    buildPdfBlob(exportSvg('#ffffff'), { pageSize: 'a4', orientation: 'portrait', scale: 2 })
+    buildPdfBlob(exportSvg('#ffffff', mode), { pageSize: 'a4', orientation: 'portrait', scale: 2 })
       .then((blob) => downloadBlob(blob, `${exportName()}.pdf`))
       .catch(() => undefined);
   }
@@ -550,6 +617,16 @@ export function RackDesigner() {
         <div className={styles.brandBlock}>
           <span className={styles.title}>Rack designer</span>
           <span>{view === 'row' ? `${racks.length} rack${racks.length === 1 ? '' : 's'} · row view` : `${rack.name} · ${side}`}</span>
+        </div>
+        <div className={styles.breadcrumb} aria-label="Workspace path">
+          <button onClick={() => setView('row')}>Row</button>
+          <span>›</span>
+          <button onClick={() => setView('focus')}>{rack.name}</button>
+          <span>›</span>
+          <button onClick={() => setSide(side === 'front' ? 'rear' : 'front')}>{side}</button>
+          {(selected || selCable) && <span>›</span>}
+          {selected && <button onClick={() => setInspectorTab('placement')}>{selected.name}</button>}
+          {!selected && selCable && <button onClick={() => setInspectorTab('cabling')}>Cable</button>}
         </div>
         <div className={styles.commandGroup} aria-label="Rack commands">
           {view === 'focus' && (
@@ -602,16 +679,7 @@ export function RackDesigner() {
         </span>
         <div className={styles.spacer} />
         <div className={styles.commandGroup} aria-label="Export controls">
-          <select value={exportMode} onChange={(e) => setExportMode(e.target.value as ExportMode)} title="What to include in PNG/PDF export">
-            <option value="diagram">Diagram</option>
-            <option value="diagram+table">Diagram + table</option>
-            <option value="table-only">Table only</option>
-          </select>
-          <button className={styles.btn} title="Export the cable schedule as CSV" onClick={exportCsv}>CSV</button>
-          <button className={styles.btn} title="Bill of materials (qty by model, power, weight, cost) as CSV" onClick={exportBom}>BOM</button>
-          <button className={styles.btn} title="Printable label strips for every device" onClick={exportLabels}>Labels</button>
-          <button className={styles.btn} onClick={exportPdf}>PDF</button>
-          <button className={`${styles.btn} ${styles.primary}`} title="Export the visible rack view as PNG" onClick={exportPng}>PNG</button>
+          <button className={`${styles.btn} ${styles.primary}`} title="Open export presets" onClick={() => setExportOpen(true)}>Export handoff</button>
         </div>
       </div>
 
@@ -689,6 +757,50 @@ export function RackDesigner() {
             </div>
           </div>
         )}
+        <div className={styles.workflowRail} aria-label="Next actions">
+          <button
+            className={`${styles.workflowAction} ${armed ? styles.workflowHot : ''}`}
+            onClick={() => {
+              if (armed && bestArmedU != null) {
+                setView('focus');
+                placePreset(armed, bestArmedU);
+                setArmed(null);
+              } else {
+                setView('focus');
+                setInspectorTab('placement');
+              }
+            }}
+          >
+            <b>{armed && bestArmedU != null ? `Place at U${bestArmedU}` : 'Place gear'}</b>
+            <span>{armed ? `${armed.label}${bestArmedU == null ? ' needs a free slot' : ''}` : `${budget?.freeU ?? 0}U free in ${rack.name}`}</span>
+          </button>
+          <button className={styles.workflowAction} onClick={openConnectFromSelected}>
+            <b>Cable ports</b>
+            <span>{selected ? `Start from ${selected.name}` : `${cables.length} cable${cables.length === 1 ? '' : 's'} in schedule`}</span>
+          </button>
+          <button
+            className={`${styles.workflowAction} ${insights.some((i) => i.action === 'balance-power') ? styles.workflowWarn : ''}`}
+            onClick={() => {
+              const power = insights.find((i) => i.action === 'balance-power');
+              if (power) handleInsight(power);
+              else setInspectorTab('power');
+            }}
+          >
+            <b>Fix power</b>
+            <span>{insights.find((i) => i.action === 'balance-power')?.title ?? 'Review feed balance'}</span>
+          </button>
+          <button
+            className={`${styles.workflowAction} ${inventory.missing > 0 ? styles.workflowWarn : ''}`}
+            onClick={focusFirstMissingAsset}
+          >
+            <b>Add asset tags</b>
+            <span>{inventory.pct}% complete · {inventory.missing} missing fields</span>
+          </button>
+          <button className={styles.workflowAction} onClick={() => setExportOpen(true)}>
+            <b>Export handoff</b>
+            <span>{view === 'row' ? 'Install packet for row' : `${rack.name} elevation`}</span>
+          </button>
+        </div>
         {view === 'row' ? (
           <>
             <div className={styles.workspaceHead}>
@@ -803,7 +915,10 @@ export function RackDesigner() {
                 onConnectPorts={(a, b) => {
                   // Cycle the default palette so consecutive drag-cables aren't all one color.
                   const color = CABLE_COLORS[cables.length % CABLE_COLORS.length]!;
-                  const id = s().connectRackCable(a, b, color);
+                  const aDevice = devices.find((d) => d.id === a.deviceId);
+                  const bDevice = devices.find((d) => d.id === b.deviceId);
+                  const lengthFt = aDevice && bDevice ? estimateCableLengthFt(aDevice, bDevice, racks) ?? undefined : undefined;
+                  const id = s().connectRackCable(a, b, color, undefined, lengthFt);
                   if (id) setSelCable(id);
                 }}
                 onSelectCable={setSelCable}
@@ -824,6 +939,11 @@ export function RackDesigner() {
                 Set a field on all {selection.size} selected devices at once. Leave a field
                 blank to keep it unchanged. One undo reverts the whole batch.
               </p>
+              <div className={styles.bulkQuick} aria-label="Bulk edit presets">
+                <button className={styles.btn} onClick={() => setBulkPatch((p) => ({ ...p, status: 'active' }))}>Mark active</button>
+                <button className={styles.btn} onClick={() => setBulkPatch((p) => ({ ...p, status: 'maintenance' }))}>Maintenance</button>
+                <button className={styles.btn} onClick={() => setBulkPatch((p) => ({ ...p, powerFeed: 'AB' }))}>A+B feed</button>
+              </div>
               <div className={styles.field}>
                 <label>Status</label>
                 <select
@@ -865,6 +985,22 @@ export function RackDesigner() {
                   onChange={(e) => setBulkPatch((p) => ({ ...p, warrantyExpiry: e.target.value === '' ? undefined : e.target.value }))}
                 />
               </div>
+              <div className={styles.field}>
+                <label>Asset tag prefix</label>
+                <input
+                  value={assetPrefix}
+                  placeholder="e.g. DC1-R01"
+                  onChange={(e) => setAssetPrefix(e.target.value)}
+                />
+                <button
+                  className={styles.btn}
+                  disabled={!assetPrefix.trim()}
+                  onClick={assignAssetTags}
+                  title="Assign sequential tags to selected devices (one undo)"
+                >
+                  Assign {selection.size} tags
+                </button>
+              </div>
               <div className={styles.rowBtns}>
                 <button
                   className={`${styles.btn} ${styles.primary}`}
@@ -890,6 +1026,10 @@ export function RackDesigner() {
                     onBlur={() => s().endEdit()}
                   />
                   <span>{selected.vendor || selected.model ? [selected.vendor, selected.model].filter(Boolean).join(' ') : selected.type}</span>
+                  <div className={styles.completeness} title={selectedMissing.length ? `Missing ${selectedMissing.join(', ')}` : 'Inventory fields complete'}>
+                    <span style={{ width: `${Math.round(((5 - selectedMissing.length) / 5) * 100)}%` }} />
+                  </div>
+                  <small>{selectedMissing.length ? `Missing ${selectedMissing.join(', ')}` : 'Inventory complete'}</small>
                 </div>
               </div>
               <div className={styles.inspectorTabs} aria-label="Selected device sections">
@@ -1023,7 +1163,7 @@ export function RackDesigner() {
                       </div>
                     );
                   })}
-                  <button className={styles.connectBtn} onClick={() => setConnecting(true)}>+ Cable a port…</button>
+                  <button className={styles.connectBtn} onClick={openConnectFromSelected}>+ Cable from this device…</button>
                 </div>
               )}
               {inspectorTab === 'asset' && (
@@ -1067,15 +1207,28 @@ export function RackDesigner() {
               </button>
             )}
           </h3>
-          {insights.slice(0, 6).map((insight) => (
-            <div key={insight.id} className={`${styles.insight} ${styles[`insight_${insight.severity}`]}`}>
-              <div>
-                <b>{insight.title}</b>
-                <span>{insight.detail}</span>
+          {INSIGHT_GROUPS.map((group) => {
+            const items = groupedInsights.get(group) ?? [];
+            if (!items.length) return null;
+            return (
+              <div key={group} className={styles.insightGroup}>
+                <div className={styles.insightGroupHead}>
+                  <b>{group}</b>
+                  <span>{items.length}</span>
+                </div>
+                {items.slice(0, 4).map((insight) => (
+                  <div key={insight.id} className={`${styles.insight} ${styles[`insight_${insight.severity}`]}`}>
+                    <div>
+                      <b>{insight.title}</b>
+                      <span>{insight.detail}</span>
+                      <em>{group === 'Critical' ? 'Prevents install-day surprises.' : group === 'Inventory' ? 'Keeps audit and labels complete.' : group === 'Cabling' ? 'Keeps schedule, export, and rack view aligned.' : 'Improves planning confidence.'}</em>
+                    </div>
+                    <button className={styles.btn} onClick={() => handleInsight(insight)}>{insight.actionLabel}</button>
+                  </div>
+                ))}
               </div>
-              <button className={styles.btn} onClick={() => handleInsight(insight)}>{insight.actionLabel}</button>
-            </div>
-          ))}
+            );
+          })}
         </div>
         <div className={styles.sec} style={{ flex: 1 }}>
           <h3>
@@ -1119,11 +1272,76 @@ export function RackDesigner() {
               </div>
             );
           })}
-          <button className={styles.connectBtn} onClick={() => setConnecting(true)}>+ Connect ports…</button>
+          <button className={styles.connectBtn} onClick={openConnectFromSelected}>+ Connect ports…</button>
         </div>
       </div>
 
-      {connecting && <ConnectPortsDialog rackId={rack.id} onClose={() => setConnecting(false)} />}
+      {exportOpen && (
+        <div className={styles.exportBackdrop} onClick={() => setExportOpen(false)}>
+          <div className={styles.exportDrawer} onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Export handoff">
+            <div className={styles.exportHead}>
+              <div>
+                <h3>Export handoff</h3>
+                <p>{view === 'row' ? `${racks.length} racks` : rack.name} · {devices.filter((d) => d.rackId != null).length} devices · {cables.length} cables</p>
+              </div>
+              <button className={styles.x} aria-label="Close export drawer" onClick={() => setExportOpen(false)}>×</button>
+            </div>
+            <div className={styles.field}>
+              <label>Diagram content</label>
+              <select value={exportMode} onChange={(e) => setExportMode(e.target.value as ExportMode)}>
+                <option value="diagram">Diagram</option>
+                <option value="diagram+table">Diagram + cable table</option>
+                <option value="table-only">Cable table only</option>
+              </select>
+            </div>
+            <div className={styles.exportPresetGrid}>
+              <div className={styles.exportPreset}>
+                <b>Install packet</b>
+                <span>Rack elevation plus cable table for field work.</span>
+                <div className={styles.rowBtns}>
+                  <button className={styles.btn} onClick={() => { setExportMode('diagram+table'); exportPdf('diagram+table'); }}>PDF</button>
+                  <button className={styles.btn} onClick={() => { setExportMode('diagram+table'); exportPng('diagram+table'); }}>PNG</button>
+                </div>
+              </div>
+              <div className={styles.exportPreset}>
+                <b>Cable schedule</b>
+                <span>Endpoint list with color, label, and length.</span>
+                <div className={styles.rowBtns}>
+                  <button className={styles.btn} onClick={exportCsv}>CSV</button>
+                  <button className={styles.btn} onClick={() => s().autoLengthRackCables()}>Auto-length</button>
+                </div>
+              </div>
+              <div className={styles.exportPreset}>
+                <b>Inventory audit</b>
+                <span>BOM plus printable device labels.</span>
+                <div className={styles.rowBtns}>
+                  <button className={styles.btn} onClick={exportBom}>BOM</button>
+                  <button className={styles.btn} onClick={exportLabels}>Labels</button>
+                </div>
+              </div>
+              <div className={styles.exportPreset}>
+                <b>Rack elevation</b>
+                <span>Visible rack artwork for diagrams and reviews.</span>
+                <div className={styles.rowBtns}>
+                  <button className={styles.btn} onClick={() => exportPdf()}>PDF</button>
+                  <button className={`${styles.btn} ${styles.primary}`} onClick={() => exportPng()}>PNG</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {connecting && (
+        <ConnectPortsDialog
+          rackId={rack.id}
+          initialA={connectingFrom}
+          onClose={() => {
+            setConnecting(false);
+            setConnectingFrom(undefined);
+          }}
+        />
+      )}
     </div>
   );
 }

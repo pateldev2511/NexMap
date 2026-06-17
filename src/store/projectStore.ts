@@ -432,6 +432,8 @@ export interface ProjectStore {
   balancePower(): number;
   /** Stamp allowlisted fields (status/owner/assetTag/warranty/feed) onto many devices in one undo. Returns count changed. */
   bulkUpdateDevices(ids: string[], patch: Partial<Device>): number;
+  /** Assign sequential asset tags to many devices in one undo. Returns count changed. */
+  bulkPrefixAssetTags(ids: string[], prefix: string): number;
   /** Set or clear a device's uploaded photo (extra.rackPhotoDataUri). One undo. */
   setDevicePhoto(deviceId: string, dataUri: string | null): void;
   disconnectRackCable(id: string): void;
@@ -2006,6 +2008,26 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       }
       if (!cmds.length) return 0;
       history.dispatch(transaction('Bulk edit devices', cmds), model);
+      history.commitCoalesceBoundary();
+      set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
+      return cmds.length;
+    },
+
+    bulkPrefixAssetTags(ids, prefix) {
+      const clean = prefix.trim();
+      if (!ids.length || !clean) return 0;
+      const cmds: Command[] = [];
+      let next = 1;
+      for (const id of ids) {
+        const d = model.devices.get(id);
+        if (!d) continue;
+        const assetTag = `${clean}-${String(next).padStart(3, '0')}`;
+        next += 1;
+        if (d.assetTag === assetTag) continue;
+        cmds.push(new UpdateDeviceCommand(id, { assetTag: d.assetTag }, { assetTag }));
+      }
+      if (!cmds.length) return 0;
+      history.dispatch(transaction('Assign asset tags', cmds), model);
       history.commitCoalesceBoundary();
       set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
       return cmds.length;
