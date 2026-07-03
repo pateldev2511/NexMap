@@ -521,6 +521,45 @@ requests fired.
 **Priority:** P2
 **Depends on:** None (can land before or with the pointer-native canvas work).
 
+### Create DESIGN.md via /design-consultation
+
+**What:** Codify the de facto design system (25 CSS tokens in global.css,
+dark-first theming, quiet-chrome philosophy, severity-color-pairs-with-icon
+convention) into a DESIGN.md source of truth.
+
+**Why:** The 2026-07-03 design review had to reverse-engineer the system from
+CSS. A written system makes every future design decision calibrate faster and
+capped that review's Design System score at 8/10.
+
+**Context:** Start from src/styles/global.css (the header comment already
+states the philosophy) + the M3 quiet-canvas spec v2 in
+docs/designs/pointer-native-canvas.md, which names tokens, z-slots, and sizes.
+
+**Effort:** S (one /design-consultation session)
+**Priority:** P2
+**Depends on:** None.
+
+### Quiet-canvas mockups (blocked on OpenAI org verification)
+
+**What:** Verify the OpenAI organization at
+platform.openai.com/settings/organization (~15 min to propagate), then run the
+gstack designer: 3-variant comparison board for the M3 selection-toolbar +
+demoted-chrome direction; approve one variant before M3 implementation starts.
+
+**Why:** The design review shipped text-only because generation failed on org
+verification. M3 is the taste-critical milestone; building against an approved
+picture beats prose.
+
+**Context:** The exact brief to reuse is in the 2026-07-03 session (dark
+charcoal canvas, hairline selection toolbar pill, 60%-demoted mode toolbar,
+one accent). Output dir convention: ~/.gstack/projects/pateldev2511-NexMap/
+designs/quiet-canvas-YYYYMMDD/. The design binary prints a JSON manifest even
+when generation fails — always ls the output dir.
+
+**Effort:** S
+**Priority:** P2
+**Depends on:** OpenAI org verification; gate before M3 (not M1/M2).
+
 ### Stuck-gesture dev watchdog
 
 **What:** Dev-mode-only console warning when a gesture stays active >30 s with
