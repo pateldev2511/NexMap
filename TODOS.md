@@ -27,23 +27,24 @@ on top, never a replacement for correctness.
 
 ---
 
-## Phase 8 — Editor Polish (daily-driver friction)  🚧 IN PROGRESS (2026-06-03)
+## Phase 8 — Editor Polish (daily-driver friction)  ✅ COMPLETE (checkboxes synced 2026-07-03; every item verified in code by the CEO review)
 
 Closes the power-user gaps surfaced by the expert review. Each item keeps existing
 behavior green and is undoable where it mutates the model.
 
-- [ ] **P0 Alignment guides + smart snap** — while dragging, snap selection
-      edges/centers to other objects' edges/centers; render guide lines. Pure
-      helper (`canvas/align.ts`), threshold in screen px, grid snap as fallback.
-- [ ] **P0 Inline text editing** — double-click a text object to edit on canvas
-      (overlay textarea), commit on blur/Enter as one undoable update.
-- [ ] **P0 Resize handles** — 8 handles on a single selected shape/text/image;
-      resize gesture committed as one undoable update; min-size clamp.
-- [ ] **P1 Align & distribute** — align left/center/right/top/middle/bottom and
-      distribute horizontally/vertically across a multi-selection (one undo each).
-- [ ] **P1 Canvas search (⌘F)** — find devices by name/IP/role, jump-to + select.
-- [ ] **P1 Zoom-to-selection** — frame the current selection (key + zoom-bar btn).
-- [ ] **P1 Drag/resize readout** — live x/y (and w/h on resize) near the cursor.
+- [x] **P0 Alignment guides + smart snap** ✅ — `canvas/align.ts` (computeAlignSnap
+      + equal-spacing snap beyond spec), wired into store dragTo, guide lines
+      rendered; 12 tests in align.test.ts.
+- [x] **P0 Inline text editing** ✅ — dbl-click overlay editor on canvas, commit on
+      blur/Enter as one undoable update (Canvas.tsx).
+- [x] **P0 Resize handles** ✅ — 8 handles, MIN_OBJ_SIZE=16 clamp, one undoable
+      endResize commit.
+- [x] **P1 Align & distribute** ✅ — AlignBar (6 align + 2 distribute) via store
+      alignSelection/distributeSelection, one undo each.
+- [x] **P1 Canvas search (⌘F)** ✅ — CanvasSearch.tsx, find by name/IP/role,
+      jump-to + select.
+- [x] **P1 Zoom-to-selection** ✅ — key `2` + zoom-bar button.
+- [x] **P1 Drag/resize readout** ✅ — live x/y during drag, w×h during resize.
 - [x] **Click/drag refinement** ✅ — selection now resolves on RELEASE: a click
       isolates one item out of a multi-selection, shift-click toggles off, and a
       4px movement threshold means clicks never accidentally move/nudge a device.
@@ -408,7 +409,9 @@ not commodity styling. Run /plan-design-review before implementing (UI scope).
       parallel links stay independent records (no LAG object v1). Additive, no migration.
 - [ ] **Width = bandwidth-derived + override:** pure `bandwidthToWidth(bandwidth)`
       (M/G scaled, unparseable→default, never throws) + optional `Link.width` override.
-- [ ] **Drag-to-relink (M / CC ~35m):** drag a selected link's endpoint onto another
+- [x] **Drag-to-relink** ✅ (checkbox synced 2026-07-03 — shipped: diamond endpoint
+      handles on selected links, store `relinkEndpoint`, tested in
+      `store/relink.test.ts`): drag a selected link's endpoint onto another
       device → rewire via connect()-style + clear that endpoint's iface ref + one
       undoable txn + runValidation on DROP. Recompute parallel offsets for old+new pair.
       Drop-in-air / self-loop → snap back. Health/color are derived, re-computed on undo.
@@ -476,3 +479,60 @@ not commodity styling. Run /plan-design-review before implementing (UI scope).
       public store method can mint a cable to a non-existent port. Add an existence check
       (return null otherwise) and update the rackActions tests that currently cable to
       fictional `p1`/`nic0` ids. Found by pre-landing review, confidence 6/10. Effort: CC ~15m.
+
+## Pointer-Native Canvas follow-ups (CEO review 2026-07-03)
+
+Plan: `~/.gstack/projects/pateldev2511-NexMap/ceo-plans/2026-07-03-pointer-native-canvas.md`
+
+### Pointer-native library palette drag
+
+**What:** Replace the HTML5 DnD palette→canvas/rack drag with a pointer-based drag
+on the shared input core.
+
+**Why:** HTML5 DnD never fires on touch devices and has its own gesture feel; this
+is the last non-pointer-native drag in the app once the pointer-native canvas plan
+ships.
+
+**Context:** Explicit NOT-in-scope decision in the 2026-07-03 CEO plan (finding C2
+of its spec review). Touch users meanwhile place gear via click-to-arm + tap-bay
+and double-click quick-add (M4c). Start in Library.tsx (draggable/onDragStart) and
+RackDesigner.tsx:717 / RackRow.tsx:107 drop targets.
+
+**Effort:** M (human) / S (CC)
+**Priority:** P2
+**Depends on:** Pointer-native canvas M1+M2 (shared input core).
+
+### Network-cut CI e2e
+
+**What:** A Playwright spec that blocks all non-localhost requests at the context
+level and runs the full app flow (load, edit, export), failing on ANY network
+attempt.
+
+**Why:** The local-only guarantee currently rests on CSP (build-time meta) +
+netguard (runtime tripwire). A CI tripwire proves the guarantee on every commit
+instead of trusting the two layers stay wired.
+
+**Context:** Named as the remaining nice-to-have when netguard shipped; the
+2026-06-05 strategy explicitly calls for "CSP default-src self + network-cut CI
+test." Use `context.route('**/*')` allowlisting localhost, assert zero blocked
+requests fired.
+
+**Effort:** S (human) / S (CC)
+**Priority:** P2
+**Depends on:** None (can land before or with the pointer-native canvas work).
+
+### Stuck-gesture dev watchdog
+
+**What:** Dev-mode-only console warning when a gesture stays active >30 s with
+zero pointer moves.
+
+**Why:** Belt-and-suspenders on top of the fuzz invariant; the signature of the
+pointer-capture bug class that shipped twice (Phase 8 latent capture bug, v0.6.1
+rack pan click-stealing). ~10 lines.
+
+**Context:** From the CEO review's observability section. Lives in the `src/input/`
+adapter layer next to the `?debug=input` logger.
+
+**Effort:** S (human) / S (CC)
+**Priority:** P3
+**Depends on:** Pointer-native canvas M1 (shared core + debug tooling).
