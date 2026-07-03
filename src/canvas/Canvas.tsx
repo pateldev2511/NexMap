@@ -4,7 +4,8 @@ import { NexIcon } from '@/ui/icons/NexIcon';
 import { useProjectStore, type AlignEdge, type ProjectStore } from '@/store/projectStore';
 import { CanvasSearch } from './CanvasSearch';
 import { MiniMap } from './MiniMap';
-import { getConnectMode } from '@/lib/prefs';
+import { getConnectMode, getWheelAction } from '@/lib/prefs';
+import { normalizeWheel, resolveWheel, MomentumGuard } from '@/input/wheel';
 import { DeviceNode } from './DeviceNode';
 import { IsoDeviceNode } from './IsoDeviceNode';
 import { DEFAULT_LABEL_HEIGHT } from './nodeCard';
@@ -72,7 +73,6 @@ type Gesture =
       origBefore: { x: number; y: number }[];
     };
 
-const ZOOM_STEP = 1.0015;
 /** Pointer travel (screen px) before a press becomes a drag rather than a click. */
 const DRAG_THRESHOLD = 4;
 
@@ -186,6 +186,8 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   const [pendingSource, setPendingSource] = useState<string | null>(null);
   const pendingSourceRef = useRef<string | null>(null);
   const gesture = useRef<Gesture>({ kind: 'none' });
+  // Swallows inertial trackpad wheel events after an Escape-cancel.
+  const momentum = useRef(new MomentumGuard());
   const altHeld = useRef(false);
   // Set after a right-button drag-pan so the trailing contextmenu is suppressed.
   const suppressMenu = useRef(false);
@@ -378,6 +380,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       if (e.key === 'Escape') {
         if (gesture.current.kind === 'link' || gesture.current.kind === 'relink') cancelLink();
         gesture.current = { kind: 'none' };
+        momentum.current.block(performance.now()); // eat the trackpad tail
         setMarquee(null);
         setLassoPts(null);
         setPending(null);
@@ -403,18 +406,53 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     const el = rootRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
+      // Floating chrome (toolbar, zoom bar, minimap, search) owns its own
+      // scroll — never pan the canvas underneath it, never preventDefault.
+      if (e.target instanceof Element && e.target.closest('[data-canvas-chrome]')) return;
       e.preventDefault();
+      const n = normalizeWheel(e);
+      // Inertial trackpad tail after an Escape-cancel is not user intent.
+      if (momentum.current.shouldSwallow(n.dy, e.timeStamp)) return;
       const rect = el.getBoundingClientRect();
       const sx = e.clientX - rect.left;
       const sy = e.clientY - rect.top;
-      if (e.ctrlKey || e.metaKey) {
-        setViewport((v) => zoomAt(v, Math.pow(ZOOM_STEP, -e.deltaY), sx, sy));
-      } else {
-        setViewport((v) => pan(v, e.deltaX, e.deltaY));
-      }
+      const intent = resolveWheel(n, getWheelAction());
+      if (intent.kind === 'zoom') setViewport((v) => zoomAt(v, intent.factor, sx, sy));
+      else setViewport((v) => pan(v, intent.dx, intent.dy));
     };
     el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
+
+    // Safari emits proprietary gesture events for trackpad pinch (no
+    // ctrlKey-wheel synthesis); map the scale ratio onto cursor-anchored zoom.
+    type GestureEvt = Event & { scale?: number; clientX?: number; clientY?: number };
+    let lastScale = 1;
+    const gestureStart = (e: GestureEvt) => {
+      e.preventDefault();
+      lastScale = e.scale ?? 1;
+    };
+    const gestureChange = (e: GestureEvt) => {
+      e.preventDefault();
+      const scale = e.scale ?? 1;
+      const rect = el.getBoundingClientRect();
+      const sx = (e.clientX ?? rect.left + rect.width / 2) - rect.left;
+      const sy = (e.clientY ?? rect.top + rect.height / 2) - rect.top;
+      const factor = scale / (lastScale || 1);
+      lastScale = scale;
+      setViewport((v) => zoomAt(v, factor, sx, sy));
+    };
+    const gestureEnd = (e: GestureEvt) => {
+      e.preventDefault();
+      lastScale = 1;
+    };
+    el.addEventListener('gesturestart', gestureStart as EventListener);
+    el.addEventListener('gesturechange', gestureChange as EventListener);
+    el.addEventListener('gestureend', gestureEnd as EventListener);
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('gesturestart', gestureStart as EventListener);
+      el.removeEventListener('gesturechange', gestureChange as EventListener);
+      el.removeEventListener('gestureend', gestureEnd as EventListener);
+    };
   }, []);
 
   const localPoint = useCallback((e: { clientX: number; clientY: number }) => {
@@ -471,8 +509,11 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       setLinkCursor(c);
       setLinkTarget(null);
     },
+    // toFlat carries BOTH viewport and projection — depending on viewport
+    // alone left a stale projection in this closure after a flat↔iso toggle
+    // (drops/link starts landed at mis-projected coordinates).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [viewport],
+    [toFlat],
   );
 
   function screenToCanvasFromEvent(e: { clientX: number; clientY: number }) {
@@ -492,8 +533,9 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       setLinkCursor(screenToCanvasFromEvent(e));
       setLinkTarget(null);
     },
+    // toFlat, not viewport: see startLinkFrom (stale-projection fix).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [viewport],
+    [toFlat],
   );
 
   const onWaypointDown = useCallback(
@@ -867,8 +909,9 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       s.select([id]);
       s.runValidation();
     },
+    // toFlat, not viewport: see startLinkFrom (stale-projection fix).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [store, viewport],
+    [store, toFlat],
   );
 
   const onCanvasDoubleClick = useCallback(
@@ -1588,7 +1631,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         />
       )}
 
-      <div className={styles.zoomBar}>
+      <div className={styles.zoomBar} data-canvas-chrome>
         <button
           onClick={() => setViewport((v) => zoomAt(v, 1 / 1.2, size.w / 2, size.h / 2))}
           aria-label="Zoom out"
@@ -1767,7 +1810,12 @@ function AlignBar({ count }: { count: number }) {
   const dist = (axis: 'h' | 'v') => store().distributeSelection(axis);
   const canDist = count >= 3;
   return (
-    <div className={styles.alignBar} role="toolbar" aria-label="Align and distribute">
+    <div
+      className={styles.alignBar}
+      role="toolbar"
+      aria-label="Align and distribute"
+      data-canvas-chrome
+    >
       <button title="Align left" aria-label="Align left" onClick={() => align('left')}>
         <NexIcon name="align-left" />
       </button>

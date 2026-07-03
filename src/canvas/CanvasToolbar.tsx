@@ -45,7 +45,7 @@ export function CanvasToolbar({
   );
 
   return (
-    <div className={styles.toolbar} role="toolbar" aria-label="Canvas tools">
+    <div className={styles.toolbar} role="toolbar" aria-label="Canvas tools" data-canvas-chrome>
       {tool('select', 'select', 'V', 'Select')}
       {tool('lasso', 'lasso', 'Q', 'Lasso select')}
       {tool('pan', 'pan', 'H', 'Pan')}

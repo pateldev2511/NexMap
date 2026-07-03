@@ -51,7 +51,7 @@ export function CanvasSearch({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className={styles.wrap} role="dialog" aria-label="Find device">
+    <div className={styles.wrap} role="dialog" aria-label="Find device" data-canvas-chrome>
       <input
         ref={inputRef}
         className={styles.input}

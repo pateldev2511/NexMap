@@ -2,10 +2,13 @@ import { useEffect, useState } from 'react';
 import {
   getConnectMode,
   setConnectMode,
+  getWheelAction,
+  setWheelAction,
   getReduceMotion,
   setReduceMotion,
   type ConnectMode,
 } from '@/lib/prefs';
+import type { WheelAction } from '@/input/wheel';
 import { canWriteBack, canOpenPicker } from '@/persistence/fsaccess';
 import { NexIcon } from '@/ui/icons/NexIcon';
 import styles from './ImportDialog.module.css';
@@ -25,6 +28,7 @@ export function SettingsDialog({
   onClose: () => void;
 }) {
   const [connect, setConnect] = useState<ConnectMode>(() => getConnectMode());
+  const [wheel, setWheel] = useState<WheelAction>(() => getWheelAction());
   const [reduceMotion, setRM] = useState(() => getReduceMotion());
   const [usage, setUsage] = useState<string>('…');
   const fsAvailable = canWriteBack || canOpenPicker;
@@ -112,6 +116,20 @@ export function SettingsDialog({
               <option value="both">Click or drag</option>
               <option value="drag">Drag only</option>
               <option value="click">Click only</option>
+            </select>
+
+            <label>Scroll wheel</label>
+            <select
+              value={wheel}
+              onChange={(e) => {
+                const a = e.target.value as WheelAction;
+                setWheel(a);
+                setWheelAction(a);
+              }}
+              aria-label="Scroll wheel behavior"
+            >
+              <option value="pan">Pans the canvas (pinch or Ctrl+scroll zooms)</option>
+              <option value="zoom">Zooms</option>
             </select>
 
             <label>Reduced motion</label>
