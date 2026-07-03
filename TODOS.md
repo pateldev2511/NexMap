@@ -460,9 +460,11 @@ not commodity styling. Run /plan-design-review before implementing (UI scope).
       creates the cable (`connectRackCable`) then writes `lengthFt` in a separate
       `updateRackCable` — two history entries for one action. Fold an optional `lengthFt`
       into `connectRackCable`. Found by ship adversarial review. Effort: CC ~15m.
-- [ ] **Share the cable-curve helper between row renderers** (P4). `buildRackRowSvg` and
-      `RackRow.tsx` duplicate the bow/cross-arc curve math with drifting magic numbers
-      (`*18/-40` vs `*14/-36`). Extract one `cablePath(pa,pb,i,crossRack)`. Effort: CC ~15m.
+- [x] **Share the cable-curve helper between row renderers** ✅ (checkbox synced
+      2026-07-03 — SHIPPED in 2ad076d: `src/rack/cablePath.ts` exports
+      `cablePath(a,b,index,crossRack)` + `cablePath.test.ts`; imported by
+      RackRow.tsx:27 and buildRackSvg.ts. The stale entry briefly got re-scheduled
+      by a review before the code was checked — verified done.)
 
 ## Deferred from Rack Designer v3 (2026-06-10)
 - [ ] **True rear-face port art** (P3). The rear column currently shows the same front
@@ -473,12 +475,10 @@ not commodity styling. Run /plan-design-review before implementing (UI scope).
       no drill-in step (the rejected "unified canvas" CEO option). Needs viewport math.
 
 ## Deferred from rack-designer ship review (2026-06-10)
-- [ ] **Validate rack-cable endpoints exist** (P2). `connectRackCable` (projectStore.ts)
-      only checks self-cable and already-cabled; it does not verify each `{deviceId, ifaceId}`
-      resolves to a real `device.interfaces[].id`. The UI dialog constrains this, but the
-      public store method can mint a cable to a non-existent port. Add an existence check
-      (return null otherwise) and update the rackActions tests that currently cable to
-      fictional `p1`/`nic0` ids. Found by pre-landing review, confidence 6/10. Effort: CC ~15m.
+- [x] **Validate rack-cable endpoints exist** ✅ (checkbox synced 2026-07-03 —
+      SHIPPED in 2ad076d: `hasEnd` existence check at projectStore.ts:1942-1946
+      returns null on unresolvable `{deviceId, ifaceId}`; tested by "rejects
+      endpoints that do not resolve to real interfaces", rackActions.test.ts:117.)
 
 ## Pointer-Native Canvas follow-ups (CEO review 2026-07-03)
 

@@ -7,7 +7,12 @@ Branch: main | Mode: SELECTIVE EXPANSION
 Repo: pateldev2511/NexMap
 Pinned to: commit 3568562 (+ uncommitted RackCanvas.tsx/RackDesigner.module.css
 pan/zoom work in the tree — see Milestone M2 note). Line refs must be
-re-verified at implementation time.
+re-verified at implementation time. CAVEAT (eng-review outside voice, finding
+1): parts of the original audit ran >=7 commits behind HEAD — treat every
+line ref and "this doesn't exist yet" claim as a hint to verify against HEAD,
+never as fact. Two review-added work items were caught scheduling
+already-shipped code (cablePath helper, connectRackCable validation, both in
+2ad076d) and have been removed.
 
 ## Problem (user brief, 2026-07-03)
 
@@ -57,17 +62,20 @@ argument B rests on is honest, not theater.
 
 | Preference mode | Plain wheel | Ctrl/Cmd+wheel or pinch | Shift+wheel | Pan fallbacks (always) |
 |---|---|---|---|---|
-| `auto` (DEFAULT) | per-event heuristic: trackpad-classified events pan, mouse-classified zoom | zoom at cursor | horizontal pan | Space+drag, middle-drag, right-drag, Hand tool |
-| `trackpad` | pan (both axes) | zoom at cursor | horizontal pan | Space+drag, middle-drag, right-drag, Hand tool |
-| `mouse` | zoom at cursor | zoom at cursor | horizontal pan | Space+drag, middle-drag, right-drag, Hand tool |
+| `pan` (DEFAULT) | pan (both axes) | zoom at cursor | horizontal pan | Space+drag, middle-drag, right-drag, Hand tool |
+| `zoom` | zoom at cursor | zoom at cursor | horizontal pan | Space+drag, middle-drag, right-drag, Hand tool |
 
-`wheelMode: 'auto' | 'trackpad' | 'mouse'` (outside-voice finding 4, accepted):
-`auto` classifies per event — fractional deltas, nonzero deltaX, or ctrlKey-
-pinch signature -> trackpad semantics; large integer notch deltas (|deltaY|
->= ~100, deltaX 0, deltaMode 0/1) -> mouse semantics. Classifier is a pure
-function, unit-tested against the recorded fixtures. The explicit override
-exists because heuristics misread some hardware; the laptop+sometimes-mouse
-user gets correct behavior on both devices without opening Settings.
+`wheelAction: 'pan' | 'zoom'` (eng-review outside voice findings 2+3 —
+SUPERSEDES the earlier tri-state `auto` heuristic): default `pan` matches
+today's flat-canvas behavior and DA-DES-5.1 for EVERY device, so nothing
+changes under anyone's fingers by default on either input class. `zoom` is
+the explicit opt-in that restores wheel-zoom (including for former rack-view
+habits). The device classifier is DEMOTED to delta normalization only — its
+mode-picking spec was provably wrong on Firefox deltaMode=1 hardware
+(discrete wheels report |deltaY| ~ 3 lines and would misclassify as
+trackpad), and heuristic mode-picking contradicted DA-DES-5.1's
+unconditional scroll=pan on the flat canvas. Figma's real default is the
+same shape: scroll pans; wheel-zoom is a preference.
 Momentum-tail swallow: after Escape-cancel or modal-open, inertial wheel
 events are ignored until sign-change or 150 ms of quiet.
 
@@ -76,13 +84,13 @@ flat canvas via `spaceHeld`) is a first-class state in the shared machine and
 extends to BOTH rack canvases; middle-drag pan is kept everywhere. This is the
 documented vertical-pan path for `mouse` mode, where plain wheel zooms.
 
-- Preference lives in `src/lib/prefs.ts` (same pattern as `getConnectMode()`),
-  surfaced in SettingsDialog next to the connect-mode setting. `auto`'s
-  trackpad classification matches the existing flat-canvas behavior and the
-  PLAN.md DA-DES-5.1 contract.
+- Preference lives in `src/lib/prefs.ts` (same union-guard pattern as
+  `getConnectMode()`; garbage stored values fall back to `pan`), surfaced in
+  SettingsDialog next to the connect-mode setting.
 - Migration note: rack users lose wheel-zoom-by-default (intentional; it
   violated DA-DES-5.1). One-line changelog entry + the Settings toggle
-  restores it via `mouse` mode.
+  restores it via `zoom` mode. Flat-canvas default behavior is UNCHANGED for
+  all devices.
 - Normalization: `normalizeWheel(e)` converts deltaMode LINE(1)->x16 px,
   PAGE(2)->x100 px, then clamps |delta| to <=120 px per event BEFORE applying
   zoom factor `Math.pow(1.0015, -delta)`. Pinch events (ctrlKey, typical
@@ -144,6 +152,74 @@ documented vertical-pan path for `mouse` mode, where plain wheel zooms.
 - Right-drag pan extends to both rack canvases for parity with flat
   (contextmenu suppressed after a right-drag, same `suppressMenu` pattern).
 
+### Adapter & router contract (eng review 2026-07-03)
+
+- EFFECTS EXECUTION (two classes, eng-review outside voice finding 4):
+  SYNC-MANDATORY effects (`preventDefault`, `capture`, `release`,
+  commit-`dispatch`) execute synchronously inside the originating DOM event
+  handler — preventDefault is dead if deferred. VIEWPORT WRITES are applied
+  synchronously to a viewport REF (order-preserving: pan deltas and
+  cursor-anchored zoomAt apply in event order, so there is no commutativity
+  problem), and the ref is FLUSHED to React state at most once per animation
+  frame. A pending flush is forced on gesture end/cancel and cancelled on
+  unmount. The reducer is never invoked during render.
+- STATE RESIDENCE: machine state lives in a ref inside each canvas adapter
+  (same lifetime as today's `gesture.current`). No React state for gesture
+  progress; only committed results flow through the store.
+- ROUTER REGISTRY API: `registerCanvas(id, {cancelActiveGesture(),
+  hasActiveGesture(), handleKey(e), handleKeyUp(e)})` — handleKey carries the
+  canvas-shortcut stage (arrow-nudge, Delete, mode keys); handleKeyUp carries
+  Space/Alt release. Registration is StrictMode-IDEMPOTENT (Map set/delete;
+  mount->unmount->mount is symmetric — main.tsx runs StrictMode, and this is
+  tested). Only one canvas is mounted at a time (App mode is 'rack'|'network'
+  exclusive), so "active" = "registered", no focus model needed.
+- ROUTING ORDER (full): OVERLAYS first (context menu, command palette,
+  dialogs, presentation-mode Escape — the six existing window keydown
+  listeners: App.tsx x3, Canvas.tsx, ContextMenu.tsx:38, RackDesigner.tsx are
+  each either absorbed or explicitly registered in this layer) -> gesture-
+  cancel -> canvas shortcuts (handleKey) -> app shortcuts. "Escape cancels
+  the innermost thing" now includes overlays as the innermost layer.
+- UNDO MID-GESTURE (decided — supersedes behavior change 7's earlier
+  wording): Cmd+Z during an active gesture is CONSUMED by the cancel — the
+  gesture reverts, history is untouched; a second press performs the actual
+  undo (Figma/tldraw behavior; bailing out of a bad drag must not eat your
+  last committed edit).
+- ROUTER FAULT ISOLATION with ABORTED CONTINUATIONS: handlers are wrapped in
+  try/catch with a dev warn, and a throw ABORTS the dependent continuation —
+  if `cancelActiveGesture()` throws, `store.undo()` is NOT called (undo over
+  a live drag is the stale-dragOrigins corruption this plan exists to kill).
+  A throw in one layer never blocks unrelated layers (Cmd+S still saves).
+- UNREGISTER-DURING-ACTIVE-GESTURE: unregistering (mode switch mid-drag,
+  unmount) first cancels the active gesture, releases capture, and reverts
+  the in-flight item. Tested.
+- LEGACY SHIM (strangler seam): from M1 commit one, `registerCanvas` accepts
+  an implementation backed by the LEGACY `gesture.current` refs. Unmigrated
+  gestures stay Escape-cancellable and undo-safe through the router for the
+  whole migration window; each per-gesture migration commit swaps that
+  gesture's shim path for the machine path. Rack keydown consolidation
+  happens in M2 (rack machines don't exist in M1 — the shim covers rack for
+  the gap only if M2 starts before M1's router removes RackDesigner's
+  listener; simplest rule: RackDesigner's listener is absorbed in M2, not
+  M1).
+- RACK GUARD NON-REGRESSION: RackDesigner's existing keydown already guards
+  INPUT/SELECT/TEXTAREA — consolidation must preserve that (the shared
+  isTextTarget gains SELECT and is used by the router globally).
+- M1 ADOPTION STRATEGY (decided): strangler-fig, per-gesture. Land the
+  skeleton + wheel/pan/pinch with behavior identical, then migrate flat
+  gesture kinds one commit each: drag -> marquee/lasso -> link/relink ->
+  resize/waypoint/shape. Old and new coexist briefly inside Canvas.tsx; every
+  commit lands green and bisectable. No big-bang swap.
+- NO ONE-SHOT FLAGS (code quality rule): trailing-click swallowing and its
+  relatives are modeled as machine STATES (e.g. `swallowNextClick` expires on
+  the very next pointerdown/up pair), never as mutable boolean refs. The
+  `justMarqueed` leak class becomes unrepresentable.
+- RAF BATCHING: pointermove-driven viewport writes coalesce to one setState
+  per animation frame in the adapters (matters most for RackRow, where every
+  pan frame currently re-renders the whole scene).
+- FUZZ DETERMINISM: the fuzz spec uses a seeded PRNG with the seed printed on
+  failure, and a CI runtime budget of ~2 s (thousands of sequences, pure
+  function — cheap).
+
 ### Proof harness (the jsdom problem, solved by construction)
 
 jsdom does not implement pointer capture or real layout, so the plan does NOT
@@ -187,6 +263,39 @@ are synthetic-labeled. Synthetic fixtures prove machine logic; real traces
 prove the normalizer against actual hardware. The distinction is never
 blurred.
 
+TEST ADDITIONS (eng review 2026-07-03, hardened by outside voice) — ORDERING
+RULE: the three capture-regression e2e specs are the FIRST commit of M1,
+before the skeleton lands — they only protect the surgery if they precede it.
+- Keyboard router: unit tests for full routing ORDER (overlays beat
+  gesture-cancel beat canvas shortcuts beat app shortcuts), StrictMode
+  register/unregister idempotency, fault isolation WITH aborted continuation
+  (cancel throws -> undo not applied, Cmd+S unaffected), and
+  unregister-during-active-gesture (cancels + releases capture + reverts).
+- Undo-consume: L1 sequence — Cmd+Z mid-drag reverts the drag and leaves
+  history length unchanged; second Cmd+Z pops history.
+- Escape-innermost: L1 sequence — Escape presses from overlay-open +
+  active-gesture state land on close-overlay, cancel-gesture, clear-armed,
+  clear-selection, in order, one per press.
+- prefs parsing: wheelAction read from localStorage with a garbage value
+  falls back to 'pan' (same union-guard pattern as getConnectMode).
+- Wheel-mode behavior: e2e — flat canvas plain wheel PANS by default;
+  flipping the Settings toggle to 'zoom' makes plain wheel zoom; toggle back
+  restores pan.
+- RAF coalescing: L2 — N pointermove events within one frame produce exactly
+  one flushed state write whose value equals sequential application; pending
+  flush is forced on cancel and dropped on unmount.
+- RackRow adoption: e2e pan spec in row view (the third consumer must not be
+  the untested one).
+- M3 selection toolbar (contract restated: the toolbar IS interactive within
+  its visible bounds and never beyond them): e2e for (a) pointerdown ON the
+  toolbar operates the toolbar and starts no canvas gesture, (b) wheel over
+  the toolbar does not pan/zoom the canvas, (c) drag-through while capture is
+  held by the canvas is unaffected by the toolbar overlapping the path.
+- M4b quick-create: e2e for the full flow — drag link, release on empty,
+  pick type, assert node created + connected + selected + validated.
+- M4d cross-rack drag: e2e including the reject path (drop on a full rack ->
+  red flash + reason, device stays put).
+
 SAFARI EXCEPTION (outside-voice finding 3, accepted): the Safari
 `gesturestart`/`gesturechange` pinch branch is UNPROVABLE UNDER THIS HARNESS
 (Playwright's WebKit is not Safari and does not emit those events). It ships
@@ -203,20 +312,22 @@ All existing tests must pass, AND these deliberate changes ship with new tests:
    not model undo; `isTextTarget` gains SELECT.
 5. Rejected rack drop/nudge: silent no-op -> red flash + reason.
 6. Rack gesture thresholds: SVG-units -> screen px (feel change at zoom != 1).
-7. Undo during active drag: aborts the drag cleanly first.
+7. Cmd+Z during an active drag: the keypress is consumed by the cancel (drag
+   reverts, history untouched); a second press performs the undo. If the
+   cancel throws, the undo is aborted — never applied over a live gesture.
 
-## Milestones (each lands green: typecheck + 61 unit files + e2e)
+## Milestones (each lands green: typecheck + the full unit suite + e2e)
 
 | M | Content | Effort (human / CC) | Risk |
 |---|---|---|---|
-| M1 | `src/input/` core + normalizeWheel + prefs + FLAT canvas adoption; layer-1/2 tests | ~1 wk / ~2 h | Med — Canvas.tsx is 1,982 lines; adoption is mechanical rewiring of 9 gesture kinds; iso mode must stay green (projection closure fix lands here) |
-| M2 | RackCanvas + RackRow adoption. In-tree diff disposition (DECIDED, outside-voice finding 7): the uncommitted RackCanvas work stays uncommitted until M2 lands it corrected — KEEP its CSS-transform viewport plumbing, fit logic, and zoom widget; DISCARD its wheel-always-zoom handler (violates the contract; avoids a user-visible flip-flop). Rejected-drop feedback; fit-on-rack-switch; e2e gesture specs | ~4 d / ~1.5 h | Med |
+| M1 | Capture-regression e2e FIRST commit, then `src/input/` core + normalizeWheel + prefs + FLAT canvas adoption via strangler-fig with the legacy shim (skeleton + wheel/pan/pinch first, then per-gesture migration, every commit green — see Adapter & router contract); keyboard router (flat + app + overlays; rack listener stays until M2); layer-1/2 tests + fuzz + human fixture-recording step | ~1.5 wk / ~4 h | Med-High — over half the plan's risk lives here; the coexistence protocol (shim + capture ownership between old/new paths) is the actual cost center, not the feature count |
+| M2 | RackCanvas + RackRow adoption. In-tree diff disposition (DECIDED, outside-voice finding 7): the uncommitted RackCanvas work stays uncommitted until M2 lands it corrected — KEEP its CSS-transform viewport plumbing, fit logic, and zoom widget; DISCARD its wheel-always-zoom handler (violates the contract; avoids a user-visible flip-flop). Rejected-drop feedback; fit-on-rack-switch; e2e gesture specs; RackDesigner keydown consolidates onto the router HERE (rack machines now exist). (A cablePath-extraction bundle was removed — already shipped in 2ad076d as src/rack/cablePath.ts) | ~4 d / ~1.5 h | Med |
 | M3 | Quiet canvas + in-canvas cable ops (spec below). The floating selection toolbar is a FEATURE, not polish: it must never intercept canvas gestures (hit-test exclusion, same mechanism as wheel scoping) | ~4-5 d / ~1.5 h | Med |
 | M4a | Expansion 1: touch/tablet pinch + two-finger pan | ~3-4 d / ~1.5 h | Med |
 | M4b | Expansion 2: drop-on-empty quick-create (flat) | ~2 d / ~45 m | Low |
 | M4c | Expansion 3: double-click quick-add (both) | ~1 d / ~30 m | Low |
 | M4d | Expansion 4: cross-rack pointer drag (row view) | ~2-3 d / ~1 h | Med |
-| M4e | Expansion 5: click-click cabling (rack) | ~1 d / ~30 m | Low |
+| M4e | Expansion 5: click-click cabling (rack). (An endpoint-validation bundle was removed — `connectRackCable` already validates via `hasEnd`, projectStore.ts:1942, shipped 2ad076d with the test) | ~1 d / ~30 m | Low |
 | M4f | Expansion 6: MiniMap/RackRow perf hardening | ~2 d / ~1 h | Low |
 
 M4a-f are independently landable in any order (each lands green on its own);
