@@ -1,0 +1,49 @@
+{
+  "synthetic": true,
+  "note": "Hand-authored per-device wheel sequences. These prove NORMALIZER LOGIC only. Real traces recorded via the ?debug=input logger on actual hardware replace/augment these and are labeled synthetic:false (plan: fixture provenance rule).",
+  "sequences": {
+    "mac-trackpad-two-finger-pan": {
+      "synthetic": true,
+      "events": [
+        { "deltaX": -2.4, "deltaY": 6.8, "deltaMode": 0, "ctrlKey": false, "metaKey": false, "shiftKey": false },
+        { "deltaX": -3.1, "deltaY": 11.5, "deltaMode": 0, "ctrlKey": false, "metaKey": false, "shiftKey": false },
+        { "deltaX": -1.2, "deltaY": 22.9, "deltaMode": 0, "ctrlKey": false, "metaKey": false, "shiftKey": false }
+      ],
+      "expectClass": "trackpad"
+    },
+    "mac-trackpad-pinch": {
+      "synthetic": true,
+      "events": [
+        { "deltaX": 0, "deltaY": -0.7, "deltaMode": 0, "ctrlKey": true, "metaKey": false, "shiftKey": false },
+        { "deltaX": 0, "deltaY": -2.3, "deltaMode": 0, "ctrlKey": true, "metaKey": false, "shiftKey": false },
+        { "deltaX": 0, "deltaY": -1.1, "deltaMode": 0, "ctrlKey": true, "metaKey": false, "shiftKey": false }
+      ],
+      "expectClass": "pinch"
+    },
+    "chrome-mouse-notches": {
+      "synthetic": true,
+      "events": [
+        { "deltaX": 0, "deltaY": 120, "deltaMode": 0, "ctrlKey": false, "metaKey": false, "shiftKey": false },
+        { "deltaX": 0, "deltaY": -120, "deltaMode": 0, "ctrlKey": false, "metaKey": false, "shiftKey": false },
+        { "deltaX": 0, "deltaY": 240, "deltaMode": 0, "ctrlKey": false, "metaKey": false, "shiftKey": false }
+      ],
+      "expectClass": "wheel-notch"
+    },
+    "firefox-mouse-lines": {
+      "synthetic": true,
+      "events": [
+        { "deltaX": 0, "deltaY": 3, "deltaMode": 1, "ctrlKey": false, "metaKey": false, "shiftKey": false },
+        { "deltaX": 0, "deltaY": -3, "deltaMode": 1, "ctrlKey": false, "metaKey": false, "shiftKey": false }
+      ],
+      "expectClass": "wheel-notch",
+      "note": "The deltaMode=1 case that broke magnitude-based mode heuristics; ×16 → 48px normalized"
+    },
+    "page-mode": {
+      "synthetic": true,
+      "events": [
+        { "deltaX": 0, "deltaY": 1, "deltaMode": 2, "ctrlKey": false, "metaKey": false, "shiftKey": false }
+      ],
+      "expectClass": "wheel-notch"
+    }
+  }
+}

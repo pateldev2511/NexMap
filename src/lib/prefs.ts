@@ -15,6 +15,24 @@ export function setConnectMode(mode: ConnectMode): void {
   localStorage.setItem(KEY, mode);
 }
 
+import type { WheelAction } from '../input/wheel';
+
+const WHEEL_KEY = 'nexmap.wheelAction';
+
+/**
+ * What a plain (unmodified) wheel/two-finger scroll does on every canvas.
+ * 'pan' is the default and matches DA-DES-5.1; 'zoom' is the explicit opt-in
+ * that restores wheel-zoom (ctrl/pinch zooms in both modes regardless).
+ */
+export function getWheelAction(): WheelAction {
+  const v = localStorage.getItem(WHEEL_KEY);
+  return v === 'zoom' ? 'zoom' : 'pan';
+}
+
+export function setWheelAction(action: WheelAction): void {
+  localStorage.setItem(WHEEL_KEY, action);
+}
+
 const RM_KEY = 'nexmap.reduceMotion';
 
 export function getReduceMotion(): boolean {
