@@ -333,22 +333,124 @@ All existing tests must pass, AND these deliberate changes ship with new tests:
 M4a-f are independently landable in any order (each lands green on its own);
 a stall on one does not block the others.
 
-## Quiet canvas — concrete spec (M3)
+## Quiet canvas — concrete spec (M3, v2 — design review 2026-07-03)
 
-- Selection toolbar (floating, near selection, both designers): flat = align/
-  distribute (absorbs AlignBar), bring/send, group, delete, color; rack device
-  = nudge U up/down, unmount, delete, move-to-rack; rack cable = color swatch,
-  label, length, delete (this IS the in-canvas cable ops item).
-- Idle demotion: mode toolbar and zoom bar drop to 60% opacity (WCAG-safe
-  floor; 40% was rejected — outside-voice finding 10b) after 4 s without
-  pointer activity over them; full opacity on hover/use AND on keyboard
-  focus; the active tool indicator is never demoted; honors
-  prefers-reduced-motion (no fade animation, instant states). No layout
-  shift, opacity only (no motion in peripheral vision — Figma UI3 lesson).
-- Collapsible: Inspector and BottomPanel get collapse toggles with state
-  persisted in prefs; default state unchanged (no surprise removal).
-- Nothing is deleted from the UI in M3 except the dead library filter pills;
-  everything else is demoted or collapsed, reversibly.
+HIERARCHY OWNERSHIP (decided): with a selection active, the selection toolbar
+is the PRIMARY quick-action path. It exclusively owns the quick actions
+(color, align/distribute, z-order, group, delete/unmount); the Inspector
+keeps DEEP editing (identity, network, interfaces, placement detail) and
+joins gentle demotion: 85% opacity while the pointer is over the canvas,
+full opacity on hover or focus-within. One selection, one loud surface.
+
+### Selection toolbar
+
+- Contents by selection type — flat: align 6 + distribute 2 (ABSORBS AlignBar;
+  `.alignBar` and its fixed top-center slot are DELETED in the same commit),
+  group/ungroup, bring/send, color swatch, delete. Rack device: nudge U
+  up/down, unmount, move-to-rack, delete. Rack cable: the mini-controls below.
+- BUTTON MATRIX rule: buttons never appear/disappear per selection — they
+  DISABLE (existing `.icon:disabled` 0.35-opacity convention) so toolbar
+  width is stable for a given selection TYPE. Mixed flat selections show the
+  union with inapplicable actions disabled. Align/distribute disabled below
+  2 movable items. Locked items: destructive + move actions disabled.
+- PLACEMENT: anchored to the selection bbox in world space, rendered at fixed
+  screen size. Preferred slot: 8 px above the bbox top edge, centered.
+  Flip-then-clamp: if clipped above -> below the bbox; still clipped ->
+  clamp inside the viewport with 8 px insets, pinned to the edge nearest the
+  selection centroid (covers select-all-at-30%-zoom). If a NodeInfoCard is
+  showing above the same single selection, the toolbar takes the BELOW slot
+  (info card keeps its airspace; no overlap, ever).
+- VISIBILITY (decided): hidden while ANY gesture is active (drag, marquee,
+  pan, pinch — the M1 machine's active-state enter/exit is the hook, built in
+  M1, consumed in M3); reappears on settle. Appear/disappear = 120 ms opacity
+  fade; instant under prefers-reduced-motion. No world-space "swim": hidden
+  during viewport changes by the same rule.
+- TOKENS/SIZES: quiet dark pill on `--chrome-bg` with 1 px `--chrome-border`
+  hairline; 28 px icon buttons (44 px hit area via padding when
+  pointerType === 'touch' — M4a is in scope, so this ships ready); single
+  accent = existing `--accent`; z-slot: takes AlignBar's old z-4;
+  mini-controls z-4; hint toast z-6 (above textEditor's z-6 peers, same band).
+- KEYBOARD: roving tabindex within the toolbar; reachable via a shortcut
+  (routed through the keyboard router's canvas-shortcut stage); Escape from
+  inside it returns focus to the canvas WITHOUT clearing selection.
+
+### Idle demotion — complete inventory (per canvas, no partial fades)
+
+| Surface | Demotes? | Level |
+|---|---|---|
+| Mode toolbar (flat) | yes | 60%, active tool indicator never demoted |
+| Zoom pill (flat + rack) | yes | 60% |
+| MiniMap | yes | 60% |
+| Rack capacity strip / legend | yes | 60% |
+| Inspector / right sidebar | yes (gentle) | 85% while pointer over canvas |
+| BottomPanel tab strip | yes (gentle) | 85% |
+| Selection toolbar / mini-controls | NEVER (contextual chrome is the point) |
+| CanvasSearch, dialogs, toasts | never (transient by nature) |
+
+- Trigger: 4 s without pointer activity over that surface, AND "EARNED
+  QUIET" (decided): demotion arms only after the first COMPLETED canvas
+  gesture of the session — first-time users never watch chrome fade while
+  reading it. Full opacity on hover/use/keyboard-focus; honors
+  prefers-reduced-motion (instant states); opacity only, no layout shift.
+
+### Cable mini-controls (rack) — the in-canvas cable ops item
+
+- Anchor: cable path midpoint; below-the-path preferred slot, same
+  flip-then-clamp rules as the toolbar. At low zoom (cable on-screen length
+  < 48 px) the controls anchor to the cable's selected endpoint jack instead.
+- Contents: color swatch (opens an 8-swatch popover, same palette as
+  ConnectPortsDialog), label (inline text input), length (inline numeric
+  input with unit), delete.
+- TEXT EDITING contract: inline inputs commit on Enter/blur, Escape reverts
+  the field WITHOUT deselecting the cable — these inputs register as text
+  targets with the keyboard router (the isTextTarget boundary applies inside
+  floating chrome too; this is the explicit M3<->M1 connection). Invalid
+  length -> field shows `--sev-error` border + message, value not committed.
+- SOURCE OF TRUTH (decided): mini-controls are THE edit path. The cable
+  schedule panel becomes read-mostly: locate, hover-highlight,
+  click-to-select (selecting spawns the mini-controls); its per-row
+  label/length/color edit affordances are REMOVED in M3 (row delete-x stays;
+  list-level ops like Auto-length stay). One edit home, one finder.
+
+### Rejected-drop feedback (behavior change 5 — full pattern)
+
+- Flash TARGET: the attempted destination bay/slot region (not the whole
+  rack, not the ghost). Token: `--sev-error`. Duration: 300 ms ease-out,
+  two pulses max; reduced-motion -> steady highlight, no pulse.
+- REASON: actionable copy ("Needs 2 contiguous U — U12-13 occupied"), shown
+  as a transient chip near the drop point for 4 s (outlives the flash) AND
+  routed through the existing ValidationAnnouncer for screen readers.
+  Severity color is always paired with a non-color indicator (icon + text) —
+  the project's stated convention holds here.
+
+### Collapse spec
+
+- Affordance: chevron button in each panel's header edge (Inspector: left
+  edge; BottomPanel: top edge). Collapsed state = an 24 px rail with the
+  chevron + panel name, so re-opening is always one visible click (never
+  keyboard-only). State persisted in prefs; default unchanged.
+- VALIDATION BADGE (zero-silent-failures applies to our own milestone): a
+  collapsed BottomPanel shows a count badge on its rail when validation
+  issues exist; badge uses severity token + count (non-color pairing).
+
+### Settings + upgrade moment
+
+- wheelAction control: segmented control in SettingsDialog next to
+  connect-mode (same component pattern). Copy: "Scroll wheel: [Pans the
+  canvas] [Zooms]" — behavior words, not mode names. Applies live; the
+  canvas behind the dialog responds immediately (that IS the feedback).
+- FIRST-WHEEL HINT (decided): one-time dismissible quiet toast on the first
+  rack-canvas wheel event after upgrade: "Scroll now pans — restore
+  scroll-to-zoom in Settings." localStorage flag, never shown again, never
+  shown to fresh installs (no prior rack wheel-zoom habit to migrate).
+
+### Deletions in M3 (complete list)
+
+Dead library filter pills; `.alignBar` (absorbed into the selection
+toolbar — an owned muscle-memory trade: contextual placement beats the old
+fixed top-center slot); cable schedule per-row edit affordances (per source
+of truth above). Everything else is demoted or collapsed, reversibly.
+
 - In-canvas cable ops rationale: the brief's "everything can be done inside
   the canvas too" is broader than creation-only; cable edit/delete currently
   requires the schedule panel, which is precisely the panel-round-trip the
