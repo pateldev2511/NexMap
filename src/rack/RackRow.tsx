@@ -12,6 +12,7 @@ import type { Device, Rack, RackCable } from '@/model/types';
 import { fit, panBy, zoomAt, zoomTo, type Viewport, IDENTITY } from './viewport';
 import { normalizeWheel, resolveWheel } from '@/input/wheel';
 import { getWheelAction } from '@/lib/prefs';
+import { consumeRackWheelHint, RACK_WHEEL_HINT_EVENT } from './wheelHint';
 import {
   cabinetSize,
   bayOrigin,
@@ -245,6 +246,8 @@ export function RackRow({
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      // One-time migration hint for returning users: their wheel used to zoom.
+      if (consumeRackWheelHint()) window.dispatchEvent(new CustomEvent(RACK_WHEEL_HINT_EVENT));
       const n = normalizeWheel(e);
       const intent = resolveWheel(n, getWheelAction());
       if (intent.kind === 'zoom') {

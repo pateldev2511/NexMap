@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import { createInterface, defaultDeviceName } from '@/model/schema';
 import { rasterize, downloadBlob } from '@/io/export/raster';
 import { buildPdfBlob } from '@/io/export/pdf';
-import { RackCanvas, type RejectInfo } from './RackCanvas';
+import { RackCanvas, type RejectInfo, type RackGestureApi } from './RackCanvas';
 import { RackRow } from './RackRow';
+import { keyboardRouter } from '@/input/router';
+import { RACK_WHEEL_HINT_EVENT, RACK_WHEEL_HINT_TEXT } from './wheelHint';
 import { ConnectPortsDialog, CABLE_COLORS, type CableSeedEnd } from './ConnectPortsDialog';
 import {
   buildRackSvg,
@@ -233,28 +235,72 @@ export function RackDesigner() {
     setSelCable(null);
   }
 
-  // Keyboard: ↑/↓ nudge selected device a U, Delete removes it, Esc clears. Declared
-  // BEFORE the no-racks early return so the hook order is stable across renders;
-  // nudge()/deleteSelected() are hoisted function declarations, safe to reference here.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement;
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA')) return;
-      if (e.key === 'Escape') {
+  // Keyboard: canvas-shortcut stage of the shared router. Text targets never
+  // reach this (the router steps aside, SELECT included), and Escape / Cmd+Z
+  // during an in-flight rack gesture is consumed by the router's gesture-
+  // cancel stage via the RackGestureApi the mounted canvas fills in.
+  // Declared BEFORE the no-racks early return so hook order stays stable;
+  // nudge()/deleteSelected() are hoisted function declarations.
+  const rackGestureApi = useRef<RackGestureApi | null>(null);
+  const handleRackKey = (e: KeyboardEvent): boolean => {
+    if (e.key === 'Escape') {
+      // Innermost-only, one layer per press: armed preset → highlighted
+      // cable → selection (behavior change 3, rack side).
+      if (armed) {
         setArmed(null);
-        setSelCable(null);
-        s().select([]);
-        return;
+        return true;
       }
-      if (!selectedId) return;
-      if (e.key === 'ArrowUp') { e.preventDefault(); nudge(1); }
-      else if (e.key === 'ArrowDown') { e.preventDefault(); nudge(-1); }
-      else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelected(); }
+      if (selCable) {
+        setSelCable(null);
+        return true;
+      }
+      if (s().selection.size > 0) {
+        s().select([]);
+        return true;
+      }
+      return false;
+    }
+    if (!selectedId) return false;
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      nudge(1);
+      return true;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      nudge(-1);
+      return true;
+    }
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault();
+      deleteSelected();
+      return true;
+    }
+    return false;
+  };
+  const rackKeyRef = useRef(handleRackKey);
+  rackKeyRef.current = handleRackKey;
+  useEffect(
+    () =>
+      keyboardRouter.registerCanvas('rack', {
+        cancelActiveGesture: () => rackGestureApi.current?.cancel(),
+        hasActiveGesture: () => rackGestureApi.current?.active() ?? false,
+        handleKey: (e) => rackKeyRef.current(e),
+        handleKeyUp: () => {},
+      }),
+    [],
+  );
+
+  // One-time "scroll now pans" toast for returning users (behavior change 1).
+  const [wheelHint, setWheelHint] = useState<string | null>(null);
+  useEffect(() => {
+    const onHint = () => {
+      setWheelHint(RACK_WHEEL_HINT_TEXT);
+      window.setTimeout(() => setWheelHint(null), 8000);
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, selected, rack]);
+    window.addEventListener(RACK_WHEEL_HINT_EVENT, onHint);
+    return () => window.removeEventListener(RACK_WHEEL_HINT_EVENT, onHint);
+  }, []);
 
   // ── No racks yet: warm empty state ─────────────────────────────────────────
   if (!rack) {
@@ -365,7 +411,21 @@ export function RackDesigner() {
     const d = devices.find((x) => x.id === id);
     if (!d) return;
     const slot = slotOf(d);
-    s().placeInRack(id, rack.id, { ...slot, ru: Math.min(u, rack.ruHeight - slot.ruSpan + 1) });
+    const ru = Math.min(u, rack.ruHeight - slot.ruSpan + 1);
+    const fit = s().placeInRack(id, rack.id, { ...slot, ru });
+    if (!fit.ok) {
+      // Behavior change #5: a rejected drag-move (or blocked nudge) flashes
+      // the slot + reason and pulses the nearest U that WOULD fit — never a
+      // silent no-op. (This path used to discard the FitResult.)
+      const others = devices.filter((x) => x.rackId === rack.id && x.id !== id);
+      setReject({
+        u: ru,
+        span: slot.ruSpan,
+        reason: rejectReason(fit),
+        pulseU: nearestFreeU(rack, others, slot.ruSpan, ru, slot.side, slot.bay, slot.depth),
+      });
+      window.setTimeout(() => setReject(null), 2400);
+    }
   }
 
   /** Nudge the selected device by ±1U (keyboard / inspector). No-op if it can't move. */
@@ -613,6 +673,44 @@ export function RackDesigner() {
 
   return (
     <div className={styles.root}>
+      {wheelHint && (
+        <div
+          role="status"
+          style={{
+            position: 'fixed',
+            bottom: 18,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 60,
+            background: 'var(--chrome-bg)',
+            color: 'var(--chrome-fg)',
+            border: '1px solid var(--chrome-border)',
+            borderRadius: 8,
+            padding: '8px 12px',
+            fontSize: 12,
+            display: 'flex',
+            gap: 10,
+            alignItems: 'center',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.35)',
+          }}
+        >
+          <span>{wheelHint}</span>
+          <button
+            onClick={() => setWheelHint(null)}
+            aria-label="Dismiss"
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--chrome-fg-muted)',
+              cursor: 'pointer',
+              fontSize: 14,
+              padding: 0,
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
       <div className={styles.toolbar}>
         <div className={styles.brandBlock}>
           <span className={styles.title}>Rack designer</span>
@@ -899,6 +997,7 @@ export function RackDesigner() {
             </div>
             <div className={styles.focusCanvasWrap}>
               <RackCanvas
+                gestureApi={rackGestureApi}
                 rack={rack}
                 devices={devices}
                 cables={cables}

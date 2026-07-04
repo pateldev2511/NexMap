@@ -27,6 +27,13 @@ import { portAt, portCenter, type PortTarget } from './portHit';
 import { fit, panBy, zoomAt, zoomTo, type Viewport, IDENTITY } from './viewport';
 import { normalizeWheel, resolveWheel } from '@/input/wheel';
 import { getWheelAction } from '@/lib/prefs';
+import { consumeRackWheelHint, RACK_WHEEL_HINT_EVENT } from './wheelHint';
+
+/** Cancel/inspect handle the keyboard router uses for in-flight rack gestures. */
+export interface RackGestureApi {
+  cancel: () => void;
+  active: () => boolean;
+}
 import styles from './RackDesigner.module.css';
 
 /**
@@ -50,6 +57,7 @@ export function RackCanvas({
   onConnectPorts,
   onSelectCable,
   onMoveTo,
+  gestureApi,
 }: {
   rack: Rack;
   devices: Device[];
@@ -75,6 +83,8 @@ export function RackCanvas({
   onConnectPorts?: (a: { deviceId: string; ifaceId: string }, b: { deviceId: string; ifaceId: string }) => void;
   onSelectCable: (id: string | null) => void;
   onMoveTo: (id: string, u: number) => void;
+  /** Filled with cancel/active so the router can Escape-cancel rack gestures. */
+  gestureApi?: React.MutableRefObject<RackGestureApi | null>;
 }) {
   const { width, height } = cabinetSize(rack);
   const origin = bayOrigin();
@@ -106,15 +116,52 @@ export function RackCanvas({
   const pan = useRef({ active: false, sx: 0, sy: 0, tx: 0, ty: 0 });
   const rectOf = () => containerRef.current?.getBoundingClientRect();
 
+  // True after any manual pan/zoom; auto-refits (rack switch, container
+  // resize) never fight a viewport the user deliberately set. The ⊡ button
+  // re-arms auto-fit.
+  const userAdjusted = useRef(false);
   function fitNow() {
+    userAdjusted.current = false;
     const r = rectOf();
     if (r) setVp(fit(width, height, r.width, r.height));
   }
-  // Fit once on mount (content + container measured by then).
+  // Fit on mount AND whenever the rack (or its height) changes — switching
+  // from a 12U to a 42U cabinet must never keep the old viewport.
   useEffect(() => {
     fitNow();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rack.id, rack.ruHeight]);
+  // Re-fit on container resize unless the user has taken over the viewport.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      if (!userAdjusted.current) fitNow();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Router hook: Escape / Cmd+Z cancel whatever rack gesture is in flight.
+  useEffect(() => {
+    if (!gestureApi) return;
+    gestureApi.current = {
+      cancel: () => {
+        drag.current = null;
+        setHoverU(null);
+        marquee.current = null;
+        setMarqueeBox(null);
+        cableDrag.current = null;
+        setCablePt(null);
+        pan.current.active = false;
+      },
+      active: () =>
+        !!(drag.current || marquee.current || cableDrag.current || pan.current.active),
+    };
+    return () => {
+      if (gestureApi) gestureApi.current = null;
+    };
+  });
   // Wheel contract (shared with the flat canvas): plain wheel PANS by default
   // per DA-DES-5.1, ctrl/pinch zooms at the cursor, and the Settings
   // wheelAction pref flips plain wheel to zoom for those who want it.
@@ -123,6 +170,9 @@ export function RackCanvas({
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      // One-time migration hint for returning users: their wheel used to zoom.
+      if (consumeRackWheelHint()) window.dispatchEvent(new CustomEvent(RACK_WHEEL_HINT_EVENT));
+      userAdjusted.current = true;
       const n = normalizeWheel(e);
       const intent = resolveWheel(n, getWheelAction());
       if (intent.kind === 'zoom') {
@@ -134,6 +184,7 @@ export function RackCanvas({
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const onPanDown = (e: React.PointerEvent) => {
@@ -141,6 +192,7 @@ export function RackCanvas({
     // contract's pan fallbacks apply on every canvas).
     if (e.button !== 1 && e.button !== 2) return;
     e.preventDefault();
+    userAdjusted.current = true;
     pan.current = { active: true, sx: e.clientX, sy: e.clientY, tx: vpRef.current.tx, ty: vpRef.current.ty };
     containerRef.current?.setPointerCapture?.(e.pointerId);
   };
@@ -154,6 +206,7 @@ export function RackCanvas({
     containerRef.current?.releasePointerCapture?.(e.pointerId);
   };
   const zoomStep = (k: number) => {
+    userAdjusted.current = true;
     const r = rectOf();
     setVp((v) => zoomTo(v, v.scale * k, r?.width ?? 800, r?.height ?? 600));
   };
