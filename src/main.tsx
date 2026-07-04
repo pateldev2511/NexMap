@@ -2,12 +2,19 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App.tsx';
 import { installNetGuard } from './lib/netguard';
+import { installInputDebugLogger } from './input/debugLog';
 import './styles/global.css';
 
 // Enforce the local-first promise in production: trap any accidental network egress
 // before the app mounts. Dev is left alone so Vite's HMR websocket keeps working.
 if (import.meta.env.PROD) {
   installNetGuard(window as unknown as Parameters<typeof installNetGuard>[0]);
+}
+
+// Dev-only input recorder (?debug=input) — captures real-device wheel/pointer
+// traces for src/input/__fixtures__/ (fixture-provenance rule). Never in prod.
+if (import.meta.env.DEV) {
+  installInputDebugLogger();
 }
 
 const rootEl = document.getElementById('root');
