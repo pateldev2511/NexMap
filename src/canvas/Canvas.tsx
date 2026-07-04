@@ -64,8 +64,6 @@ type Gesture =
       handle: Handle;
       orig: { x: number; y: number; width: number; height: number };
     }
-  | { kind: 'link'; sourceId: string }
-  | { kind: 'relink'; linkId: string; endpoint: 'source' | 'target'; otherId: string }
   | {
       kind: 'waypoint';
       linkId: string;
@@ -440,11 +438,6 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     const g = gesture.current;
     gesture.current = { kind: 'none' };
     switch (g.kind) {
-      case 'link':
-      case 'relink':
-        setLinkCursor(null);
-        setLinkTarget(null);
-        break;
       case 'resize':
         store().cancelResize();
         setReadout(null);
@@ -602,6 +595,16 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           });
         } else if (ef.gesture === 'lasso') {
           setLassoPts((prev) => (prev ? [...prev, { x: ef.x, y: ef.y }] : [{ x: ef.x, y: ef.y }]));
+        } else if (ef.gesture === 'link' || ef.gesture === 'relink') {
+          const c = toFlat(ef.x, ef.y);
+          setLinkCursor(c);
+          const excl =
+            ef.gesture === 'link'
+              ? (ef.data as { sourceId: string }).sourceId
+              : (ef.data as { otherId: string }).otherId;
+          const hit = store().hitTest(c.x, c.y);
+          const target = hit.find((id) => id !== excl && store().getDevice(id));
+          setLinkTarget(target ?? null);
         }
         break;
       case 'commit':
@@ -654,6 +657,38 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           store().select([id]);
           store().setMode('select');
           setMarquee(null);
+        } else if (ef.gesture === 'link') {
+          // Release: connect on a valid target (drag mode), else arm
+          // click-to-connect per the connect-mode preference.
+          const d = ef.data as { sourceId: string };
+          const target = linkTarget;
+          setLinkCursor(null);
+          setLinkTarget(null);
+          const cm = getConnectMode();
+          if (cm !== 'click' && target && target !== d.sourceId) {
+            const id = store().connect(d.sourceId, target);
+            if (id) {
+              store().select([id]);
+              store().runValidation();
+            }
+            setPending(null);
+          } else if (cm !== 'drag') {
+            setPending(d.sourceId);
+          } else {
+            setPending(null);
+          }
+        } else if (ef.gesture === 'relink') {
+          const d = ef.data as {
+            linkId: string;
+            endpoint: 'source' | 'target';
+            otherId: string;
+          };
+          const target = linkTarget;
+          setLinkCursor(null);
+          setLinkTarget(null);
+          // Drop on a valid device → re-wire; drop in air or on the other
+          // endpoint (relinkEndpoint rejects self-loop) → snap back.
+          if (target) store().relinkEndpoint(d.linkId, d.endpoint, target);
         }
         break;
       case 'cancel':
@@ -664,6 +699,9 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           setMarquee(null);
         } else if (ef.gesture === 'lasso') {
           setLassoPts(null);
+        } else if (ef.gesture === 'link' || ef.gesture === 'relink') {
+          setLinkCursor(null);
+          setLinkTarget(null);
         }
         break;
       case 'click':
@@ -720,20 +758,24 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     if (b) fitFlatBox(b);
   }, [fitFlatBox]);
 
-  function cancelLink() {
-    gesture.current = { kind: 'none' };
-    setLinkCursor(null);
-    setLinkTarget(null);
-  }
-
   const startLinkFrom = useCallback(
     (e: React.PointerEvent, id: string) => {
       e.stopPropagation();
-      capturePointer(svgRef.current, e.pointerId);
-      gesture.current = { kind: 'link', sourceId: id };
-      const c = screenToCanvasFromEvent(e);
-      setLinkCursor(c);
+      // MIGRATED: link rubber-band runs on the input machine, immediate arm
+      // (the band starts at press — no threshold).
+      const { sx, sy } = localPoint(e);
+      setLinkCursor(toFlat(sx, sy));
       setLinkTarget(null);
+      dispatchRef.current({
+        type: 'arm',
+        gesture: 'link',
+        data: { sourceId: id },
+        immediate: true,
+        pointerId: e.pointerId,
+        pointerType: e.pointerType as PointerKind,
+        x: sx,
+        y: sy,
+      });
     },
     // toFlat carries BOTH viewport and projection — depending on viewport
     // alone left a stale projection in this closure after a flat↔iso toggle
@@ -753,15 +795,24 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       e.stopPropagation();
       const link = store().getLink(linkId);
       if (!link) return;
-      capturePointer(svgRef.current, e.pointerId);
       const otherId = endpoint === 'source' ? link.targetId : link.sourceId;
-      gesture.current = { kind: 'relink', linkId, endpoint, otherId };
-      setLinkCursor(screenToCanvasFromEvent(e));
+      const { sx, sy } = localPoint(e);
+      setLinkCursor(toFlat(sx, sy));
       setLinkTarget(null);
+      dispatchRef.current({
+        type: 'arm',
+        gesture: 'relink',
+        data: { linkId, endpoint, otherId },
+        immediate: true,
+        pointerId: e.pointerId,
+        pointerType: e.pointerType as PointerKind,
+        x: sx,
+        y: sy,
+      });
     },
     // toFlat, not viewport: see startLinkFrom (stale-projection fix).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [toFlat],
+    [toFlat, store],
   );
 
   const onWaypointDown = useCallback(
@@ -1011,20 +1062,6 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       const { sx, sy } = localPoint(e);
       const canvasPt = toFlat(sx, sy);
 
-      if (g.kind === 'link') {
-        setLinkCursor(canvasPt);
-        const hit = store().hitTest(canvasPt.x, canvasPt.y);
-        const target = hit.find((id) => id !== g.sourceId && store().getDevice(id));
-        setLinkTarget(target ?? null);
-        return;
-      }
-      if (g.kind === 'relink') {
-        setLinkCursor(canvasPt);
-        const hit = store().hitTest(canvasPt.x, canvasPt.y);
-        const target = hit.find((id) => id !== g.otherId && store().getDevice(id));
-        setLinkTarget(target ?? null);
-        return;
-      }
       if (g.kind === 'waypoint') {
         const wps = [...(store().getLink(g.linkId)?.waypoints ?? [])];
         wps[g.index] = { x: canvasPt.x, y: canvasPt.y };
@@ -1081,33 +1118,8 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         store().endResize();
         return;
       }
-      // ('drag' commit/click resolution is machine-owned — effect table above.)
-      if (g.kind === 'link') {
-        const target = linkTarget;
-        cancelLink();
-        const cm = getConnectMode();
-        if (cm !== 'click' && target && target !== g.sourceId) {
-          // Drag-to-connect (allowed in 'both' and 'drag').
-          const id = store().connect(g.sourceId, target);
-          if (id) {
-            store().select([id]);
-            store().runValidation();
-          }
-          setPending(null);
-        } else if (cm !== 'drag') {
-          // Arm click-to-connect (allowed in 'both' and 'click').
-          setPending(g.sourceId);
-        } else {
-          setPending(null);
-        }
-      } else if (g.kind === 'relink') {
-        const target = linkTarget;
-        cancelLink();
-        // Drop on a valid device → re-wire; drop in air or on the other endpoint
-        // (relinkEndpoint rejects self-loop) → snap back, no change.
-        if (target) store().relinkEndpoint(g.linkId, g.endpoint, target);
-      }
-      // (marquee/lasso/shape commit through the machine's effect table.)
+      // (drag/marquee/lasso/shape/link/relink commit via the machine's
+      // effect table — only pan/resize/waypoint remain legacy.)
     },
     [store, marquee, linkTarget, lassoPts, setPending, toFlat],
   );
@@ -1313,11 +1325,14 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     (id) => store().getDevice(id) || store().getObject(id),
   ).length;
   const handleDevice = hoveredId ? store().getDevice(hoveredId) : undefined;
+  // Link/relink live on the machine now; every band update sets linkCursor
+  // state, so this render always sees the machine's current gesture.
   const linkSource =
-    gesture.current.kind === 'link'
-      ? store().getDevice(gesture.current.sourceId)
-      : gesture.current.kind === 'relink'
-        ? store().getDevice(gesture.current.otherId) // anchor rubber at the FIXED endpoint
+    machine.current.gesture === 'link'
+      ? store().getDevice((machine.current.data as { sourceId: string }).sourceId)
+      : machine.current.gesture === 'relink'
+        ? // anchor the rubber at the FIXED endpoint
+          store().getDevice((machine.current.data as { otherId: string }).otherId)
         : undefined;
 
   // While a link is selected its relink endpoint handles own the device edges, so the
