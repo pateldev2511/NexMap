@@ -47,7 +47,12 @@ export type NexIconName =
   | 'pages'
   | 'rack'
   | 'settings'
-  | 'theme';
+  | 'theme'
+  | 'group'
+  | 'ungroup'
+  | 'bring-forward'
+  | 'send-backward'
+  | 'trash';
 
 interface NexIconProps extends Omit<SVGProps<SVGSVGElement>, 'name'> {
   name: NexIconName;
@@ -55,6 +60,39 @@ interface NexIconProps extends Omit<SVGProps<SVGSVGElement>, 'name'> {
 }
 
 const ICONS: Record<NexIconName, ReactNode> = {
+  group: (
+    <>
+      <rect x="4" y="4" width="9" height="9" rx="1" />
+      <rect x="11" y="11" width="9" height="9" rx="1" />
+    </>
+  ),
+  ungroup: (
+    <>
+      <rect x="4" y="4" width="7" height="7" rx="1" />
+      <rect x="13" y="13" width="7" height="7" rx="1" />
+      <path d="M13.5 10.5l-3-3" />
+    </>
+  ),
+  'bring-forward': (
+    <>
+      <rect x="9" y="4" width="11" height="11" rx="1" />
+      <path d="M4 10v9a1 1 0 0 0 1 1h9" />
+    </>
+  ),
+  'send-backward': (
+    <>
+      <rect x="4" y="9" width="11" height="11" rx="1" />
+      <path d="M10 4h9a1 1 0 0 1 1 1v9" />
+    </>
+  ),
+  trash: (
+    <>
+      <path d="M5 7h14" />
+      <path d="M9 7V5h6v2" />
+      <path d="M7 7l1 13h8l1-13" />
+      <path d="M10 11v5M14 11v5" />
+    </>
+  ),
   'new-file': (
     <>
       <path d="M6 3.5h8l4 4V20H6z" />

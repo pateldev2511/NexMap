@@ -5,6 +5,8 @@ import { useProjectStore, type AlignEdge, type ProjectStore } from '@/store/proj
 import { CanvasSearch } from './CanvasSearch';
 import { MiniMap } from './MiniMap';
 import { getConnectMode, getWheelAction } from '@/lib/prefs';
+import { SelectionToolbar, ToolbarSep } from '@/ui/SelectionToolbar';
+import { placeToolbar } from '@/ui/toolbarPlace';
 import { normalizeWheel, resolveWheel, MomentumGuard } from '@/input/wheel';
 import { keyboardRouter } from '@/input/router';
 import {
@@ -1836,7 +1838,32 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         )}
       </svg>
 
-      {!readOnly && movableSelCount >= 2 && <AlignBar count={movableSelCount} />}
+      {/* Floating selection toolbar (M3): the PRIMARY quick-action path.
+          Hidden while a gesture is active — contextual chrome that follows a
+          drag is noise at the exact moment the user needs the canvas. */}
+      {!readOnly &&
+        selection.size > 0 &&
+        machine.current.phase !== 'active' &&
+        machine.current.phase !== 'pinch' &&
+        (() => {
+          const b = selectionBounds(store());
+          if (!b) return null;
+          const fb = projection === 'iso' ? projectFlatBox(b) : b;
+          const tl = canvasToScreen(viewport, fb.x, fb.y);
+          const br = canvasToScreen(viewport, fb.x + fb.width, fb.y + fb.height);
+          const first = [...selection][0]!;
+          return (
+            <FlatSelectionToolbar
+              bbox={{ x: tl.x, y: tl.y, width: br.x - tl.x, height: br.y - tl.y }}
+              vw={size.w}
+              vh={size.h}
+              cardAbove={selection.size === 1 && !!store().getDevice(first)}
+              selCount={selection.size}
+              movableCount={movableSelCount}
+              canUngroup={[...selection].some((id) => store().groupMembers(id).length > 1)}
+            />
+          );
+        })()}
 
       {!readOnly && searchOpen && <CanvasSearch onClose={() => setSearchOpen(false)} />}
 
@@ -2036,67 +2063,81 @@ function PageBoundaries({
 }
 
 /** Floating alignment toolbar shown when 2+ movable entities are selected. */
-function AlignBar({ count }: { count: number }) {
+/**
+ * Flat-canvas selection toolbar content (M3). Button-matrix rule: buttons
+ * never appear/disappear per selection — inapplicable actions DISABLE, so
+ * the toolbar width is stable for the flat selection type.
+ * (AlignBar is absorbed here; its fixed top-center slot is deleted.)
+ */
+function FlatSelectionToolbar({
+  bbox,
+  vw,
+  vh,
+  cardAbove,
+  selCount,
+  movableCount,
+  canUngroup,
+}: {
+  bbox: { x: number; y: number; width: number; height: number };
+  vw: number;
+  vh: number;
+  cardAbove: boolean;
+  selCount: number;
+  movableCount: number;
+  canUngroup: boolean;
+}) {
   const store = useProjectStore.getState;
+  const [size, setSize] = useState({ width: 340, height: 36 });
+  const pos = placeToolbar(bbox, size, { width: vw, height: vh }, cardAbove);
   const align = (edge: AlignEdge) => store().alignSelection(edge);
   const dist = (axis: 'h' | 'v') => store().distributeSelection(axis);
-  const canDist = count >= 3;
+  const canAlign = movableCount >= 2;
+  const canDist = movableCount >= 3;
+  const icon = (
+    title: string,
+    name: Parameters<typeof NexIcon>[0]['name'],
+    onClick: () => void,
+    disabled = false,
+  ) => (
+    <button title={title} aria-label={title} disabled={disabled} onClick={onClick}>
+      <NexIcon name={name} />
+    </button>
+  );
   return (
-    <div
-      className={styles.alignBar}
-      role="toolbar"
-      aria-label="Align and distribute"
-      data-canvas-chrome
+    <SelectionToolbar
+      left={pos.left}
+      top={pos.top}
+      label="Selection actions"
+      barRef={(el) => {
+        if (
+          el &&
+          (Math.abs(el.offsetWidth - size.width) > 1 ||
+            Math.abs(el.offsetHeight - size.height) > 1)
+        ) {
+          setSize({ width: el.offsetWidth, height: el.offsetHeight });
+        }
+      }}
     >
-      <button title="Align left" aria-label="Align left" onClick={() => align('left')}>
-        <NexIcon name="align-left" />
-      </button>
-      <button
-        title="Align horizontal centers"
-        aria-label="Align horizontal centers"
-        onClick={() => align('hcenter')}
-      >
-        <NexIcon name="align-hcenter" />
-      </button>
-      <button title="Align right" aria-label="Align right" onClick={() => align('right')}>
-        <NexIcon name="align-right" />
-      </button>
-      <span className={styles.sep} />
-      <button title="Align top" aria-label="Align top" onClick={() => align('top')}>
-        <NexIcon name="align-top" />
-      </button>
-      <button
-        title="Align vertical centers"
-        aria-label="Align vertical centers"
-        onClick={() => align('vcenter')}
-      >
-        <NexIcon name="align-vcenter" />
-      </button>
-      <button
-        title="Align bottom"
-        aria-label="Align bottom"
-        onClick={() => align('bottom')}
-      >
-        <NexIcon name="align-bottom" />
-      </button>
-      <span className={styles.sep} />
-      <button
-        title="Distribute horizontally"
-        aria-label="Distribute horizontally"
-        disabled={!canDist}
-        onClick={() => dist('h')}
-      >
-        <NexIcon name="distribute-h" />
-      </button>
-      <button
-        title="Distribute vertically"
-        aria-label="Distribute vertically"
-        disabled={!canDist}
-        onClick={() => dist('v')}
-      >
-        <NexIcon name="distribute-v" />
-      </button>
-    </div>
+      {icon('Align left', 'align-left', () => align('left'), !canAlign)}
+      {icon('Align horizontal centers', 'align-hcenter', () => align('hcenter'), !canAlign)}
+      {icon('Align right', 'align-right', () => align('right'), !canAlign)}
+      {icon('Align top', 'align-top', () => align('top'), !canAlign)}
+      {icon('Align vertical centers', 'align-vcenter', () => align('vcenter'), !canAlign)}
+      {icon('Align bottom', 'align-bottom', () => align('bottom'), !canAlign)}
+      {icon('Distribute horizontally', 'distribute-h', () => dist('h'), !canDist)}
+      {icon('Distribute vertically', 'distribute-v', () => dist('v'), !canDist)}
+      <ToolbarSep />
+      {icon('Group', 'group', () => store().groupSelection(), selCount < 2)}
+      {icon('Ungroup', 'ungroup', () => store().ungroupSelection(), !canUngroup)}
+      <ToolbarSep />
+      {icon('Bring forward', 'bring-forward', () => store().bringForward())}
+      {icon('Send backward', 'send-backward', () => store().sendBackward())}
+      <ToolbarSep />
+      {icon('Delete selection', 'trash', () => {
+        store().deleteSelection();
+        store().runValidation();
+      })}
+    </SelectionToolbar>
   );
 }
 

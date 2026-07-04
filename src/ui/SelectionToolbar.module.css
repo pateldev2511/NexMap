@@ -1,0 +1,90 @@
+/**
+ * Floating selection toolbar (M3 quiet-canvas spec v2): a quiet dark pill on
+ * --chrome-bg with a 1px hairline, 28px icon buttons, ONE accent for
+ * hover/active. Contextual chrome is never demoted — it IS the point.
+ * Appear/disappear is opacity-only (120ms; the global reduced-motion kill
+ * switch makes it instant). No layout shift, no motion in peripheral vision.
+ */
+.bar {
+  position: absolute;
+  z-index: 4; /* AlignBar's old slot: above canvas overlays, below readout/editors */
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  animation: seltb-in 120ms ease-out;
+}
+
+@keyframes seltb-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.bar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--chrome-fg-muted);
+  cursor: pointer;
+}
+
+.bar button:hover:not(:disabled) {
+  color: var(--chrome-fg);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.bar button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Button-matrix rule: inapplicable actions DISABLE (stable width), never hide. */
+.bar button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 3px;
+  background: var(--chrome-border);
+}
+
+/* Inline controls (rack cable label/length, move-to-rack) stay compact. */
+.bar input,
+.bar select {
+  height: 24px;
+  font-size: 11px;
+  background: var(--chrome-bg-inset, var(--chrome-bg));
+  color: var(--chrome-fg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 5px;
+  padding: 0 6px;
+}
+
+.bar input.invalid {
+  border-color: var(--sev-error);
+}
+
+/* Touch (M4a-ready): 44px hit targets while keeping the 28px visual. */
+@media (pointer: coarse) {
+  .bar button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}

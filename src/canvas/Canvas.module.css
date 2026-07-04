@@ -552,58 +552,7 @@
   stroke-dasharray: 6 4;
 }
 
-.alignBar {
-  position: absolute;
-  /* Sit just below the main canvas toolbar (top:12 + ~36 tall + gap) instead of
-     overlapping it when a multi-selection shows the align controls. */
-  top: 56px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  background: var(--chrome-bg);
-  border: 1px solid var(--chrome-border);
-  border-radius: 8px;
-  padding: 3px;
-  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.12);
-  z-index: 4;
-}
-
-.alignBar button {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 26px;
-  background: transparent;
-  border: none;
-  color: var(--chrome-fg);
-  border-radius: 6px;
-  padding: 0;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.alignBar button svg {
-  width: 15px;
-  height: 15px;
-}
-
-.alignBar button:hover:not(:disabled) {
-  background: var(--canvas-bg);
-}
-
-.alignBar button:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
-.alignBar .sep {
-  width: 1px;
-  align-self: stretch;
-  margin: 2px 3px;
-  background: var(--chrome-border);
-}
+/* (.alignBar deleted — absorbed into the floating SelectionToolbar, M3.) */
 
 .zoomBar {
   position: absolute;
