@@ -60,6 +60,37 @@ test('Escape mid-marquee cancels the marquee but PRESERVES the selection', async
   await expect(page.locator('g[data-id][aria-pressed="true"]')).toHaveCount(selected);
 });
 
+test('pointercancel mid-drag reverts the drag (no stuck gesture, no move)', async ({
+  page,
+}) => {
+  await openBranchOffice(page);
+  const node = page.locator('g[data-id][role="button"]').first();
+  const before = await node.getAttribute('transform');
+  const hit = (await node.locator('rect').first().boundingBox())!;
+  const startX = hit.x + hit.width / 2;
+  const startY = hit.y + hit.height / 2;
+
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + 60, startY + 40, { steps: 4 });
+
+  // Synthesize the OS-interrupt path the machine treats as first-class.
+  await page.evaluate(() => {
+    // The CANVAS svg (icon svgs come first in DOM order).
+    const svg = document.querySelector('g[data-id]')!.closest('svg')!;
+    svg.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerId: 1 }));
+  });
+  await page.mouse.up();
+
+  await expect(node).toHaveAttribute('transform', before!); // reverted
+  // And the canvas is not stuck: a fresh drag still works.
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + 40, startY + 30, { steps: 4 });
+  await page.mouse.up();
+  await expect(node).not.toHaveAttribute('transform', before!);
+});
+
 test('Cmd+Z mid-drag reverts the drag and leaves history for a second press', async ({
   page,
 }) => {

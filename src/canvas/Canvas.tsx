@@ -1232,6 +1232,14 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         onPointerDown={onRootPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerCancel={cancelActiveGesture}
+        onLostPointerCapture={() => {
+          // A capture we lose without a pointerup is a cancelled gesture
+          // (OS interrupt, element churn). pointerup fires lostpointercapture
+          // too, but by then the up handler already reset gesture to 'none',
+          // so this is a no-op on the normal path.
+          if (gesture.current.kind !== 'none') cancelActiveGesture();
+        }}
         onPointerLeave={() => setHoveredId(null)}
         onDoubleClick={onCanvasDoubleClick}
         onContextMenu={onContextMenu}
