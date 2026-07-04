@@ -7,6 +7,14 @@ import { MiniMap } from './MiniMap';
 import { getConnectMode, getWheelAction } from '@/lib/prefs';
 import { normalizeWheel, resolveWheel, MomentumGuard } from '@/input/wheel';
 import { keyboardRouter } from '@/input/router';
+import {
+  reduce,
+  IDLE,
+  type MachineState,
+  type MachineEvent,
+  type Effect as MachineEffect,
+  type PointerKind,
+} from '@/input/machine';
 import { DeviceNode } from './DeviceNode';
 import { IsoDeviceNode } from './IsoDeviceNode';
 import { DEFAULT_LABEL_HEIGHT } from './nodeCard';
@@ -44,18 +52,11 @@ import { isoProjectPx, isoUnprojectPx, type IsoTile } from './iso';
 import type { Box } from '@/lib/spatial-index';
 import styles from './Canvas.module.css';
 
+// Legacy gesture union — kinds migrate one by one onto src/input/machine.ts
+// ('drag' already lives there); this shrinks to nothing by end of M1.
 type Gesture =
   | { kind: 'none' }
   | { kind: 'pan'; lastX: number; lastY: number; button: number; moved: boolean }
-  | {
-      kind: 'drag';
-      startX: number;
-      startY: number;
-      /** True once movement crossed the threshold and a real drag began. */
-      moved: boolean;
-      /** Deferred click resolution if the press never becomes a drag. */
-      pending: { members: string[]; shift: boolean; addedOnDown: boolean };
-    }
   | { kind: 'marquee'; startX: number; startY: number; additive: boolean }
   | { kind: 'lasso'; additive: boolean }
   | { kind: 'shape'; startX: number; startY: number }
@@ -75,7 +76,6 @@ type Gesture =
     };
 
 /** Pointer travel (screen px) before a press becomes a drag rather than a click. */
-const DRAG_THRESHOLD = 4;
 
 /**
  * Capture the pointer on the SVG (which owns the move/up handlers) so a gesture
@@ -189,6 +189,17 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   const gesture = useRef<Gesture>({ kind: 'none' });
   // Swallows inertial trackpad wheel events after an Escape-cancel.
   const momentum = useRef(new MomentumGuard());
+  // ── Input-machine adapter (strangler) ────────────────────────────────────
+  // Migrated gesture kinds run on the pure machine in src/input/machine.ts;
+  // legacy kinds still use gesture.current. Exactly one system owns any
+  // given pointer sequence: handlers check `machine.current.phase` first.
+  const machine = useRef<MachineState>(IDLE);
+  // Assigned each render (below, after its dependencies exist) so handlers
+  // and the router shim always dispatch with fresh closures.
+  const dispatchRef = useRef<
+    (e: MachineEvent, mods?: { alt?: boolean; shift?: boolean }) => void
+  >(() => {});
+  const viewportRef = useRef<Viewport>(initialViewport);
   const altHeld = useRef(false);
   // Set after a right-button drag-pan so the trailing contextmenu is suppressed.
   const suppressMenu = useRef(false);
@@ -421,18 +432,20 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   // router can consume Escape / Cmd+Z safely mid-gesture. Each per-gesture
   // machine migration swaps its case here for the machine path.
   const cancelActiveGesture = useCallback(() => {
+    momentum.current.block(performance.now());
+    // Machine-owned gestures cancel through the reducer (effects restore
+    // the store and release capture).
+    if (machine.current.phase !== 'idle') {
+      dispatchRef.current({ type: 'escape' });
+      return;
+    }
     const g = gesture.current;
     gesture.current = { kind: 'none' };
-    momentum.current.block(performance.now());
     switch (g.kind) {
       case 'link':
       case 'relink':
         setLinkCursor(null);
         setLinkTarget(null);
-        break;
-      case 'drag':
-        store().cancelDrag();
-        setReadout(null);
         break;
       case 'resize':
         store().cancelResize();
@@ -470,7 +483,8 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     () =>
       keyboardRouter.registerCanvas('flat', {
         cancelActiveGesture: () => routerApiRef.current.cancel(),
-        hasActiveGesture: () => gesture.current.kind !== 'none',
+        hasActiveGesture: () =>
+          gesture.current.kind !== 'none' || machine.current.phase !== 'idle',
         handleKey: (e) => routerApiRef.current.key(e),
         handleKeyUp: (e) => {
           if (e.code === 'Space') setSpaceHeld(false);
@@ -557,6 +571,79 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         : { x: dx, y: dy },
     [projection],
   );
+
+  // ── Machine dispatch + per-gesture effect table (strangler) ─────────────
+  // The reducer owns lifecycle (capture, threshold, cancellation, second-
+  // pointer policy); these handlers own the store semantics per gesture.
+  viewportRef.current = viewport;
+  const runMachineEffect = (ef: MachineEffect): void => {
+    switch (ef.kind) {
+      case 'capture':
+        capturePointer(svgRef.current, ef.pointerId);
+        break;
+      case 'release':
+        try {
+          svgRef.current?.releasePointerCapture?.(ef.pointerId);
+        } catch {
+          /* not captured here — fine */
+        }
+        break;
+      case 'begin':
+        if (ef.gesture === 'drag') store().beginDrag();
+        break;
+      case 'update':
+        if (ef.gesture === 'drag') {
+          const scale = viewportRef.current.scale;
+          const d = toFlatVec(ef.dx / scale, ef.dy / scale);
+          store().dragTo(d.x, d.y, ef.alt, scale);
+          const firstId = [...store().selection][0];
+          const m = firstId
+            ? (store().getDevice(firstId) ?? store().getObject(firstId))
+            : undefined;
+          if (m)
+            setReadout({ sx: ef.x, sy: ef.y, text: `${Math.round(m.x)}, ${Math.round(m.y)}` });
+        }
+        break;
+      case 'commit':
+        if (ef.gesture === 'drag') {
+          store().endDrag();
+          store().runValidation();
+          setReadout(null);
+        }
+        break;
+      case 'cancel':
+        if (ef.gesture === 'drag') {
+          store().cancelDrag();
+          setReadout(null);
+        }
+        break;
+      case 'click':
+        if (ef.gesture === 'drag') {
+          // A press that never crossed the threshold: selection resolves on
+          // release (isolate / shift-toggle), unchanged semantics.
+          const s = store();
+          const pc = ef.data as { members: string[]; shift: boolean; addedOnDown: boolean };
+          if (pc.shift) {
+            if (!pc.addedOnDown) {
+              const next = new Set(s.selection);
+              for (const m of pc.members) next.delete(m);
+              s.select([...next], false);
+            }
+          } else {
+            s.select(pc.members, false);
+          }
+          setReadout(null);
+        }
+        break;
+      default:
+        break; // pinch*/swallowClick arrive with later migrations (M4a/marquee)
+    }
+  };
+  dispatchRef.current = (e: MachineEvent, mods?: { alt?: boolean; shift?: boolean }) => {
+    const r = reduce(machine.current, e, mods);
+    machine.current = r.state;
+    for (const ef of r.effects) runMachineEffect(ef);
+  };
 
   // Fit a flat box into view, projecting it first when isometric.
   const fitFlatBox = useCallback(
@@ -681,6 +768,20 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
 
   const onDevicePointerDown = useCallback(
     (e: React.PointerEvent, id: string) => {
+      // A second pointer while the machine owns a gesture → its policy
+      // (touch cancels into pinch; mouse/pen buttons are ignored).
+      if (machine.current.phase !== 'idle') {
+        e.stopPropagation();
+        const { sx, sy } = localPoint(e);
+        dispatchRef.current({
+          type: 'down',
+          pointerId: e.pointerId,
+          pointerType: e.pointerType as PointerKind,
+          x: sx,
+          y: sy,
+        });
+        return;
+      }
       // Only the left button selects/drags a cell. Middle/right bubble to the
       // root so they pan (draw.io: right-drag pans anywhere) or open the menu.
       if (e.button !== 0) return;
@@ -703,7 +804,6 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         return;
       }
       e.stopPropagation();
-      capturePointer(svgRef.current, e.pointerId);
       const s = store();
       // Clicking a grouped device selects the whole group (Phase 1 grouping).
       const members = s.groupMembers(id);
@@ -720,15 +820,18 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       } else if (!already) {
         s.select(members, false); // select just this (group)
       }
-      // NOTE: beginDrag is deferred until movement crosses DRAG_THRESHOLD.
+      // MIGRATED: drag runs on the input machine — capture, the 4px
+      // threshold, buttons validation, and cancellation are all owned there.
       const { sx, sy } = localPoint(e);
-      gesture.current = {
-        kind: 'drag',
-        startX: sx,
-        startY: sy,
-        moved: false,
-        pending: { members, shift: e.shiftKey, addedOnDown },
-      };
+      dispatchRef.current({
+        type: 'arm',
+        gesture: 'drag',
+        data: { members, shift: e.shiftKey, addedOnDown },
+        pointerId: e.pointerId,
+        pointerType: e.pointerType as PointerKind,
+        x: sx,
+        y: sy,
+      });
     },
     [spaceHeld, store, localPoint, startLinkFrom, setPending, readOnly],
   );
@@ -736,6 +839,18 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   const onRootPointerDown = useCallback(
     (e: React.PointerEvent) => {
       const { sx, sy } = localPoint(e);
+      // Machine-owned gesture in flight → second-pointer policy, never a
+      // parallel legacy gesture.
+      if (machine.current.phase !== 'idle') {
+        dispatchRef.current({
+          type: 'down',
+          pointerId: e.pointerId,
+          pointerType: e.pointerType as PointerKind,
+          x: sx,
+          y: sy,
+        });
+        return;
+      }
       // Capture on the SVG (where the move/up handlers live) so they keep firing
       // during a pan — capturing the parent div would exclude the svg from the
       // event path and silently break drag-panning.
@@ -792,6 +907,14 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
 
   const onPointerMove = useCallback(
     (e: React.PointerEvent) => {
+      if (machine.current.phase !== 'idle') {
+        const { sx, sy } = localPoint(e);
+        dispatchRef.current(
+          { type: 'move', pointerId: e.pointerId, buttons: e.buttons, x: sx, y: sy },
+          { alt: altHeld.current, shift: e.shiftKey },
+        );
+        return;
+      }
       const g = gesture.current;
       if (g.kind === 'pan') {
         setViewport((v) => pan(v, -(e.clientX - g.lastX), -(e.clientY - g.lastY)));
@@ -833,26 +956,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         });
         return;
       }
-      if (g.kind === 'drag') {
-        // Below threshold this is still a click — don't move anything yet.
-        if (!g.moved) {
-          if (Math.hypot(sx - g.startX, sy - g.startY) < DRAG_THRESHOLD) return;
-          store().beginDrag(); // snapshot origins now that a real drag starts
-          g.moved = true;
-          gesture.current = g;
-        }
-        const d = toFlatVec(
-          (sx - g.startX) / viewport.scale,
-          (sy - g.startY) / viewport.scale,
-        );
-        store().dragTo(d.x, d.y, altHeld.current, viewport.scale);
-        const firstId = [...store().selection][0];
-        const m = firstId
-          ? (store().getDevice(firstId) ?? store().getObject(firstId))
-          : undefined;
-        if (m) setReadout({ sx, sy, text: `${Math.round(m.x)}, ${Math.round(m.y)}` });
-        return;
-      }
+      // ('drag' is machine-owned now — see the dispatch guard at the top.)
       if (g.kind === 'marquee' || g.kind === 'shape') {
         setMarquee({
           x: Math.min(g.startX, sx),
@@ -876,6 +980,10 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
 
   const onPointerUp = useCallback(
     (e: React.PointerEvent) => {
+      if (machine.current.phase !== 'idle') {
+        dispatchRef.current({ type: 'up', pointerId: e.pointerId }, { shift: e.shiftKey });
+        return;
+      }
       const g = gesture.current;
       gesture.current = { kind: 'none' };
       // Pointer capture auto-releases on pointerup; release defensively in case
@@ -899,27 +1007,8 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         store().endResize();
         return;
       }
-      if (g.kind === 'drag') {
-        if (g.moved) {
-          store().endDrag();
-          store().runValidation();
-        } else {
-          // A click (no drag): resolve selection on release.
-          const s = store();
-          const pc = g.pending;
-          if (pc.shift) {
-            if (!pc.addedOnDown) {
-              // Shift-click an already-selected item → toggle it off.
-              const next = new Set(s.selection);
-              for (const m of pc.members) next.delete(m);
-              s.select([...next], false);
-            }
-          } else {
-            // Plain click → isolate this item/group (collapse any multi-selection).
-            s.select(pc.members, false);
-          }
-        }
-      } else if (g.kind === 'link') {
+      // ('drag' commit/click resolution is machine-owned — effect table above.)
+      if (g.kind === 'link') {
         const target = linkTarget;
         cancelLink();
         const cm = getConnectMode();
