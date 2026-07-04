@@ -52,27 +52,6 @@ import { isoProjectPx, isoUnprojectPx, type IsoTile } from './iso';
 import type { Box } from '@/lib/spatial-index';
 import styles from './Canvas.module.css';
 
-// Legacy gesture union — kinds migrate one by one onto src/input/machine.ts
-// (drag, marquee, lasso, shape already live there); this shrinks to nothing
-// by end of M1.
-type Gesture =
-  | { kind: 'none' }
-  | { kind: 'pan'; lastX: number; lastY: number; button: number; moved: boolean }
-  | {
-      kind: 'resize';
-      id: string;
-      handle: Handle;
-      orig: { x: number; y: number; width: number; height: number };
-    }
-  | {
-      kind: 'waypoint';
-      linkId: string;
-      index: number;
-      origBefore: { x: number; y: number }[];
-    };
-
-/** Pointer travel (screen px) before a press becomes a drag rather than a click. */
-
 /**
  * Capture the pointer on the SVG (which owns the move/up handlers) so a gesture
  * keeps tracking even if the cursor leaves the element. Capturing the parent div
@@ -182,14 +161,14 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   const [linkTarget, setLinkTarget] = useState<string | null>(null);
   const [pendingSource, setPendingSource] = useState<string | null>(null);
   const pendingSourceRef = useRef<string | null>(null);
-  const gesture = useRef<Gesture>({ kind: 'none' });
   // Swallows inertial trackpad wheel events after an Escape-cancel.
   const momentum = useRef(new MomentumGuard());
-  // ── Input-machine adapter (strangler) ────────────────────────────────────
-  // Migrated gesture kinds run on the pure machine in src/input/machine.ts;
-  // legacy kinds still use gesture.current. Exactly one system owns any
-  // given pointer sequence: handlers check `machine.current.phase` first.
+  // ── Input-machine adapter ────────────────────────────────────────────────
+  // ALL gesture kinds run on the pure machine in src/input/machine.ts; the
+  // legacy gesture ref is gone (end of the M1 strangler migration).
   const machine = useRef<MachineState>(IDLE);
+  // Previous pan position (incremental viewport deltas between updates).
+  const panPrev = useRef({ x: 0, y: 0 });
   // Assigned each render (below, after its dependencies exist) so handlers
   // and the router shim always dispatch with fresh closures.
   const dispatchRef = useRef<
@@ -429,35 +408,10 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   // machine migration swaps its case here for the machine path.
   const cancelActiveGesture = useCallback(() => {
     momentum.current.block(performance.now());
-    // Machine-owned gestures cancel through the reducer (effects restore
-    // the store and release capture).
-    if (machine.current.phase !== 'idle') {
-      dispatchRef.current({ type: 'escape' });
-      return;
-    }
-    const g = gesture.current;
-    gesture.current = { kind: 'none' };
-    switch (g.kind) {
-      case 'resize':
-        store().cancelResize();
-        setReadout(null);
-        break;
-      case 'waypoint': {
-        // The live waypoint drag coalesces into one history entry; restoring
-        // the original bends collapses it to an identity update. (The
-        // waypoint machine migration replaces this with a transient path.)
-        const cur = store().getLink(g.linkId)?.waypoints ?? [];
-        store().updateLink(
-          g.linkId,
-          { waypoints: cur },
-          { waypoints: g.origBefore },
-        );
-        break;
-      }
-      default:
-        break; // 'pan' and 'none': nothing to revert
-    }
-  }, [store]);
+    // ALL gestures are machine-owned: cancel through the reducer — its
+    // effects restore the store and release capture.
+    if (machine.current.phase !== 'idle') dispatchRef.current({ type: 'escape' });
+  }, []);
 
   // Register with the router. The ref indirection keeps registration stable
   // across renders (and StrictMode-idempotent) while handlers stay fresh.
@@ -467,8 +421,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     () =>
       keyboardRouter.registerCanvas('flat', {
         cancelActiveGesture: () => routerApiRef.current.cancel(),
-        hasActiveGesture: () =>
-          gesture.current.kind !== 'none' || machine.current.phase !== 'idle',
+        hasActiveGesture: () => machine.current.phase !== 'idle',
         handleKey: (e) => routerApiRef.current.key(e),
         handleKeyUp: (e) => {
           if (e.code === 'Space') setSpaceHeld(false);
@@ -573,7 +526,13 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         }
         break;
       case 'begin':
-        if (ef.gesture === 'drag') store().beginDrag();
+        if (ef.gesture === 'drag') {
+          store().beginDrag();
+        } else if (ef.gesture === 'resize') {
+          store().beginResize((ef.data as { id: string }).id);
+        } else if (ef.gesture === 'pan') {
+          panPrev.current = { x: ef.x, y: ef.y };
+        }
         break;
       case 'update':
         if (ef.gesture === 'drag') {
@@ -605,6 +564,34 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           const hit = store().hitTest(c.x, c.y);
           const target = hit.find((id) => id !== excl && store().getDevice(id));
           setLinkTarget(target ?? null);
+        } else if (ef.gesture === 'pan') {
+          const prev = panPrev.current;
+          panPrev.current = { x: ef.x, y: ef.y };
+          setViewport((v) => pan(v, -(ef.x - prev.x), -(ef.y - prev.y)));
+        } else if (ef.gesture === 'resize') {
+          const d = ef.data as {
+            id: string;
+            handle: Handle;
+            orig: { x: number; y: number; width: number; height: number };
+          };
+          const c = toFlat(ef.x, ef.y);
+          const box = resizeBox(d.orig, d.handle, c.x, c.y, (v) => snap(v, ef.alt));
+          store().resizeTo(box);
+          setReadout({
+            sx: ef.x,
+            sy: ef.y,
+            text: `${Math.round(box.width)} × ${Math.round(box.height)}`,
+          });
+        } else if (ef.gesture === 'waypoint') {
+          const d = ef.data as {
+            linkId: string;
+            index: number;
+            origBefore: { x: number; y: number }[];
+          };
+          const c = toFlat(ef.x, ef.y);
+          const wps = [...(store().getLink(d.linkId)?.waypoints ?? [])];
+          wps[d.index] = { x: c.x, y: c.y };
+          store().updateLink(d.linkId, { waypoints: d.origBefore }, { waypoints: wps });
         }
         break;
       case 'commit':
@@ -689,6 +676,17 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           // Drop on a valid device → re-wire; drop in air or on the other
           // endpoint (relinkEndpoint rejects self-loop) → snap back.
           if (target) store().relinkEndpoint(d.linkId, d.endpoint, target);
+        } else if (ef.gesture === 'pan') {
+          const d = ef.data as { button: number; startX: number; startY: number };
+          // A right-drag that actually panned must not pop the context menu.
+          if (d.button === 2 && Math.hypot(ef.x - d.startX, ef.y - d.startY) > 2) {
+            suppressMenu.current = true;
+          }
+        } else if (ef.gesture === 'resize') {
+          store().endResize();
+          setReadout(null);
+        } else if (ef.gesture === 'waypoint') {
+          store().endEdit();
         }
         break;
       case 'cancel':
@@ -702,6 +700,22 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         } else if (ef.gesture === 'link' || ef.gesture === 'relink') {
           setLinkCursor(null);
           setLinkTarget(null);
+        } else if (ef.gesture === 'resize') {
+          store().cancelResize();
+          setReadout(null);
+        } else if (ef.gesture === 'waypoint') {
+          const d = ef.data as {
+            linkId: string;
+            origBefore: { x: number; y: number }[];
+          };
+          // Restore the pre-drag bends; the live drag coalesced into one
+          // history entry, so this collapses it to an identity update.
+          const cur = store().getLink(d.linkId)?.waypoints ?? [];
+          store().updateLink(
+            d.linkId,
+            { waypoints: cur },
+            { waypoints: d.origBefore },
+          );
         }
         break;
       case 'click':
@@ -815,19 +829,35 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     [toFlat, store],
   );
 
+  const armWaypoint = useCallback(
+    (
+      e: React.PointerEvent,
+      linkId: string,
+      index: number,
+      origBefore: { x: number; y: number }[],
+    ) => {
+      const { sx, sy } = localPoint(e);
+      dispatchRef.current({
+        type: 'arm',
+        gesture: 'waypoint',
+        data: { linkId, index, origBefore },
+        immediate: true, // bends track the pointer from the press
+        pointerId: e.pointerId,
+        pointerType: e.pointerType as PointerKind,
+        x: sx,
+        y: sy,
+      });
+    },
+    [localPoint],
+  );
+
   const onWaypointDown = useCallback(
     (e: React.PointerEvent, linkId: string, index: number) => {
       e.stopPropagation();
-      capturePointer(svgRef.current, e.pointerId);
       const link = store().getLink(linkId);
-      gesture.current = {
-        kind: 'waypoint',
-        linkId,
-        index,
-        origBefore: [...(link?.waypoints ?? [])],
-      };
+      armWaypoint(e, linkId, index, [...(link?.waypoints ?? [])]);
     },
-    [store],
+    [store, armWaypoint],
   );
 
   const onAddWaypoint = useCallback(
@@ -838,14 +868,13 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       point: { x: number; y: number },
     ) => {
       e.stopPropagation();
-      capturePointer(svgRef.current, e.pointerId);
       const before = [...(store().getLink(linkId)?.waypoints ?? [])];
       const after = [...before];
       after.splice(segIndex, 0, { x: point.x, y: point.y });
       store().updateLink(linkId, { waypoints: before }, { waypoints: after });
-      gesture.current = { kind: 'waypoint', linkId, index: segIndex, origBefore: before };
+      armWaypoint(e, linkId, segIndex, before);
     },
-    [store],
+    [store, armWaypoint],
   );
 
   const onRemoveWaypoint = useCallback(
@@ -864,18 +893,21 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   const onResizeHandleDown = useCallback(
     (e: React.PointerEvent, id: string, handle: Handle) => {
       e.stopPropagation();
-      capturePointer(svgRef.current, e.pointerId);
       const o = store().getObject(id);
       if (!o) return;
-      store().beginResize(id);
-      gesture.current = {
-        kind: 'resize',
-        id,
-        handle,
-        orig: { x: o.x, y: o.y, width: o.width, height: o.height },
-      };
+      const { sx, sy } = localPoint(e);
+      dispatchRef.current({
+        type: 'arm',
+        gesture: 'resize',
+        data: { id, handle, orig: { x: o.x, y: o.y, width: o.width, height: o.height } },
+        immediate: true, // handles track from the press
+        pointerId: e.pointerId,
+        pointerType: e.pointerType as PointerKind,
+        x: sx,
+        y: sy,
+      });
     },
-    [store],
+    [store, localPoint],
   );
 
   const onDevicePointerDown = useCallback(
@@ -963,11 +995,10 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         });
         return;
       }
-      // Capture on the SVG (where the move/up handlers live) so they keep firing
-      // during a pan — capturing the parent div would exclude the svg from the
-      // event path and silently break drag-panning.
-      capturePointer(svgRef.current, e.pointerId);
-      // Pan with: Space-held, middle button, right button (draw.io), or Hand tool.
+      // Pan with: Space-held, middle button, right button (draw.io), or Hand
+      // tool. MIGRATED: pan runs on the machine (immediate arm — it starts at
+      // press; the machine's capture effect targets the svg, which is what
+      // keeps move/up firing off-element).
       if (
         readOnly ||
         spaceHeld ||
@@ -975,13 +1006,16 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         e.button === 2 ||
         store().mode === 'pan'
       ) {
-        gesture.current = {
-          kind: 'pan',
-          lastX: e.clientX,
-          lastY: e.clientY,
-          button: e.button,
-          moved: false,
-        };
+        dispatchRef.current({
+          type: 'arm',
+          gesture: 'pan',
+          data: { button: e.button, startX: sx, startY: sy },
+          immediate: true,
+          pointerId: e.pointerId,
+          pointerType: e.pointerType as PointerKind,
+          x: sx,
+          y: sy,
+        });
         return;
       }
       if (e.button !== 0) return; // any other non-left press: ignore
@@ -1053,35 +1087,10 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         );
         return;
       }
-      const g = gesture.current;
-      if (g.kind === 'pan') {
-        setViewport((v) => pan(v, -(e.clientX - g.lastX), -(e.clientY - g.lastY)));
-        gesture.current = { ...g, lastX: e.clientX, lastY: e.clientY, moved: true };
-        return;
-      }
+      // All gesture kinds are machine-owned (dispatch guard above).
+      // Idle: track hovered device so the connect handle can appear.
       const { sx, sy } = localPoint(e);
       const canvasPt = toFlat(sx, sy);
-
-      if (g.kind === 'waypoint') {
-        const wps = [...(store().getLink(g.linkId)?.waypoints ?? [])];
-        wps[g.index] = { x: canvasPt.x, y: canvasPt.y };
-        store().updateLink(g.linkId, { waypoints: g.origBefore }, { waypoints: wps });
-        return;
-      }
-      if (g.kind === 'resize') {
-        const box = resizeBox(g.orig, g.handle, canvasPt.x, canvasPt.y, (v) =>
-          snap(v, altHeld.current),
-        );
-        store().resizeTo(box);
-        setReadout({
-          sx,
-          sy,
-          text: `${Math.round(box.width)} × ${Math.round(box.height)}`,
-        });
-        return;
-      }
-      // (drag/marquee/lasso/shape are machine-owned — dispatch guard above.)
-      // Idle: track hovered device so the connect handle can appear.
       const hit = store().hitTest(canvasPt.x, canvasPt.y);
       const top = hit.find((id) => store().getDevice(id)) ?? null;
       if (top !== hoveredId) setHoveredId(top);
@@ -1095,31 +1104,14 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         dispatchRef.current({ type: 'up', pointerId: e.pointerId }, { shift: e.shiftKey });
         return;
       }
-      const g = gesture.current;
-      gesture.current = { kind: 'none' };
-      // Pointer capture auto-releases on pointerup; release defensively in case
-      // it was taken on the svg (pan) or a child (drag), ignoring if neither.
+      // All gesture kinds commit through the machine's effect table. A
+      // machine-idle release is just a stray up: release capture defensively.
       try {
         (e.currentTarget as Element).releasePointerCapture?.(e.pointerId);
       } catch {
         /* not captured here — fine */
       }
       setReadout(null);
-      if (g.kind === 'pan') {
-        // A right-drag that actually panned should not pop the context menu.
-        if (g.button === 2 && g.moved) suppressMenu.current = true;
-        return;
-      }
-      if (g.kind === 'waypoint') {
-        store().endEdit();
-        return;
-      }
-      if (g.kind === 'resize') {
-        store().endResize();
-        return;
-      }
-      // (drag/marquee/lasso/shape/link/relink commit via the machine's
-      // effect table — only pan/resize/waypoint remain legacy.)
     },
     [store, marquee, linkTarget, lassoPts, setPending, toFlat],
   );
@@ -1352,7 +1344,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   }, [projection]);
 
   const svgClass = `${styles.svg} ${
-    gesture.current.kind === 'pan'
+    machine.current.gesture === 'pan' && machine.current.phase !== 'idle'
       ? styles.panning
       : spaceHeld || mode === 'pan'
         ? styles.panMode
@@ -1384,7 +1376,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           // (OS interrupt, element churn). pointerup fires lostpointercapture
           // too, but by then the up handler already reset gesture to 'none',
           // so this is a no-op on the normal path.
-          if (gesture.current.kind !== 'none') cancelActiveGesture();
+          if (machine.current.phase !== 'idle') cancelActiveGesture();
         }}
         onPointerLeave={() => setHoveredId(null)}
         onDoubleClick={onCanvasDoubleClick}
@@ -1733,7 +1725,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
             mode === 'select' &&
             handleDevice &&
             !anyLinkSelected &&
-            gesture.current.kind === 'none' &&
+            machine.current.phase === 'idle' &&
             (() => {
               const c = center(handleDevice);
               const dirs = [
@@ -1800,7 +1792,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
               mode === 'select' &&
               handleDevice &&
               !anyLinkSelected &&
-              gesture.current.kind === 'none' &&
+              machine.current.phase === 'idle' &&
               (() => {
                 const c = center(handleDevice);
                 const dirs = [
