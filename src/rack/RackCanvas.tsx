@@ -22,8 +22,16 @@ export interface RejectInfo {
 import { slotOf } from './rackModel';
 import { deviceFaceParts, deviceOppositeFaceParts, devicePortLayout, rackShellParts, RACK_ART_DEFS } from './rackDeviceArt';
 import { cablePath } from './cablePath';
-import { normalizeRect, devicesInMarquee, MARQUEE_THRESHOLD, type Box } from './marquee';
+import { normalizeRect, devicesInMarquee, type Box } from './marquee';
 import { portAt, portCenter, type PortTarget } from './portHit';
+import {
+  reduce,
+  IDLE,
+  type MachineState,
+  type MachineEvent,
+  type Effect as MachineEffect,
+  type PointerKind,
+} from '@/input/machine';
 import { fit, panBy, zoomAt, zoomTo, type Viewport, IDENTITY } from './viewport';
 import { normalizeWheel, resolveWheel } from '@/input/wheel';
 import { getWheelAction } from '@/lib/prefs';
@@ -58,6 +66,7 @@ export function RackCanvas({
   onSelectCable,
   onMoveTo,
   gestureApi,
+  spaceHeld,
 }: {
   rack: Rack;
   devices: Device[];
@@ -85,6 +94,8 @@ export function RackCanvas({
   onMoveTo: (id: string, u: number) => void;
   /** Filled with cancel/active so the router can Escape-cancel rack gestures. */
   gestureApi?: React.MutableRefObject<RackGestureApi | null>;
+  /** Space+drag pans (contract fallback) — tracked by the designer's key stage. */
+  spaceHeld?: boolean;
 }) {
   const { width, height } = cabinetSize(rack);
   const origin = bayOrigin();
@@ -92,17 +103,20 @@ export function RackCanvas({
   const svgRef = useRef<SVGSVGElement>(null);
   const [hoverU, setHoverU] = useState<number | null>(null);
   const [dragU, setDragU] = useState<number | null>(null); // external drag-from-library
-  const drag = useRef<{ id: string; startY: number; startRu: number } | null>(null);
-  // Marquee (rubber-band) selection. `pending` records the press; it only becomes a real
-  // marquee after crossing MARQUEE_THRESHOLD, so a plain empty click stays a click.
-  const marquee = useRef<{ sx: number; sy: number; active: boolean } | null>(null);
-  const justMarqueed = useRef(false);
   const [marqueeBox, setMarqueeBox] = useState<Box | null>(null);
-  // Drag-to-cable: a press on a port arms a cable; it only becomes a drag after crossing the
-  // threshold (so a tap on a jack still selects the device), then release on another port
-  // connects them.
-  const cableDrag = useRef<{ source: PortTarget; devId: string; additive: boolean; sx: number; sy: number; active: boolean } | null>(null);
   const [cablePt, setCablePt] = useState<{ x: number; y: number } | null>(null);
+  // ── Input-machine adapter: ALL rack gestures (device move, marquee,
+  // port-cable, pan) run on the pure machine in src/input/machine.ts. The
+  // machine works in CLIENT px, so click-vs-drag is 4 CSS px at every zoom
+  // (the old 6-SVG-unit threshold varied 20× across the zoom range), and the
+  // old justMarqueed one-shot flag is replaced by the machine's expiring
+  // click-swallow state.
+  const machine = useRef<MachineState>(IDLE);
+  const dispatchRef = useRef<
+    (e: MachineEvent, mods?: { alt?: boolean; shift?: boolean }) => void
+  >(() => {});
+  const hoverURef = useRef<number | null>(null);
+  const panPrev = useRef({ x: 0, y: 0 });
 
   // ── Pan / zoom viewport (mirrors the multi-rack canvas in RackRow) ───────────
   // The SVG is CSS-transformed; because clientToSvg/yToU read getBoundingClientRect(),
@@ -113,7 +127,6 @@ export function RackCanvas({
   const [vp, setVp] = useState<Viewport>(IDENTITY);
   const vpRef = useRef(vp);
   vpRef.current = vp;
-  const pan = useRef({ active: false, sx: 0, sy: 0, tx: 0, ty: 0 });
   const rectOf = () => containerRef.current?.getBoundingClientRect();
 
   // True after any manual pan/zoom; auto-refits (rack switch, container
@@ -142,21 +155,13 @@ export function RackCanvas({
     return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // Router hook: Escape / Cmd+Z cancel whatever rack gesture is in flight.
+  // Router hook: Escape / Cmd+Z cancel whatever rack gesture is in flight —
+  // straight through the machine (effects restore visuals + release capture).
   useEffect(() => {
     if (!gestureApi) return;
     gestureApi.current = {
-      cancel: () => {
-        drag.current = null;
-        setHoverU(null);
-        marquee.current = null;
-        setMarqueeBox(null);
-        cableDrag.current = null;
-        setCablePt(null);
-        pan.current.active = false;
-      },
-      active: () =>
-        !!(drag.current || marquee.current || cableDrag.current || pan.current.active),
+      cancel: () => dispatchRef.current({ type: 'escape' }),
+      active: () => machine.current.phase !== 'idle',
     };
     return () => {
       if (gestureApi) gestureApi.current = null;
@@ -187,24 +192,56 @@ export function RackCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const onPanDown = (e: React.PointerEvent) => {
-    // Middle OR right drag pans (left button is the editing gesture; the
-    // contract's pan fallbacks apply on every canvas).
-    if (e.button !== 1 && e.button !== 2) return;
-    e.preventDefault();
-    userAdjusted.current = true;
-    pan.current = { active: true, sx: e.clientX, sy: e.clientY, tx: vpRef.current.tx, ty: vpRef.current.ty };
-    containerRef.current?.setPointerCapture?.(e.pointerId);
+  // Container-level pointer routing: the machine owns every gesture; the
+  // container is the single event owner (svg events bubble up to it) and the
+  // capture target, so moves/ups keep arriving off-element.
+  const onContainerDown = (e: React.PointerEvent) => {
+    if (machine.current.phase !== 'idle') {
+      // The gesture's own down bubbles here after an svg-level arm — only a
+      // genuinely NEW pointer is second-pointer policy.
+      if (e.pointerId !== machine.current.pointerId) {
+        dispatchRef.current({
+          type: 'down',
+          pointerId: e.pointerId,
+          pointerType: e.pointerType as PointerKind,
+          x: e.clientX,
+          y: e.clientY,
+        });
+      }
+      return;
+    }
+    // Pan fallbacks (always): middle-drag, right-drag, Space+left-drag.
+    if (e.button === 1 || e.button === 2 || (e.button === 0 && spaceHeld)) {
+      e.preventDefault();
+      dispatchRef.current({
+        type: 'arm',
+        gesture: 'pan',
+        data: null,
+        immediate: true,
+        pointerId: e.pointerId,
+        pointerType: e.pointerType as PointerKind,
+        x: e.clientX,
+        y: e.clientY,
+      });
+    }
   };
-  const onPanMove = (e: React.PointerEvent) => {
-    if (!pan.current.active) return;
-    setVp((v) => ({ ...v, tx: pan.current.tx + (e.clientX - pan.current.sx), ty: pan.current.ty + (e.clientY - pan.current.sy) }));
+  const onContainerMove = (e: React.PointerEvent) => {
+    if (machine.current.phase !== 'idle') {
+      dispatchRef.current(
+        { type: 'move', pointerId: e.pointerId, buttons: e.buttons, x: e.clientX, y: e.clientY },
+        { shift: e.shiftKey },
+      );
+      return;
+    }
+    // Idle + armed preset: the placement preview follows the pointer.
+    if (armed) setHoverU(yToU(e.clientY));
   };
-  const onPanUp = (e: React.PointerEvent) => {
-    if (!pan.current.active) return;
-    pan.current.active = false;
-    containerRef.current?.releasePointerCapture?.(e.pointerId);
+  const onContainerUp = (e: React.PointerEvent) => {
+    if (machine.current.phase !== 'idle') {
+      dispatchRef.current({ type: 'up', pointerId: e.pointerId }, { shift: e.shiftKey });
+    }
   };
+  const onContainerCancel = () => dispatchRef.current({ type: 'cancel' });
   const zoomStep = (k: number) => {
     userAdjusted.current = true;
     const r = rectOf();
@@ -235,110 +272,174 @@ export function RackCanvas({
     return Math.max(1, Math.min(rack.ruHeight, rack.ruHeight - fromTop));
   };
 
-  const onBayMove = (e: React.PointerEvent) => {
-    if (cableDrag.current) {
-      const p = clientToSvg(e.clientX, e.clientY);
-      if (!cableDrag.current.active) {
-        if (Math.abs(p.x - cableDrag.current.sx) + Math.abs(p.y - cableDrag.current.sy) <= MARQUEE_THRESHOLD) return;
-        cableDrag.current.active = true;
-      }
-      setCablePt(p);
-      return;
+  // ── Per-gesture effect table (the machine owns lifecycle; this owns rack
+  // semantics). Gestures: 'pan' | 'move' (device) | 'cable' | 'bay'
+  // (marquee / armed placement / empty-click).
+  type CableData = { source: PortTarget; devId: string; additive: boolean };
+  type BayData = { armed: boolean; additive: boolean; sx: number; sy: number };
+  const runMachineEffect = (ef: MachineEffect): void => {
+    switch (ef.kind) {
+      case 'capture':
+        containerRef.current?.setPointerCapture?.(ef.pointerId);
+        break;
+      case 'release':
+        try {
+          containerRef.current?.releasePointerCapture?.(ef.pointerId);
+        } catch {
+          /* not captured here — fine */
+        }
+        break;
+      case 'begin':
+        if (ef.gesture === 'pan') {
+          panPrev.current = { x: ef.x, y: ef.y };
+          userAdjusted.current = true;
+        } else if (ef.gesture === 'move') {
+          const startRu = (ef.data as { startRu: number }).startRu;
+          hoverURef.current = startRu;
+          setHoverU(startRu);
+        }
+        break;
+      case 'update':
+        if (ef.gesture === 'pan') {
+          const prev = panPrev.current;
+          panPrev.current = { x: ef.x, y: ef.y };
+          setVp((v) => panBy(v, ef.x - prev.x, ef.y - prev.y));
+        } else if (ef.gesture === 'move') {
+          const u = yToU(ef.y);
+          hoverURef.current = u;
+          setHoverU(u);
+        } else if (ef.gesture === 'cable') {
+          setCablePt(clientToSvg(ef.x, ef.y));
+        } else if (ef.gesture === 'bay') {
+          const d = ef.data as BayData;
+          if (d.armed) {
+            setHoverU(yToU(ef.y));
+          } else {
+            const p = clientToSvg(ef.x, ef.y);
+            setMarqueeBox(normalizeRect(d.sx, d.sy, p.x, p.y));
+          }
+        }
+        break;
+      case 'commit':
+        if (ef.gesture === 'move') {
+          const u = hoverURef.current;
+          hoverURef.current = null;
+          setHoverU(null);
+          if (u != null) onMoveTo((ef.data as { id: string }).id, u);
+        } else if (ef.gesture === 'cable') {
+          const d = ef.data as CableData;
+          const p = clientToSvg(ef.x, ef.y);
+          const target = portAt(ports, p.x, p.y);
+          if (
+            onConnectPorts &&
+            target &&
+            !(target.deviceId === d.source.deviceId && target.ifaceId === d.source.ifaceId)
+          ) {
+            onConnectPorts(
+              { deviceId: d.source.deviceId, ifaceId: d.source.ifaceId },
+              { deviceId: target.deviceId, ifaceId: target.ifaceId },
+            );
+          }
+          setCablePt(null);
+        } else if (ef.gesture === 'bay') {
+          const d = ef.data as BayData;
+          if (d.armed) {
+            onPlaceAt(yToU(ef.y)); // drag-while-armed places at the release U
+          } else if (marqueeBox && onMarquee) {
+            onMarquee(devicesInMarquee(deviceRects, marqueeBox), d.additive);
+          }
+          setMarqueeBox(null);
+        }
+        break;
+      case 'cancel':
+        if (ef.gesture === 'move') {
+          hoverURef.current = null;
+          setHoverU(null);
+        } else if (ef.gesture === 'cable') {
+          setCablePt(null);
+        } else if (ef.gesture === 'bay') {
+          setMarqueeBox(null);
+        }
+        break;
+      case 'click':
+        if (ef.gesture === 'cable') {
+          const d = ef.data as CableData;
+          onSelect(d.devId, d.additive); // tap on a jack → just select the device
+          setCablePt(null);
+        } else if (ef.gesture === 'bay') {
+          const d = ef.data as BayData;
+          if (d.armed) onPlaceAt(yToU(ef.y));
+          else onSelectCable(null); // click empty space → clear the cable highlight
+        }
+        break;
+      default:
+        break; // pinch*/swallowClick arrive with M4a
     }
-    if (drag.current) {
-      onSelectNudge(e);
-      return;
-    }
-    if (marquee.current) {
-      const p = clientToSvg(e.clientX, e.clientY);
-      if (!marquee.current.active) {
-        if (Math.abs(p.x - marquee.current.sx) + Math.abs(p.y - marquee.current.sy) <= MARQUEE_THRESHOLD) return;
-        marquee.current.active = true; // crossed the threshold → it's a real marquee, capture
-        svgRef.current?.setPointerCapture?.(e.pointerId);
-      }
-      setMarqueeBox(normalizeRect(marquee.current.sx, marquee.current.sy, p.x, p.y));
-      return;
-    }
-    if (armed) setHoverU(yToU(e.clientY));
+  };
+  dispatchRef.current = (e: MachineEvent, mods?: { alt?: boolean; shift?: boolean }) => {
+    const r = reduce(machine.current, e, mods);
+    machine.current = r.state;
+    for (const ef of r.effects) runMachineEffect(ef);
   };
 
   /** Press on empty canvas (devices stopPropagation, so this is bay/background). */
   const onCanvasDown = (e: React.PointerEvent) => {
-    if (armed || e.button !== 0 || !onMarquee) return; // placing or no marquee consumer
+    if (machine.current.phase !== 'idle') return; // container routes second pointers
+    if (e.button !== 0 || spaceHeld) return; // space+left = pan (container arms it)
     const p = clientToSvg(e.clientX, e.clientY);
-    marquee.current = { sx: p.x, sy: p.y, active: false };
-  };
-  const onSelectNudge = (e: React.PointerEvent) => {
-    if (!drag.current) return;
-    setHoverU(yToU(e.clientY));
-  };
-  const onBayClick = (e: React.MouseEvent) => {
-    // A marquee just finished on this press — swallow the trailing click so it doesn't
-    // also clear the cable highlight.
-    if (justMarqueed.current) {
-      justMarqueed.current = false;
-      return;
-    }
-    // Compute the U directly from the click, not from hover state — so a tap or a
-    // click-without-prior-move still lands reliably.
-    if (armed) onPlaceAt(yToU(e.clientY));
-    else onSelectCable(null); // click empty space → clear the highlighted cable
+    dispatchRef.current({
+      type: 'arm',
+      gesture: 'bay',
+      data: {
+        armed,
+        additive: e.shiftKey || e.metaKey || e.ctrlKey,
+        sx: p.x,
+        sy: p.y,
+      },
+      pointerId: e.pointerId,
+      pointerType: e.pointerType as PointerKind,
+      x: e.clientX,
+      y: e.clientY,
+    });
   };
 
   const onDevDown = (e: React.PointerEvent, d: Device) => {
-    if (armed) return; // placing — let the bay handle the click
+    if (machine.current.phase !== 'idle') return; // container routes second pointers
+    if (armed || spaceHeld) return; // placing/panning — the bay/container owns the press
+    if (e.button !== 0) return; // middle/right bubble to the container pan
     e.stopPropagation();
     const additive = e.shiftKey || e.metaKey || e.ctrlKey;
-    // Arbiter priority: a press on a port (jack) ARMS a cable drag, beating device-move. It
-    // only becomes a real drag past the threshold (onBayMove); a tap falls through to select.
+    // Arbiter priority: a press on a port (jack) ARMS a cable drag, beating
+    // device-move; below the 4 CSS px threshold it resolves as a tap-select.
     if (onConnectPorts) {
       const p = clientToSvg(e.clientX, e.clientY);
       const hit = portAt(ports, p.x, p.y);
       if (hit) {
-        cableDrag.current = { source: hit, devId: d.id, additive, sx: p.x, sy: p.y, active: false };
-        svgRef.current?.setPointerCapture?.(e.pointerId); // capture on SVG so moves track across devices
+        dispatchRef.current({
+          type: 'arm',
+          gesture: 'cable',
+          data: { source: hit, devId: d.id, additive } satisfies CableData,
+          swallowTrailingClick: true,
+          pointerId: e.pointerId,
+          pointerType: e.pointerType as PointerKind,
+          x: e.clientX,
+          y: e.clientY,
+        });
         return;
       }
     }
     onSelect(d.id, additive);
-    if (additive) return; // additive = building a multi-selection; don't start a drag/move
-    (e.currentTarget as Element).setPointerCapture(e.pointerId);
-    drag.current = { id: d.id, startY: e.clientY, startRu: d.ru ?? 1 };
-    setHoverU(d.ru ?? 1);
-  };
-  const onDevUp = (e?: React.PointerEvent) => {
-    if (cableDrag.current) {
-      const cd = cableDrag.current;
-      if (cd.active && onConnectPorts) {
-        const p = e ? clientToSvg(e.clientX, e.clientY) : null;
-        const target = p ? portAt(ports, p.x, p.y) : null;
-        if (target && !(target.deviceId === cd.source.deviceId && target.ifaceId === cd.source.ifaceId)) {
-          onConnectPorts(
-            { deviceId: cd.source.deviceId, ifaceId: cd.source.ifaceId },
-            { deviceId: target.deviceId, ifaceId: target.ifaceId },
-          );
-        }
-        justMarqueed.current = true; // a real drag happened — swallow the trailing click
-      } else {
-        onSelect(cd.devId, cd.additive); // tap on a jack → just select the device
-      }
-      cableDrag.current = null;
-      setCablePt(null);
-      return;
-    }
-    if (drag.current && hoverU != null) {
-      onMoveTo(drag.current.id, hoverU);
-    }
-    drag.current = null;
-    setHoverU(null);
-    if (marquee.current?.active && marqueeBox && onMarquee) {
-      const ids = devicesInMarquee(deviceRects, marqueeBox);
-      const additive = !!(e && (e.shiftKey || e.metaKey || e.ctrlKey));
-      onMarquee(ids, additive);
-      justMarqueed.current = true; // suppress the trailing click's cable-clear
-    }
-    marquee.current = null;
-    setMarqueeBox(null);
+    if (additive) return; // additive = building a multi-selection; no move
+    dispatchRef.current({
+      type: 'arm',
+      gesture: 'move',
+      data: { id: d.id, startRu: d.ru ?? 1 },
+      immediate: true, // the drop preview tracks from the press (no threshold)
+      pointerId: e.pointerId,
+      pointerType: e.pointerType as PointerKind,
+      x: e.clientX,
+      y: e.clientY,
+    });
   };
 
   const cssVar = (name: string): string => `var(${name})`;
@@ -362,7 +463,6 @@ export function RackCanvas({
         key={d.id}
         className={styles.devhit}
         onPointerDown={(e) => onDevDown(e, d)}
-        onPointerUp={onDevUp}
         role="button"
         tabIndex={0}
         aria-label={`${d.name}, U${d.ru}${(d.ruSpan ?? 1) > 1 ? `–U${(d.ru ?? 0) + (d.ruSpan ?? 1) - 1}` : ''}`}
@@ -371,6 +471,21 @@ export function RackCanvas({
         <g dangerouslySetInnerHTML={{ __html: deviceFaceParts(d, panel, side).join('') }} />
         {/* transparent hit area so the whole panel drags/selects */}
         <rect x={panel.x} y={panel.y} width={panel.w} height={panel.h} fill="transparent" />
+        {/* per-jack markers: hit-testing uses portAt(); these exist so e2e
+            specs (and devtools) can FIND ports — the old "no stable
+            selectors" excuse for skipping cabling e2e is retired */}
+        {jacks.map((j) => (
+          <rect
+            key={`port-${d.id}-${j.ifaceId}`}
+            data-port={`${d.id}:${j.ifaceId}`}
+            x={j.x}
+            y={j.y}
+            width={j.w}
+            height={j.h}
+            fill="transparent"
+            pointerEvents="none"
+          />
+        ))}
         {isSel && (
           <rect x={panel.x} y={panel.y} width={panel.w} height={panel.h} rx={3}
             fill="none" style={{ stroke: cssVar('--accent'), strokeWidth: 2 }} pointerEvents="none" />
@@ -402,9 +517,13 @@ export function RackCanvas({
     <div
       ref={containerRef}
       className={styles.rackEditCanvas}
-      onPointerDown={onPanDown}
-      onPointerMove={onPanMove}
-      onPointerUp={onPanUp}
+      onPointerDown={onContainerDown}
+      onPointerMove={onContainerMove}
+      onPointerUp={onContainerUp}
+      onPointerCancel={onContainerCancel}
+      onLostPointerCapture={() => {
+        if (machine.current.phase !== 'idle') dispatchRef.current({ type: 'lostcapture' });
+      }}
       onContextMenu={(e) => e.preventDefault() /* right-drag pans; no menu here */}
     >
     <svg
@@ -416,9 +535,6 @@ export function RackCanvas({
       viewBox={`0 0 ${width} ${height}`}
       style={{ transformOrigin: '0 0', transform: `translate(${vp.tx}px, ${vp.ty}px) scale(${vp.scale})` }}
       onPointerDown={onCanvasDown}
-      onPointerMove={onBayMove}
-      onClick={onBayClick}
-      onPointerUp={onDevUp}
       onDragOver={(e) => {
         if (!e.dataTransfer.types.includes('text/rack-preset')) return;
         e.preventDefault();
@@ -521,7 +637,8 @@ export function RackCanvas({
 
       {/* drop / move preview — click-arm, device-drag, OR drag-from-library */}
       {(() => {
-        const previewU = dragU ?? (armed || drag.current ? hoverU : null);
+        const previewU =
+          dragU ?? (armed || machine.current.gesture === 'move' ? hoverU : null);
         if (previewU == null) return null;
         return (
           <rect
@@ -567,23 +684,25 @@ export function RackCanvas({
           pointerEvents="none"
         />
       )}
-      {cablePt && cableDrag.current?.active && (
-        <g pointerEvents="none">
-          {ports.map((pt, i) => {
-            const c = portCenter(pt);
-            return <circle key={`pt-${i}`} cx={c.x} cy={c.y} r={3} fill="var(--accent)" opacity={0.55} />;
-          })}
-          <line
-            x1={portCenter(cableDrag.current.source).x}
-            y1={portCenter(cableDrag.current.source).y}
-            x2={cablePt.x}
-            y2={cablePt.y}
-            stroke="var(--accent)"
-            strokeWidth={2}
-            strokeDasharray="5 3"
-          />
-        </g>
-      )}
+      {cablePt &&
+        machine.current.gesture === 'cable' &&
+        machine.current.phase === 'active' && (
+          <g pointerEvents="none">
+            {ports.map((pt, i) => {
+              const c = portCenter(pt);
+              return <circle key={`pt-${i}`} cx={c.x} cy={c.y} r={3} fill="var(--accent)" opacity={0.55} />;
+            })}
+            <line
+              x1={portCenter((machine.current.data as { source: PortTarget }).source).x}
+              y1={portCenter((machine.current.data as { source: PortTarget }).source).y}
+              x2={cablePt.x}
+              y2={cablePt.y}
+              stroke="var(--accent)"
+              strokeWidth={2}
+              strokeDasharray="5 3"
+            />
+          </g>
+        )}
     </svg>
       <div className={styles.zoomControls}>
         <button onClick={() => zoomStep(1 / 1.2)} aria-label="Zoom out" title="Zoom out">−</button>

@@ -242,7 +242,13 @@ export function RackDesigner() {
   // Declared BEFORE the no-racks early return so hook order stays stable;
   // nudge()/deleteSelected() are hoisted function declarations.
   const rackGestureApi = useRef<RackGestureApi | null>(null);
+  const [spaceHeld, setSpaceHeld] = useState(false);
   const handleRackKey = (e: KeyboardEvent): boolean => {
+    if (e.code === 'Space') {
+      e.preventDefault();
+      setSpaceHeld(true);
+      return true;
+    }
     if (e.key === 'Escape') {
       // Innermost-only, one layer per press: armed preset → highlighted
       // cable → selection (behavior change 3, rack side).
@@ -286,7 +292,9 @@ export function RackDesigner() {
         cancelActiveGesture: () => rackGestureApi.current?.cancel(),
         hasActiveGesture: () => rackGestureApi.current?.active() ?? false,
         handleKey: (e) => rackKeyRef.current(e),
-        handleKeyUp: () => {},
+        handleKeyUp: (e) => {
+          if (e.code === 'Space') setSpaceHeld(false);
+        },
       }),
     [],
   );
@@ -998,6 +1006,7 @@ export function RackDesigner() {
             <div className={styles.focusCanvasWrap}>
               <RackCanvas
                 gestureApi={rackGestureApi}
+                spaceHeld={spaceHeld}
                 rack={rack}
                 devices={devices}
                 cables={cables}
