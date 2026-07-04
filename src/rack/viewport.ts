@@ -13,7 +13,9 @@ export interface Viewport {
 
 export const IDENTITY: Viewport = { scale: 1, tx: 0, ty: 0 };
 
-export const MIN_SCALE = 0.2;
+// Unified with the flat canvas (pointer-native plan): same floor/ceiling on
+// every canvas so the zoom range feels identical app-wide.
+export const MIN_SCALE = 0.1;
 export const MAX_SCALE = 4;
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -21,8 +23,9 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 /**
  * Zoom by `factor` while keeping the content point under the cursor (px, py — container px)
  * pinned in place. This is what makes wheel-zoom feel anchored instead of drifting.
+ * Signature matches canvas/viewport.ts (vp, factor, x, y) — one zoomAt shape app-wide.
  */
-export function zoomAt(vp: Viewport, px: number, py: number, factor: number): Viewport {
+export function zoomAt(vp: Viewport, factor: number, px: number, py: number): Viewport {
   const scale = clamp(vp.scale * factor, MIN_SCALE, MAX_SCALE);
   const k = scale / vp.scale; // effective change after clamping
   return {
@@ -39,7 +42,7 @@ export function panBy(vp: Viewport, dx: number, dy: number): Viewport {
 
 /** Set an explicit zoom level centered on the viewport middle. */
 export function zoomTo(vp: Viewport, scale: number, viewW: number, viewH: number): Viewport {
-  return zoomAt(vp, viewW / 2, viewH / 2, clamp(scale, MIN_SCALE, MAX_SCALE) / vp.scale);
+  return zoomAt(vp, clamp(scale, MIN_SCALE, MAX_SCALE) / vp.scale, viewW / 2, viewH / 2);
 }
 
 /**

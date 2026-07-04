@@ -5,7 +5,7 @@ describe('zoomAt — cursor stays pinned', () => {
   it('keeps the world point under the cursor fixed when zooming', () => {
     const vp = { scale: 1, tx: 50, ty: 20 };
     const before = toWorld(vp, 200, 150);
-    const after = zoomAt(vp, 200, 150, 1.5);
+    const after = zoomAt(vp, 1.5, 200, 150);
     const afterWorld = toWorld(after, 200, 150);
     expect(afterWorld.x).toBeCloseTo(before.x, 6);
     expect(afterWorld.y).toBeCloseTo(before.y, 6);
@@ -13,8 +13,12 @@ describe('zoomAt — cursor stays pinned', () => {
   });
 
   it('clamps scale to [MIN, MAX] and adjusts translate by the effective factor', () => {
-    expect(zoomAt(IDENTITY, 0, 0, 100).scale).toBe(MAX_SCALE);
-    expect(zoomAt(IDENTITY, 0, 0, 0.001).scale).toBe(MIN_SCALE);
+    expect(zoomAt(IDENTITY, 100, 0, 0).scale).toBe(MAX_SCALE);
+    expect(zoomAt(IDENTITY, 0.001, 0, 0).scale).toBe(MIN_SCALE);
+  });
+
+  it('floor matches the flat canvas (0.1) — one zoom range app-wide', () => {
+    expect(MIN_SCALE).toBe(0.1);
   });
 });
 

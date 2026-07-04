@@ -9,7 +9,9 @@
  */
 import { useRef, useState, useEffect } from 'react';
 import type { Device, Rack, RackCable } from '@/model/types';
-import { fit, zoomAt, zoomTo, type Viewport, IDENTITY } from './viewport';
+import { fit, panBy, zoomAt, zoomTo, type Viewport, IDENTITY } from './viewport';
+import { normalizeWheel, resolveWheel } from '@/input/wheel';
+import { getWheelAction } from '@/lib/prefs';
 import {
   cabinetSize,
   bayOrigin,
@@ -235,22 +237,31 @@ export function RackRow({
     fitNow();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // Wheel-zoom toward the cursor (non-passive so we can preventDefault the page scroll).
+  // Wheel contract (shared with the flat canvas): plain wheel PANS by default
+  // per DA-DES-5.1, ctrl/pinch zooms at the cursor; the Settings wheelAction
+  // pref flips plain wheel to zoom.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const r = el.getBoundingClientRect();
-      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-      setVp((v) => zoomAt(v, e.clientX - r.left, e.clientY - r.top, factor));
+      const n = normalizeWheel(e);
+      const intent = resolveWheel(n, getWheelAction());
+      if (intent.kind === 'zoom') {
+        const r = el.getBoundingClientRect();
+        setVp((v) => zoomAt(v, intent.factor, e.clientX - r.left, e.clientY - r.top));
+      } else {
+        setVp((v) => panBy(v, -intent.dx, -intent.dy));
+      }
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
   function onPointerDown(e: React.PointerEvent) {
-    if (e.button !== 0) return;
+    // Left pans behind a 4px threshold (click-to-drill survives); middle and
+    // right pan too (the contract's always-on fallbacks).
+    if (e.button !== 0 && e.button !== 1 && e.button !== 2) return;
     // Don't capture the pointer yet — capturing on pointerdown retargets the click to the
     // container and would break click-to-drill-in on rack faces. Capture only once an actual
     // drag starts (in onPointerMove past the threshold).
@@ -266,13 +277,26 @@ export function RackRow({
     }
     if (pan.current.moved) setVp((v) => ({ ...v, tx: pan.current.tx + dx, ty: pan.current.ty + dy }));
   }
+  const suppressMenu = useRef(false);
   function onPointerUp(e: React.PointerEvent) {
     pan.current.active = false;
     containerRef.current?.releasePointerCapture?.(e.pointerId);
+    if (e.button !== 0) {
+      // Right: suppress the imminent contextmenu after a real pan. Middle:
+      // nothing follows — reset so `moved` can't swallow a later left click.
+      suppressMenu.current = pan.current.moved && e.button === 2;
+      pan.current.moved = false;
+    }
   }
   // If the pointer actually dragged, swallow the click so a pan doesn't also focus a rack.
   function onClickCapture(e: React.MouseEvent) {
     if (pan.current.moved) { e.stopPropagation(); pan.current.moved = false; }
+  }
+  function onContextMenu(e: React.MouseEvent) {
+    if (suppressMenu.current) {
+      e.preventDefault();
+      suppressMenu.current = false;
+    }
   }
   const zoomStep = (k: number) => {
     const r = rect();
@@ -287,6 +311,7 @@ export function RackRow({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onClickCapture={onClickCapture}
+      onContextMenu={onContextMenu}
     >
       <svg
         width={width}

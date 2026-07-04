@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Device, Rack, RackCable } from '@/model/types';
 import {
   cabinetSize,
@@ -24,6 +24,9 @@ import { deviceFaceParts, deviceOppositeFaceParts, devicePortLayout, rackShellPa
 import { cablePath } from './cablePath';
 import { normalizeRect, devicesInMarquee, MARQUEE_THRESHOLD, type Box } from './marquee';
 import { portAt, portCenter, type PortTarget } from './portHit';
+import { fit, panBy, zoomAt, zoomTo, type Viewport, IDENTITY } from './viewport';
+import { normalizeWheel, resolveWheel } from '@/input/wheel';
+import { getWheelAction } from '@/lib/prefs';
 import styles from './RackDesigner.module.css';
 
 /**
@@ -90,6 +93,70 @@ export function RackCanvas({
   // connects them.
   const cableDrag = useRef<{ source: PortTarget; devId: string; additive: boolean; sx: number; sy: number; active: boolean } | null>(null);
   const [cablePt, setCablePt] = useState<{ x: number; y: number } | null>(null);
+
+  // ── Pan / zoom viewport (mirrors the multi-rack canvas in RackRow) ───────────
+  // The SVG is CSS-transformed; because clientToSvg/yToU read getBoundingClientRect(),
+  // which already reflects the post-transform geometry, the hit-testing math needs no
+  // changes. Wheel zooms toward the cursor; MIDDLE-mouse drags pan (left button is owned
+  // by marquee / device-drag / port-cable, so panning must not steal it).
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [vp, setVp] = useState<Viewport>(IDENTITY);
+  const vpRef = useRef(vp);
+  vpRef.current = vp;
+  const pan = useRef({ active: false, sx: 0, sy: 0, tx: 0, ty: 0 });
+  const rectOf = () => containerRef.current?.getBoundingClientRect();
+
+  function fitNow() {
+    const r = rectOf();
+    if (r) setVp(fit(width, height, r.width, r.height));
+  }
+  // Fit once on mount (content + container measured by then).
+  useEffect(() => {
+    fitNow();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Wheel contract (shared with the flat canvas): plain wheel PANS by default
+  // per DA-DES-5.1, ctrl/pinch zooms at the cursor, and the Settings
+  // wheelAction pref flips plain wheel to zoom for those who want it.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const n = normalizeWheel(e);
+      const intent = resolveWheel(n, getWheelAction());
+      if (intent.kind === 'zoom') {
+        const r = el.getBoundingClientRect();
+        setVp((v) => zoomAt(v, intent.factor, e.clientX - r.left, e.clientY - r.top));
+      } else {
+        setVp((v) => panBy(v, -intent.dx, -intent.dy));
+      }
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  const onPanDown = (e: React.PointerEvent) => {
+    // Middle OR right drag pans (left button is the editing gesture; the
+    // contract's pan fallbacks apply on every canvas).
+    if (e.button !== 1 && e.button !== 2) return;
+    e.preventDefault();
+    pan.current = { active: true, sx: e.clientX, sy: e.clientY, tx: vpRef.current.tx, ty: vpRef.current.ty };
+    containerRef.current?.setPointerCapture?.(e.pointerId);
+  };
+  const onPanMove = (e: React.PointerEvent) => {
+    if (!pan.current.active) return;
+    setVp((v) => ({ ...v, tx: pan.current.tx + (e.clientX - pan.current.sx), ty: pan.current.ty + (e.clientY - pan.current.sy) }));
+  };
+  const onPanUp = (e: React.PointerEvent) => {
+    if (!pan.current.active) return;
+    pan.current.active = false;
+    containerRef.current?.releasePointerCapture?.(e.pointerId);
+  };
+  const zoomStep = (k: number) => {
+    const r = rectOf();
+    setVp((v) => zoomTo(v, v.scale * k, r?.width ?? 800, r?.height ?? 600));
+  };
 
   const mounted = devices.filter((d) => d.rackId === rack.id && d.ru != null);
   const portCenters = new Map<string, { x: number; y: number }>(); // `${devId}:${ifaceId}`
@@ -279,6 +346,14 @@ export function RackCanvas({
   const panels = mounted.filter((d) => slotOf(d).side === side).map(renderPanel);
 
   return (
+    <div
+      ref={containerRef}
+      className={styles.rackEditCanvas}
+      onPointerDown={onPanDown}
+      onPointerMove={onPanMove}
+      onPointerUp={onPanUp}
+      onContextMenu={(e) => e.preventDefault() /* right-drag pans; no menu here */}
+    >
     <svg
       ref={svgRef}
       data-testid="rack-canvas"
@@ -286,6 +361,7 @@ export function RackCanvas({
       width={width}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
+      style={{ transformOrigin: '0 0', transform: `translate(${vp.tx}px, ${vp.ty}px) scale(${vp.scale})` }}
       onPointerDown={onCanvasDown}
       onPointerMove={onBayMove}
       onClick={onBayClick}
@@ -456,5 +532,12 @@ export function RackCanvas({
         </g>
       )}
     </svg>
+      <div className={styles.zoomControls}>
+        <button onClick={() => zoomStep(1 / 1.2)} aria-label="Zoom out" title="Zoom out">−</button>
+        <span>{Math.round(vp.scale * 100)}%</span>
+        <button onClick={() => zoomStep(1.2)} aria-label="Zoom in" title="Zoom in">+</button>
+        <button onClick={fitNow} aria-label="Fit to screen" title="Fit to screen">⊡</button>
+      </div>
+    </div>
   );
 }

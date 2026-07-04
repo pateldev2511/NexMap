@@ -606,6 +606,29 @@
 .panCanvas:active {
   cursor: grabbing;
 }
+
+/*
+ * Focused single-rack editor canvas. Unlike .panCanvas (the multi-rack row view, which
+ * flexes inside a height-bounded column), this lives in the scrolling .stage. The SVG's
+ * CSS transform scales it visually but does NOT reflow, so without an explicit bounded
+ * height the box grows to the rack's full untransformed height (~1290px for 42U) and the
+ * zoom controls fall below the fold. Bound it to the viewport so fit-to-screen shows the
+ * whole rack and the controls stay visible. Left-drag is select/marquee here (pan is
+ * middle-mouse), so no grab cursor.
+ */
+.rackEditCanvas {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  /* Fills .focusCanvasWrap (flex:1), so the canvas tracks the available viewport height. */
+  flex: 1;
+  min-height: 360px;
+  touch-action: none;
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--chrome-bg) 82%, transparent);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+}
 .zoomControls {
   position: absolute;
   bottom: 12px;
@@ -1050,12 +1073,16 @@
 
 .focusCanvasWrap {
   width: 100%;
-  overflow: auto;
+  /* Fill the leftover stage height so the canvas inside flexes to fit the viewport and
+     its zoom controls stay on screen (the .stage column scrolls; min-height:0 lets this
+     shrink rather than push the canvas below the fold). */
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   justify-content: safe center;
-  align-items: flex-start;
-  min-height: 0;
-  padding: 8px 0 28px;
+  align-items: stretch;
+  padding: 8px 0;
 }
 
 .rackMiniStats {
