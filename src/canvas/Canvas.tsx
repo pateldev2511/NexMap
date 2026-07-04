@@ -6,6 +6,7 @@ import { CanvasSearch } from './CanvasSearch';
 import { MiniMap } from './MiniMap';
 import { getConnectMode, getWheelAction } from '@/lib/prefs';
 import { normalizeWheel, resolveWheel, MomentumGuard } from '@/input/wheel';
+import { keyboardRouter } from '@/input/router';
 import { DeviceNode } from './DeviceNode';
 import { IsoDeviceNode } from './IsoDeviceNode';
 import { DEFAULT_LABEL_HEIGHT } from './nodeCard';
@@ -259,9 +260,14 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     return () => ro.disconnect();
   }, []);
 
-  useEffect(() => {
-    const down = (e: KeyboardEvent) => {
-      if (isTextTarget(e.target) || readOnly) return; // no keyboard editing in presentation
+  // ── Keyboard: canvas-shortcut stage of the shared router ─────────────────
+  // The old window listener, strangler-migrated onto keyboardRouter. Text
+  // targets never reach this (the router steps aside for them), and Escape /
+  // Cmd+Z during an in-flight gesture is consumed by the router's gesture-
+  // cancel stage (cancelActiveGesture below) BEFORE this runs.
+  const handleCanvasKey = useCallback(
+    (e: KeyboardEvent): boolean => {
+      if (readOnly) return false; // no keyboard editing in presentation
       const mod = e.metaKey || e.ctrlKey;
 
       // Viewport + selection shortcuts (viewport lives here in the canvas).
@@ -271,73 +277,73 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         setViewport(
           fitToBox(projection === 'iso' ? projectFlatBox(cb) : cb, size.w, size.h),
         );
-        return;
+        return true;
       }
       if (mod && (e.key === '=' || e.key === '+')) {
         e.preventDefault();
         setViewport((v) => zoomAt(v, 1.2, size.w / 2, size.h / 2));
-        return;
+        return true;
       }
       if (mod && e.key === '-') {
         e.preventDefault();
         setViewport((v) => zoomAt(v, 1 / 1.2, size.w / 2, size.h / 2));
-        return;
+        return true;
       }
       if (mod && (e.key === 'a' || e.key === 'A')) {
         e.preventDefault();
         store().selectAll();
-        return;
+        return true;
       }
       if (mod && (e.key === 'd' || e.key === 'D')) {
         e.preventDefault();
         store().duplicateSelection();
         store().runValidation();
-        return;
+        return true;
       }
       if (mod && (e.key === 'c' || e.key === 'C')) {
         e.preventDefault();
         store().copySelection();
-        return;
+        return true;
       }
       if (mod && (e.key === 'x' || e.key === 'X')) {
         e.preventDefault();
         store().cutSelection();
         store().runValidation();
-        return;
+        return true;
       }
       if (mod && (e.key === 'v' || e.key === 'V')) {
         e.preventDefault();
         store().paste();
         store().runValidation();
-        return;
+        return true;
       }
       if (mod && (e.key === 'g' || e.key === 'G')) {
         e.preventDefault();
         if (e.shiftKey) store().ungroupSelection();
         else store().groupSelection();
-        return;
+        return true;
       }
       if (mod && e.key === ']') {
         e.preventDefault();
         store().bringForward();
-        return;
+        return true;
       }
       if (mod && e.key === '[') {
         e.preventDefault();
         store().sendBackward();
-        return;
+        return true;
       }
       if (mod && (e.key === 'f' || e.key === 'F')) {
         e.preventDefault();
         setSearchOpen(true);
-        return;
+        return true;
       }
       if (mod && e.shiftKey && (e.key === 'l' || e.key === 'L')) {
         e.preventDefault();
         store().autoLayout();
-        return;
+        return true;
       }
-      if (mod) return; // leave other mod combos to the app-level handler
+      if (mod) return false; // other mod combos → the app-level stage
 
       // Zoom to fit the current selection.
       if (e.key === '2' && store().selection.size > 0) {
@@ -347,7 +353,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           setViewport(
             fitToBox(projection === 'iso' ? projectFlatBox(b) : b, size.w, size.h),
           );
-        return;
+        return true;
       }
 
       // Arrow-key nudge: 1px, or one grid step with Shift (DA-DES — keyboard move).
@@ -357,50 +363,122 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
         const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
         store().nudgeSelection(dx, dy);
-        return;
+        return true;
       }
 
       if (e.code === 'Space') {
         e.preventDefault();
         setSpaceHeld(true);
+        return true;
       }
-      if (e.key === 'Alt') altHeld.current = true;
+      if (e.key === 'Alt') {
+        altHeld.current = true;
+        return false; // modifier tracking only — never consume Alt
+      }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
         store().deleteSelection();
         store().runValidation();
+        return true;
       }
-      if (e.key === 'v' || e.key === 'V') store().setMode('select');
-      if (e.key === 'q' || e.key === 'Q') store().setMode('lasso');
-      if (e.key === 'h' || e.key === 'H') store().setMode('pan');
-      if (e.key === 't' || e.key === 'T') store().setMode('text');
-      if (e.key === 'r' || e.key === 'R') store().setMode('shape');
+      if (e.key === 'v' || e.key === 'V') return store().setMode('select'), true;
+      if (e.key === 'q' || e.key === 'Q') return store().setMode('lasso'), true;
+      if (e.key === 'h' || e.key === 'H') return store().setMode('pan'), true;
+      if (e.key === 't' || e.key === 'T') return store().setMode('text'), true;
+      if (e.key === 'r' || e.key === 'R') return store().setMode('shape'), true;
       if (e.key === 'c' || e.key === 'C' || e.key === 'l' || e.key === 'L')
-        store().setMode('connect');
+        return store().setMode('connect'), true;
       if (e.key === 'Escape') {
-        if (gesture.current.kind === 'link' || gesture.current.kind === 'relink') cancelLink();
-        gesture.current = { kind: 'none' };
+        // Innermost-only (behavior change 3): any in-flight gesture was
+        // already cancelled by the router before this stage. One layer per
+        // press: armed visuals / pending click-connect → tool mode →
+        // selection. Never all at once.
         momentum.current.block(performance.now()); // eat the trackpad tail
-        setMarquee(null);
-        setLassoPts(null);
-        setPending(null);
-        store().setMode('select');
-        store().clearSelection();
+        if (marquee || lassoPts || pendingSourceRef.current) {
+          setMarquee(null);
+          setLassoPts(null);
+          setPending(null);
+          return true;
+        }
+        if (store().mode !== 'select') {
+          store().setMode('select');
+          return true;
+        }
+        if (store().selection.size > 0) {
+          store().clearSelection();
+          return true;
+        }
+        return false;
       }
-    };
-    const up = (e: KeyboardEvent) => {
-      if (e.code === 'Space') setSpaceHeld(false);
-      if (e.key === 'Alt') altHeld.current = false;
-    };
-    window.addEventListener('keydown', down);
-    window.addEventListener('keyup', up);
-    return () => {
-      window.removeEventListener('keydown', down);
-      window.removeEventListener('keyup', up);
-    };
-    // Re-bind when size/projection change so Cmd+0/zoom use current dimensions.
+      return false;
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store, size, readOnly, projection]);
+    [store, size, readOnly, projection, marquee, lassoPts],
+  );
+
+  // Gesture-cancel shim over the legacy gesture ref: reverts whatever is in
+  // flight WITHOUT touching history (store.cancelDrag/cancelResize), so the
+  // router can consume Escape / Cmd+Z safely mid-gesture. Each per-gesture
+  // machine migration swaps its case here for the machine path.
+  const cancelActiveGesture = useCallback(() => {
+    const g = gesture.current;
+    gesture.current = { kind: 'none' };
+    momentum.current.block(performance.now());
+    switch (g.kind) {
+      case 'link':
+      case 'relink':
+        setLinkCursor(null);
+        setLinkTarget(null);
+        break;
+      case 'drag':
+        store().cancelDrag();
+        setReadout(null);
+        break;
+      case 'resize':
+        store().cancelResize();
+        setReadout(null);
+        break;
+      case 'waypoint': {
+        // The live waypoint drag coalesces into one history entry; restoring
+        // the original bends collapses it to an identity update. (The
+        // waypoint machine migration replaces this with a transient path.)
+        const cur = store().getLink(g.linkId)?.waypoints ?? [];
+        store().updateLink(
+          g.linkId,
+          { waypoints: cur },
+          { waypoints: g.origBefore },
+        );
+        break;
+      }
+      case 'marquee':
+      case 'shape':
+        setMarquee(null);
+        break;
+      case 'lasso':
+        setLassoPts(null);
+        break;
+      default:
+        break; // 'pan' and 'none': nothing to revert
+    }
+  }, [store]);
+
+  // Register with the router. The ref indirection keeps registration stable
+  // across renders (and StrictMode-idempotent) while handlers stay fresh.
+  const routerApiRef = useRef({ key: handleCanvasKey, cancel: cancelActiveGesture });
+  routerApiRef.current = { key: handleCanvasKey, cancel: cancelActiveGesture };
+  useEffect(
+    () =>
+      keyboardRouter.registerCanvas('flat', {
+        cancelActiveGesture: () => routerApiRef.current.cancel(),
+        hasActiveGesture: () => gesture.current.kind !== 'none',
+        handleKey: (e) => routerApiRef.current.key(e),
+        handleKeyUp: (e) => {
+          if (e.code === 'Space') setSpaceHeld(false);
+          if (e.key === 'Alt') altHeld.current = false;
+        },
+      }),
+    [],
+  );
 
   useEffect(() => {
     const el = rootRef.current;
@@ -699,7 +777,10 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         setLassoPts([{ x: sx, y: sy }]);
         return;
       }
-      if (!e.shiftKey) store().clearSelection();
+      // Deselection resolves on RELEASE (like device clicks): a committed
+      // marquee replaces the selection via boxSelect, an unmoved click
+      // clears it in onPointerUp, and an Escape-cancelled marquee leaves
+      // the existing selection untouched (behavior change 3).
       gesture.current = { kind: 'marquee', startX: sx, startY: sy, additive: e.shiftKey };
       setMarquee({ x: sx, y: sy, w: 0, h: 0 });
     },
@@ -867,6 +948,11 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         const fb = flatBoxFromScreenRect(marquee, toFlat);
         if (marquee.w > 2 || marquee.h > 2) {
           store().boxSelect(fb, g.additive);
+        } else if (!g.additive) {
+          // Unmoved press on empty canvas = a plain click: deselect on
+          // release (moved here from pointerdown so Escape-cancel preserves
+          // the selection — behavior change 3).
+          store().clearSelection();
         }
         setMarquee(null);
       } else if (g.kind === 'lasso') {
@@ -2022,9 +2108,3 @@ function selectionBounds(s: ProjectStore): RBox | null {
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 
-function isTextTarget(t: EventTarget | null): boolean {
-  const el = t as HTMLElement | null;
-  if (!el) return false;
-  const tag = el.tagName;
-  return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
-}

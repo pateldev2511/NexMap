@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { keyboardRouter } from '@/input/router';
 import styles from './ContextMenu.module.css';
 
 export interface MenuItem {
@@ -31,15 +32,20 @@ export function ContextMenu({
     const onDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
+    // Escape via the router's OVERLAY layer — the menu is the innermost
+    // thing, so it closes before any gesture/mode/selection Escape runs.
+    const unregister = keyboardRouter.registerOverlay((e) => {
+      if (e.key === 'Escape') {
+        onClose();
+        return true;
+      }
+      return false;
+    });
     window.addEventListener('mousedown', onDown);
-    window.addEventListener('keydown', onKey);
     window.addEventListener('wheel', onClose, { passive: true });
     return () => {
+      unregister();
       window.removeEventListener('mousedown', onDown);
-      window.removeEventListener('keydown', onKey);
       window.removeEventListener('wheel', onClose);
     };
   }, [onClose]);

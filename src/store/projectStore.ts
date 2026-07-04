@@ -276,6 +276,8 @@ export interface ProjectStore {
   dragTo(dx: number, dy: number, suspendSnap: boolean, scale?: number): void;
   /** Commit the drag as a single undoable entry (no-op if nothing moved). */
   endDrag(): void;
+  /** Abort an in-flight drag: restore origins, record NOTHING in history. */
+  cancelDrag(): void;
   /** Alignment guide lines for the in-flight drag (read during render). */
   alignGuides(): AlignGuide[];
   /** Begin resizing a single object — snapshots its box (transient). */
@@ -284,6 +286,8 @@ export interface ProjectStore {
   resizeTo(box: { x: number; y: number; width: number; height: number }): void;
   /** Commit the resize as a single undoable entry (no-op if unchanged). */
   endResize(): void;
+  /** Abort an in-flight resize: restore the original box, record nothing. */
+  cancelResize(): void;
   connect(sourceId: string, targetId: string): string | null;
   /** Apply imported devices+links as ONE atomic, undoable transaction (DA-T2). */
   importObjects(devices: Device[], links: Link[]): void;
@@ -755,6 +759,19 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       });
     },
 
+    cancelResize() {
+      // Abort path (Escape / pointercancel mid-resize): restore the original
+      // box, record nothing.
+      if (!resizeOrig) return;
+      const { id, box } = resizeOrig;
+      resizeOrig = null;
+      const o = model.objects.get(id);
+      if (!o) return;
+      model.objects.set(id, { ...o, ...box });
+      index.update(id, { x: box.x, y: box.y, width: box.width, height: box.height });
+      set({ rev: get().rev + 1 });
+    },
+
     endDrag() {
       alignGuides = [];
       if (!dragOrigins) return;
@@ -799,6 +816,41 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         canRedo: history.canRedo,
         dirty: true,
       });
+    },
+
+    cancelDrag() {
+      // Escape / Cmd+Z / pointercancel mid-drag: put everything back exactly
+      // where beginDrag found it. No history entry — the gesture never
+      // happened. (Undo-over-live-drag was the stale-dragOrigins corruption;
+      // this is the abort path the keyboard router calls first.)
+      alignGuides = [];
+      if (!dragOrigins) return;
+      for (const [id, origin] of dragOrigins) {
+        const d = model.devices.get(id);
+        if (d) {
+          model.devices.set(id, { ...d, x: origin.x, y: origin.y });
+          index.update(id, { x: origin.x, y: origin.y, width: d.width, height: d.height });
+          continue;
+        }
+        const o = model.objects.get(id);
+        if (o) {
+          model.objects.set(id, { ...o, x: origin.x, y: origin.y });
+          index.update(id, { x: origin.x, y: origin.y, width: o.width, height: o.height });
+        }
+      }
+      if (dragLinkWaypoints) {
+        for (const [linkId, info] of dragLinkWaypoints) {
+          const link = model.links.get(linkId);
+          if (!link) continue;
+          model.links.set(linkId, {
+            ...link,
+            waypoints: info.origins.map((p) => ({ x: p.x, y: p.y })),
+          });
+        }
+      }
+      dragLinkWaypoints = null;
+      dragOrigins = null;
+      set({ rev: get().rev + 1 });
     },
 
     connect(sourceId, targetId) {

@@ -18,6 +18,7 @@ import { AboutDialog } from './ui/dialogs/AboutDialog';
 import { OutlineDialog } from './ui/dialogs/OutlineDialog';
 import { UpdateToast } from './ui/UpdateToast';
 import { CommandPalette, type PaletteCommand } from './ui/CommandPalette';
+import { keyboardRouter } from './input/router';
 import { ValidationAnnouncer } from './ui/ValidationAnnouncer';
 import { applyReduceMotion, getReduceMotion } from './lib/prefs';
 import { ReadOnlyBanner, ErrorToast, NoticeToast } from './ui/dialogs/ReadOnlyBanner';
@@ -303,56 +304,69 @@ export function App() {
     </>
   );
 
+  // App-shortcut stage of the shared keyboard router (one window listener
+  // app-wide). Text fields never reach this — Cmd+Z while typing is native
+  // text undo, not model undo — and Cmd+Z mid-drag is consumed by the
+  // router's gesture-cancel stage before it can pop history.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey)) return;
-      const k = e.key.toLowerCase();
-      if (k === 'z') {
-        e.preventDefault();
-        if (e.shiftKey) doRedo();
-        else doUndo();
-      } else if (k === 's') {
-        e.preventDefault();
-        void persistence.save();
-      } else if (k === 'o') {
-        e.preventDefault();
-        void handleOpen();
-      } else if (k === 'e') {
-        e.preventDefault();
-        setExporting(true);
-      } else if (k === 'k') {
-        e.preventDefault();
-        setShowPalette((p) => !p);
+    keyboardRouter.install();
+    const unregister = keyboardRouter.registerApp((e) => {
+      if (e.metaKey || e.ctrlKey) {
+        const k = e.key.toLowerCase();
+        if (k === 'z') {
+          e.preventDefault();
+          if (e.shiftKey) doRedo();
+          else doUndo();
+          return true;
+        }
+        if (k === 's') {
+          e.preventDefault();
+          void persistence.save();
+          return true;
+        }
+        if (k === 'o') {
+          e.preventDefault();
+          void handleOpen();
+          return true;
+        }
+        if (k === 'e') {
+          e.preventDefault();
+          setExporting(true);
+          return true;
+        }
+        if (k === 'k') {
+          e.preventDefault();
+          setShowPalette((p) => !p);
+          return true;
+        }
+        return false;
       }
-    };
-    const onHelp = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement;
-      if (el?.tagName === 'INPUT' || el?.tagName === 'TEXTAREA') return;
       if (e.key === '?') {
         e.preventDefault();
         setShowHelp(true);
+        return true;
       }
-    };
+      return false;
+    });
     const onHelpEvent = () => setShowHelp(true);
-    window.addEventListener('keydown', onKey);
-    window.addEventListener('keydown', onHelp);
     window.addEventListener('nexmap:help', onHelpEvent);
     return () => {
-      window.removeEventListener('keydown', onKey);
-      window.removeEventListener('keydown', onHelp);
+      unregister();
       window.removeEventListener('nexmap:help', onHelpEvent);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [persistence]);
 
-  // Esc exits presentation mode.
+  // Esc exits presentation mode — an OVERLAY, the innermost Escape layer.
   useEffect(() => {
     if (!presentation) return;
-    const onEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setPresentation(false);
-    };
-    window.addEventListener('keydown', onEsc);
-    return () => window.removeEventListener('keydown', onEsc);
+    return keyboardRouter.registerOverlay((e) => {
+      if (e.key === 'Escape') {
+        setPresentation(false);
+        return true;
+      }
+      return false;
+    });
   }, [presentation]);
 
   if (view === 'perf') {
