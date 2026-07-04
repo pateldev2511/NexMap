@@ -251,8 +251,9 @@ export function RackDesigner() {
       return true;
     }
     if (e.key === 'Escape') {
-      // Innermost-only, one layer per press: armed preset → highlighted
-      // cable → selection (behavior change 3, rack side).
+      // Innermost-only, one layer per press: armed cable-source port →
+      // armed preset → highlighted cable → selection (behavior change 3).
+      if (rackGestureApi.current?.clearArmed?.()) return true;
       if (armed) {
         setArmed(null);
         return true;

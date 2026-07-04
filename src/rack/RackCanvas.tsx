@@ -34,7 +34,7 @@ import {
 } from '@/input/machine';
 import { fit, panBy, zoomAt, zoomTo, type Viewport, IDENTITY } from './viewport';
 import { normalizeWheel, resolveWheel } from '@/input/wheel';
-import { getWheelAction } from '@/lib/prefs';
+import { getWheelAction, getConnectMode } from '@/lib/prefs';
 import { consumeRackWheelHint, RACK_WHEEL_HINT_EVENT } from './wheelHint';
 import { markGestureComplete } from '@/input/quiet';
 import { SelectionToolbar, ToolbarSep, toolbarStyles } from '@/ui/SelectionToolbar';
@@ -45,6 +45,9 @@ import { NexIcon } from '@/ui/icons/NexIcon';
 export interface RackGestureApi {
   cancel: () => void;
   active: () => boolean;
+  /** Clear ARMED (not in-flight) state, e.g. a click-to-cable source port.
+      Returns true when something was cleared — Escape-innermost consumes it. */
+  clearArmed?: () => boolean;
 }
 
 /** In-canvas quick actions for the selected DEVICE (M3: toolbar > sidebar). */
@@ -133,6 +136,10 @@ export function RackCanvas({
   const [dragU, setDragU] = useState<number | null>(null); // external drag-from-library
   const [marqueeBox, setMarqueeBox] = useState<Box | null>(null);
   const [cablePt, setCablePt] = useState<{ x: number; y: number } | null>(null);
+  // Click-to-cable (M4e): first tap on a jack arms it as the source; the
+  // next tap on another jack connects — the low-dexterity path (FossFLOW's
+  // proven default), gated on the same connect-mode pref as the flat canvas.
+  const [pendingPort, setPendingPort] = useState<PortTarget | null>(null);
   // ── Input-machine adapter: ALL rack gestures (device move, marquee,
   // port-cable, pan) run on the pure machine in src/input/machine.ts. The
   // machine works in CLIENT px, so click-vs-drag is 4 CSS px at every zoom
@@ -172,6 +179,9 @@ export function RackCanvas({
     fitNow();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rack.id, rack.ruHeight]);
+  // An armed click-to-cable source doesn't survive face/rack switches — its
+  // jack may no longer be visible.
+  useEffect(() => setPendingPort(null), [side, rack.id]);
   // Re-fit on container resize unless the user has taken over the viewport.
   // (Also tracks the container size for floating-toolbar placement.)
   const [csize, setCsize] = useState({ w: 800, h: 600 });
@@ -194,6 +204,11 @@ export function RackCanvas({
     gestureApi.current = {
       cancel: () => dispatchRef.current({ type: 'escape' }),
       active: () => machine.current.phase !== 'idle',
+      clearArmed: () => {
+        if (!pendingPort) return false;
+        setPendingPort(null);
+        return true;
+      },
     };
     return () => {
       if (gestureApi) gestureApi.current = null;
@@ -397,10 +412,31 @@ export function RackCanvas({
       case 'click':
         if (ef.gesture === 'cable') {
           const d = ef.data as CableData;
-          onSelect(d.devId, d.additive); // tap on a jack → just select the device
           setCablePt(null);
+          // Click-to-cable (M4e), same pref as the flat canvas: tap one jack
+          // to arm it, tap another to connect. 'drag' mode keeps taps as
+          // plain device selection.
+          if (getConnectMode() !== 'drag' && onConnectPorts) {
+            if (
+              pendingPort &&
+              !(
+                pendingPort.deviceId === d.source.deviceId &&
+                pendingPort.ifaceId === d.source.ifaceId
+              )
+            ) {
+              onConnectPorts(
+                { deviceId: pendingPort.deviceId, ifaceId: pendingPort.ifaceId },
+                { deviceId: d.source.deviceId, ifaceId: d.source.ifaceId },
+              );
+              setPendingPort(null);
+              break;
+            }
+            setPendingPort(d.source);
+          }
+          onSelect(d.devId, d.additive);
         } else if (ef.gesture === 'bay') {
           const d = ef.data as BayData;
+          setPendingPort(null); // empty click disarms click-to-cable
           if (d.armed) onPlaceAt(yToU(ef.y));
           else onSelectCable(null); // click empty space → clear the cable highlight
         }
@@ -750,6 +786,26 @@ export function RackCanvas({
           height={marqueeBox.h}
           pointerEvents="none"
         />
+      )}
+      {/* Click-to-cable armed source: every jack shows its dot; the armed
+          port carries an accent ring; the next tap connects (M4e). */}
+      {pendingPort && machine.current.phase === 'idle' && (
+        <g pointerEvents="none">
+          {ports.map((pt, i) => {
+            const c = portCenter(pt);
+            return (
+              <circle key={`arm-${i}`} cx={c.x} cy={c.y} r={3} fill="var(--accent)" opacity={0.55} />
+            );
+          })}
+          <circle
+            cx={portCenter(pendingPort).x}
+            cy={portCenter(pendingPort).y}
+            r={6.5}
+            fill="none"
+            stroke="var(--accent)"
+            strokeWidth={2}
+          />
+        </g>
       )}
       {cablePt &&
         machine.current.gesture === 'cable' &&

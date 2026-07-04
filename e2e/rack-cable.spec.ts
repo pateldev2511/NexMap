@@ -89,6 +89,29 @@ test('Escape mid-cable-drag kills the rubber band, creates nothing, and does not
   expect(await cableCount(page)).toBe(before + 1);
 });
 
+test('click-click cabling: tap jack A, tap jack B → cable (M4e)', async ({ page }) => {
+  const before = await cableCount(page);
+  const [a, b] = await twoPorts(page);
+  const ab = (await a.boundingBox())!;
+  const bb = (await b.boundingBox())!;
+
+  await page.mouse.click(ab.x + ab.width / 2, ab.y + ab.height / 2); // arm source
+  await page.mouse.click(bb.x + bb.width / 2, bb.y + bb.height / 2); // connect
+  expect(await cableCount(page)).toBe(before + 1);
+});
+
+test('Escape disarms an armed click-to-cable source', async ({ page }) => {
+  const before = await cableCount(page);
+  const [a, b] = await twoPorts(page);
+  const ab = (await a.boundingBox())!;
+  const bb = (await b.boundingBox())!;
+
+  await page.mouse.click(ab.x + ab.width / 2, ab.y + ab.height / 2); // arm
+  await page.keyboard.press('Escape'); // innermost: disarm the source port
+  await page.mouse.click(bb.x + bb.width / 2, bb.y + bb.height / 2); // re-arms B, no cable
+  expect(await cableCount(page)).toBe(before);
+});
+
 test('a tap on a jack (below threshold) selects the device, no cable', async ({ page }) => {
   const before = await cableCount(page);
   const [a] = await twoPorts(page);
