@@ -405,8 +405,38 @@ export function RackCanvas({
           else onSelectCable(null); // click empty space → clear the cable highlight
         }
         break;
+      case 'pinchStart':
+        userAdjusted.current = true;
+        break;
+      case 'pinchUpdate': {
+        // Two-finger touch (M4a): centroid delta pans, distance ratio zooms
+        // at the centroid. Machine coords are client px → container-relative
+        // for the anchored zoom.
+        const r = rectOf();
+        const ox = r?.left ?? 0;
+        const oy = r?.top ?? 0;
+        const cx = (ef.a.x + ef.b.x) / 2 - ox;
+        const cy = (ef.a.y + ef.b.y) / 2 - oy;
+        const pcx = (ef.prevA.x + ef.prevB.x) / 2 - ox;
+        const pcy = (ef.prevA.y + ef.prevB.y) / 2 - oy;
+        const dist = Math.hypot(ef.a.x - ef.b.x, ef.a.y - ef.b.y);
+        const prevDist = Math.hypot(ef.prevA.x - ef.prevB.x, ef.prevA.y - ef.prevB.y);
+        // Touch points update in ALTERNATING events, so a straight two-finger
+        // pan oscillates the distance slightly — a 1% deadband keeps pans
+        // from creeping the zoom while real pinches (>1%/event) pass through.
+        const ratio = prevDist > 0 ? dist / prevDist : 1;
+        const zooming = Math.abs(ratio - 1) > 0.01;
+        setVp((v) => {
+          const panned = panBy(v, cx - pcx, cy - pcy);
+          return zooming ? zoomAt(panned, ratio, cx, cy) : panned;
+        });
+        break;
+      }
+      case 'pinchEnd':
+        markGestureComplete();
+        break;
       default:
-        break; // pinch*/swallowClick arrive with M4a
+        break; // swallowClick handled via machine state (no DOM click listener)
     }
   };
   dispatchRef.current = (e: MachineEvent, mods?: { alt?: boolean; shift?: boolean }) => {
