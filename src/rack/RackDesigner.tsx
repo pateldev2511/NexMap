@@ -6,6 +6,7 @@ import { buildPdfBlob } from '@/io/export/pdf';
 import { RackCanvas, type RejectInfo, type RackGestureApi } from './RackCanvas';
 import { RackRow } from './RackRow';
 import { keyboardRouter } from '@/input/router';
+import { announce } from '@/ui/announce';
 import { RACK_WHEEL_HINT_EVENT, RACK_WHEEL_HINT_TEXT } from './wheelHint';
 import { ConnectPortsDialog, CABLE_COLORS, type CableSeedEnd } from './ConnectPortsDialog';
 import {
@@ -376,6 +377,7 @@ export function RackDesigner() {
         reason: rejectReason(fit),
         pulseU: nearestFreeU(rack, occ, span, slot.ru, side, useBay, depth),
       });
+      announce(`Placement rejected: ${rejectReason(fit)}`);
       window.setTimeout(() => setReject(null), 2400);
       return;
     }
@@ -432,6 +434,7 @@ export function RackDesigner() {
         reason: rejectReason(fit),
         pulseU: nearestFreeU(rack, others, slot.ruSpan, ru, slot.side, slot.bay, slot.depth),
       });
+      announce(`Move rejected: ${rejectReason(fit)}`);
       window.setTimeout(() => setReject(null), 2400);
     }
   }
@@ -620,6 +623,7 @@ export function RackDesigner() {
     const wanted = Math.max(1, Math.min(sl.ru, target.ruHeight - sl.ruSpan + 1));
     const u = nearestFreeU(target, occ, sl.ruSpan, wanted, sl.side, sl.bay, sl.depth);
     const showReject = (reason: string) => {
+      announce(`Move rejected: ${reason}`);
       setReject({ u: wanted, span: sl.ruSpan, reason, pulseU: null });
       setRowReject(reason);
       window.setTimeout(() => setReject(null), 2400);
@@ -802,12 +806,8 @@ export function RackDesigner() {
           onChange={(e) => setSearch(e.target.value)}
           aria-label="Search device library"
         />
-        <div className={styles.filterPills} aria-label="Gear filters">
-          <span>All</span>
-          <span>Compute</span>
-          <span>Network</span>
-          <span>Power</span>
-        </div>
+        {/* (Dead decorative filter pills deleted — M3: chrome earns its
+            pixels or goes. Search + groups already do the filtering.) */}
         {RACK_PRESET_GROUPS.map((group) => {
           const items = RACK_DEVICE_PRESETS.filter(
             (p) => p.group === group && p.label.toLowerCase().includes(search.trim().toLowerCase()),
@@ -1007,6 +1007,43 @@ export function RackDesigner() {
               <RackCanvas
                 gestureApi={rackGestureApi}
                 spaceHeld={spaceHeld}
+                deviceActions={
+                  selected
+                    ? {
+                        nudge,
+                        unmount: () => {
+                          s().select([selected.id]);
+                          s().unmountFromRack(selected.id);
+                        },
+                        remove: deleteSelected,
+                        racks: racks.map((r) => ({ id: r.id, name: r.name })),
+                        moveToRack: (rid) => {
+                          if (rid !== rack.id) moveDeviceToRack(selected.id, rid);
+                        },
+                      }
+                    : undefined
+                }
+                cableActions={(() => {
+                  const c = selCable ? cables.find((x) => x.id === selCable) : null;
+                  if (!c) return undefined;
+                  return {
+                    setColor: (color: string) =>
+                      s().updateRackCable(c.id, { color: c.color }, { color }),
+                    setLabel: (label: string) =>
+                      s().updateRackCable(c.id, { label: c.label }, { label: label || undefined }),
+                    setLength: (lengthFt: number | null) =>
+                      s().updateRackCable(
+                        c.id,
+                        { lengthFt: c.lengthFt },
+                        { lengthFt: lengthFt ?? undefined },
+                      ),
+                    remove: () => {
+                      s().disconnectRackCable(c.id);
+                      setSelCable(null);
+                    },
+                    colors: [...CABLE_COLORS],
+                  };
+                })()}
                 rack={rack}
                 devices={devices}
                 cables={cables}

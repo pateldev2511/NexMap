@@ -36,11 +36,32 @@ import { fit, panBy, zoomAt, zoomTo, type Viewport, IDENTITY } from './viewport'
 import { normalizeWheel, resolveWheel } from '@/input/wheel';
 import { getWheelAction } from '@/lib/prefs';
 import { consumeRackWheelHint, RACK_WHEEL_HINT_EVENT } from './wheelHint';
+import { SelectionToolbar, ToolbarSep, toolbarStyles } from '@/ui/SelectionToolbar';
+import { placeToolbar } from '@/ui/toolbarPlace';
+import { NexIcon } from '@/ui/icons/NexIcon';
 
 /** Cancel/inspect handle the keyboard router uses for in-flight rack gestures. */
 export interface RackGestureApi {
   cancel: () => void;
   active: () => boolean;
+}
+
+/** In-canvas quick actions for the selected DEVICE (M3: toolbar > sidebar). */
+export interface RackDeviceActions {
+  nudge: (delta: 1 | -1) => void;
+  unmount: () => void;
+  remove: () => void;
+  racks: { id: string; name: string }[];
+  moveToRack: (rackId: string) => void;
+}
+
+/** In-canvas cable editing (M3: THE edit path; the schedule locates). */
+export interface RackCableActions {
+  setColor: (color: string) => void;
+  setLabel: (label: string) => void;
+  setLength: (lengthFt: number | null) => void;
+  remove: () => void;
+  colors: string[];
 }
 import styles from './RackDesigner.module.css';
 
@@ -67,6 +88,8 @@ export function RackCanvas({
   onMoveTo,
   gestureApi,
   spaceHeld,
+  deviceActions,
+  cableActions,
 }: {
   rack: Rack;
   devices: Device[];
@@ -96,6 +119,10 @@ export function RackCanvas({
   gestureApi?: React.MutableRefObject<RackGestureApi | null>;
   /** Space+drag pans (contract fallback) — tracked by the designer's key stage. */
   spaceHeld?: boolean;
+  /** Quick actions for the selected device (renders the floating toolbar). */
+  deviceActions?: RackDeviceActions;
+  /** Inline cable editing (renders the mini-controls at the cable midpoint). */
+  cableActions?: RackCableActions;
 }) {
   const { width, height } = cabinetSize(rack);
   const origin = bayOrigin();
@@ -145,10 +172,14 @@ export function RackCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rack.id, rack.ruHeight]);
   // Re-fit on container resize unless the user has taken over the viewport.
+  // (Also tracks the container size for floating-toolbar placement.)
+  const [csize, setCsize] = useState({ w: 800, h: 600 });
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+    setCsize({ w: el.clientWidth, h: el.clientHeight });
     const ro = new ResizeObserver(() => {
+      setCsize({ w: el.clientWidth, h: el.clientHeight });
       if (!userAdjusted.current) fitNow();
     });
     ro.observe(el);
@@ -507,6 +538,8 @@ export function RackCanvas({
     );
   };
 
+  // Captured while rendering the cable curves; anchors the mini-controls.
+  let selCableControl: { x: number; y: number } | null = null;
   // Ghosts (opposite face, rack-mounted) render BEHIND the live panels.
   const ghosts = mounted
     .filter((d) => slotOf(d).side !== side && slotOf(d).mount !== 'rail')
@@ -604,6 +637,7 @@ export function RackCanvas({
         const sel = c.id === selectedCableId;
         const anySel = selectedCableId != null;
         const { d: dPath, control } = cablePath(a, b, i, false);
+        if (sel) selCableControl = control;
         const op = anySel ? (sel ? 1 : 0.16) : 0.94;
         const w = sel ? 4.4 : 3.1;
         return (
@@ -710,6 +744,236 @@ export function RackCanvas({
         <button onClick={() => zoomStep(1.2)} aria-label="Zoom in" title="Zoom in">+</button>
         <button onClick={fitNow} aria-label="Fit to screen" title="Fit to screen">⊡</button>
       </div>
+      {/* Floating device toolbar (M3): the primary quick-action path. Hidden
+          while a gesture is active. SVG-user coords → container px is pure
+          math (u * scale + translate), so it never lags the transform. */}
+      {deviceActions &&
+        selectedId &&
+        machine.current.phase !== 'active' &&
+        machine.current.phase !== 'pinch' &&
+        (() => {
+          const dr = deviceRects.find((r) => r.id === selectedId);
+          if (!dr) return null;
+          return (
+            <RackDeviceToolbar
+              bbox={{
+                x: dr.box.x * vp.scale + vp.tx,
+                y: dr.box.y * vp.scale + vp.ty,
+                width: dr.box.w * vp.scale,
+                height: dr.box.h * vp.scale,
+              }}
+              vw={csize.w}
+              vh={csize.h}
+              currentRackId={rack.id}
+              actions={deviceActions}
+            />
+          );
+        })()}
+      {/* Cable mini-controls (M3): THE cable edit path — the schedule panel
+          locates; this edits. Anchored below the curve's control point. */}
+      {cableActions &&
+        selectedCableId &&
+        selCableControl &&
+        machine.current.phase !== 'active' &&
+        machine.current.phase !== 'pinch' &&
+        (() => {
+          const cable = cables.find((c) => c.id === selectedCableId);
+          if (!cable) return null;
+          const cx = (selCableControl as { x: number; y: number }).x * vp.scale + vp.tx;
+          const cy = (selCableControl as { x: number; y: number }).y * vp.scale + vp.ty;
+          return (
+            <RackCableControls
+              key={cable.id}
+              anchor={{ x: cx - 10, y: cy - 10, width: 20, height: 20 }}
+              vw={csize.w}
+              vh={csize.h}
+              cable={cable}
+              actions={cableActions}
+            />
+          );
+        })()}
     </div>
+  );
+}
+
+/** Floating quick actions for the selected rack device. */
+function RackDeviceToolbar({
+  bbox,
+  vw,
+  vh,
+  currentRackId,
+  actions,
+}: {
+  bbox: { x: number; y: number; width: number; height: number };
+  vw: number;
+  vh: number;
+  currentRackId: string;
+  actions: RackDeviceActions;
+}) {
+  const [size, setSize] = useState({ width: 240, height: 36 });
+  const pos = placeToolbar(bbox, size, { width: vw, height: vh });
+  return (
+    <SelectionToolbar
+      left={pos.left}
+      top={pos.top}
+      label="Device actions"
+      barRef={(el) => {
+        if (
+          el &&
+          (Math.abs(el.offsetWidth - size.width) > 1 ||
+            Math.abs(el.offsetHeight - size.height) > 1)
+        ) {
+          setSize({ width: el.offsetWidth, height: el.offsetHeight });
+        }
+      }}
+    >
+      <button title="Nudge up 1U" aria-label="Nudge up 1U" onClick={() => actions.nudge(1)}>
+        <NexIcon name="arrow-up" />
+      </button>
+      <button
+        title="Nudge down 1U"
+        aria-label="Nudge down 1U"
+        onClick={() => actions.nudge(-1)}
+      >
+        <NexIcon name="arrow-down" />
+      </button>
+      <ToolbarSep />
+      <select
+        value={currentRackId}
+        onChange={(e) => actions.moveToRack(e.target.value)}
+        disabled={actions.racks.length < 2}
+        aria-label="Move to rack"
+        title="Move to rack"
+      >
+        {actions.racks.map((r) => (
+          <option key={r.id} value={r.id}>
+            {r.name}
+          </option>
+        ))}
+      </select>
+      <ToolbarSep />
+      <button
+        style={{ width: 'auto', padding: '0 8px', fontSize: 11 }}
+        title="Unmount to the tray"
+        onClick={actions.unmount}
+      >
+        Unmount
+      </button>
+      <button title="Delete device" aria-label="Delete device" onClick={actions.remove}>
+        <NexIcon name="trash" />
+      </button>
+    </SelectionToolbar>
+  );
+}
+
+/** Inline cable editing: swatches, label, length (ft), delete. */
+function RackCableControls({
+  anchor,
+  vw,
+  vh,
+  cable,
+  actions,
+}: {
+  anchor: { x: number; y: number; width: number; height: number };
+  vw: number;
+  vh: number;
+  cable: RackCable;
+  actions: RackCableActions;
+}) {
+  const [size, setSize] = useState({ width: 320, height: 36 });
+  const [lenInvalid, setLenInvalid] = useState(false);
+  // cardAbove=true → prefer BELOW the curve (the spec's slot for cables).
+  const pos = placeToolbar(anchor, size, { width: vw, height: vh }, true);
+
+  const commitLength = (raw: string, el: HTMLInputElement) => {
+    const v = raw.trim();
+    if (v === '') {
+      setLenInvalid(false);
+      actions.setLength(null);
+      return;
+    }
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) {
+      setLenInvalid(true); // sev-error border; value not committed
+      return;
+    }
+    setLenInvalid(false);
+    actions.setLength(Math.round(n));
+    el.value = String(Math.round(n));
+  };
+
+  return (
+    <SelectionToolbar
+      left={pos.left}
+      top={pos.top}
+      label="Cable actions"
+      barRef={(el) => {
+        if (
+          el &&
+          (Math.abs(el.offsetWidth - size.width) > 1 ||
+            Math.abs(el.offsetHeight - size.height) > 1)
+        ) {
+          setSize({ width: el.offsetWidth, height: el.offsetHeight });
+        }
+      }}
+    >
+      {actions.colors.map((color) => (
+        <button
+          key={color}
+          title={`Cable color ${color}`}
+          aria-label={`Cable color ${color}`}
+          onClick={() => actions.setColor(color)}
+          style={{
+            width: 18,
+            height: 18,
+            borderRadius: 4,
+            background: color,
+            outline: color === cable.color ? '2px solid var(--accent)' : undefined,
+            outlineOffset: 1,
+          }}
+        />
+      ))}
+      <ToolbarSep />
+      <input
+        aria-label="Cable label"
+        placeholder="label"
+        defaultValue={cable.label ?? ''}
+        style={{ width: 88 }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
+          if (e.key === 'Escape') {
+            // Revert the FIELD only — the cable stays selected.
+            e.stopPropagation();
+            e.currentTarget.value = cable.label ?? '';
+            e.currentTarget.blur();
+          }
+        }}
+        onBlur={(e) => {
+          const v = e.currentTarget.value.trim();
+          if (v !== (cable.label ?? '')) actions.setLabel(v);
+        }}
+      />
+      <input
+        aria-label="Cable length in feet"
+        placeholder="ft"
+        defaultValue={cable.lengthFt != null ? String(cable.lengthFt) : ''}
+        className={lenInvalid ? toolbarStyles.invalid : undefined}
+        style={{ width: 44 }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
+          if (e.key === 'Escape') {
+            e.stopPropagation();
+            e.currentTarget.value = cable.lengthFt != null ? String(cable.lengthFt) : '';
+            setLenInvalid(false);
+            e.currentTarget.blur();
+          }
+        }}
+        onBlur={(e) => commitLength(e.currentTarget.value, e.currentTarget)}
+      />
+      <ToolbarSep />
+      <button title="Delete cable" aria-label="Delete cable" onClick={actions.remove}>
+        <NexIcon name="trash" />
+      </button>
+    </SelectionToolbar>
   );
 }

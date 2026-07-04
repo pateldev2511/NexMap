@@ -38,8 +38,11 @@ test('drag-move onto an occupied U flashes the reason instead of silently no-opi
   await page.mouse.up();
 
   // The rejection is VISIBLE: red slot + reason text (and a pulse at the
-  // nearest free U). Never a silent no-op.
+  // nearest free U). Never a silent no-op. Scoped to the canvas — the same
+  // reason also lives in the hidden screen-reader live region, by design.
   await expect(
-    page.getByText(/That U is occupied|That half-bay is taken|Won't fit there/),
+    page
+      .getByTestId('rack-canvas')
+      .getByText(/That U is occupied|That half-bay is taken|Won't fit there/),
   ).toBeVisible();
 });

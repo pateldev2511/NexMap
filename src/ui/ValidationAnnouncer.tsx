@@ -1,13 +1,26 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useProjectStore } from '@/store/projectStore';
+import { ANNOUNCE_EVENT } from './announce';
 
 /**
  * Screen-reader announcer for validation. The canvas is visual; this gives
  * non-sighted users the same "your diagram has N errors / M warnings" feedback
- * via a polite live region (visually hidden, announced on change).
+ * via a polite live region (visually hidden, announced on change). It also
+ * voices transient canvas feedback routed through announce() — e.g. a
+ * rejected rack drop's reason, which must outlive its 2.4s visual flash.
  */
 export function ValidationAnnouncer() {
   const issues = useProjectStore((s) => s.issues);
+  const [transient, setTransient] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onAnnounce = (e: Event) => {
+      const text = (e as CustomEvent<string>).detail;
+      if (typeof text === 'string' && text) setTransient(text);
+    };
+    window.addEventListener(ANNOUNCE_EVENT, onAnnounce);
+    return () => window.removeEventListener(ANNOUNCE_EVENT, onAnnounce);
+  }, []);
 
   const message = useMemo(() => {
     const errors = issues.filter(
@@ -37,7 +50,7 @@ export function ValidationAnnouncer() {
         border: 0,
       }}
     >
-      {message}
+      {transient ? `${transient} — ${message}` : message}
     </div>
   );
 }
