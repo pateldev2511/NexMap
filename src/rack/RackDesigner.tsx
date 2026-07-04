@@ -927,7 +927,7 @@ export function RackDesigner() {
               const pct = f.totalU > 0 ? Math.round((f.usedU / f.totalU) * 100) : 0;
               const pf = powerFeedAnalysis(devices);
               return (
-                <div className={styles.capacityStrip} role="status" aria-label="Fleet capacity">
+                <div className={styles.capacityStrip} role="status" aria-label="Fleet capacity" data-demote="chrome">
                   <span><small>Racks</small><b>{f.rackCount}</b></span>
                   <span><small>Space</small><b>{f.freeU}U</b><em>{f.usedU}/{f.totalU}U · {pct}% used</em></span>
                   <span><small>Power</small><b>{(f.watts / 1000).toFixed(2)} kW</b><em>{f.maxWatts > 0 ? `/ ${(f.maxWatts / 1000).toFixed(2)} kW cap` : 'uncapped'}</em></span>
@@ -945,7 +945,7 @@ export function RackDesigner() {
               const legend = colorByLegend(devices, colorBy);
               if (legend.length === 0) return null;
               return (
-                <div className={styles.capacityStrip} style={{ marginTop: -6 }} role="group" aria-label="Color legend">
+                <div className={styles.capacityStrip} style={{ marginTop: -6 }} role="group" aria-label="Color legend" data-demote="chrome">
                   {legend.map((e) => (
                     <span key={e.value} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ width: 11, height: 11, borderRadius: 3, background: e.color, display: 'inline-block' }} />
@@ -1075,7 +1075,7 @@ export function RackDesigner() {
       </div>
 
       {/* sidebar */}
-      <div className={styles.side}>
+      <div className={styles.side} data-demote="panel">
         <div className={styles.sec}>
           <h3>{multi ? `Bulk edit · ${selection.size} devices` : 'Selected device'}</h3>
           {multi ? (

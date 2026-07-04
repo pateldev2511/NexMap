@@ -87,3 +87,22 @@ button {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+
+/* ── M3c: earned-quiet chrome demotion ──────────────────────────────────
+   Driven by useQuietChrome via <html data-quiet / data-canvas-hover>.
+   Opacity only (no layout shift, no motion in peripheral vision); the
+   reduced-motion kill switch above makes the transition instant. Hover or
+   keyboard focus always restores full opacity; the active tool button
+   never carries data-demote, so it never dims. */
+[data-demote] {
+  transition: opacity 200ms ease;
+}
+
+:root[data-quiet='true'] [data-demote='chrome']:not(:hover):not(:focus-within),
+:root[data-quiet='true'] [data-demote='chrome-item']:not(:hover):not(:focus-within) {
+  opacity: 0.6;
+}
+
+:root[data-canvas-hover='true'] [data-demote='panel']:not(:hover):not(:focus-within) {
+  opacity: 0.85;
+}

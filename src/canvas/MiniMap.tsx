@@ -75,6 +75,7 @@ export function MiniMap({
       viewBox={`0 0 ${W} ${H}`}
       aria-label="Overview navigator"
       data-canvas-chrome
+      data-demote="chrome"
       onPointerDown={(e) => {
         try {
           svgRef.current?.setPointerCapture(e.pointerId);

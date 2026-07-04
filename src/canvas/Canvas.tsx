@@ -9,6 +9,7 @@ import { SelectionToolbar, ToolbarSep } from '@/ui/SelectionToolbar';
 import { placeToolbar } from '@/ui/toolbarPlace';
 import { normalizeWheel, resolveWheel, MomentumGuard } from '@/input/wheel';
 import { keyboardRouter } from '@/input/router';
+import { markGestureComplete } from '@/input/quiet';
 import {
   reduce,
   IDLE,
@@ -597,6 +598,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         }
         break;
       case 'commit':
+        markGestureComplete(); // earned quiet (M3c)
         if (ef.gesture === 'drag') {
           store().endDrag();
           store().runValidation();
@@ -1360,6 +1362,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     <div
       ref={rootRef}
       className={styles.root}
+      data-canvas-surface
       onDragOver={(e) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'copy';
@@ -1890,7 +1893,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         />
       )}
 
-      <div className={styles.zoomBar} data-canvas-chrome>
+      <div className={styles.zoomBar} data-canvas-chrome data-demote="chrome">
         <button
           onClick={() => setViewport((v) => zoomAt(v, 1 / 1.2, size.w / 2, size.h / 2))}
           aria-label="Zoom out"

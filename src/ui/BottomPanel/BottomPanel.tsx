@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useProjectStore } from '@/store/projectStore';
+import { getPanelOpen, setPanelOpen } from '@/lib/prefs';
 import { NexIcon } from '@/ui/icons/NexIcon';
 import { defaultDeviceName } from '@/model/schema';
 import { severityRank } from '@/model/validate';
@@ -16,7 +17,15 @@ import styles from './BottomPanel.module.css';
 type Tab = 'inventory' | 'links' | 'ipplan' | 'vlans' | 'racks' | 'validation' | 'health';
 
 export function BottomPanel() {
-  const [open, setOpen] = useState(false);
+  // Open/closed survives reloads (M3c). Collapsed, the tab strip stays as a
+  // rail whose per-tab counts ARE the validation badge — issues never hide.
+  const [open, setOpenState] = useState(() => getPanelOpen('bottom', false));
+  const setOpen = (v: boolean | ((o: boolean) => boolean)) =>
+    setOpenState((o) => {
+      const next = typeof v === 'function' ? v(o) : v;
+      setPanelOpen('bottom', next);
+      return next;
+    });
   const [tab, setTab] = useState<Tab>('validation');
   useProjectStore((s) => s.rev); // refresh on model change
   const issues = useProjectStore((s) => s.issues);
@@ -43,7 +52,7 @@ export function BottomPanel() {
   ];
 
   return (
-    <div className={styles.panel}>
+    <div className={styles.panel} data-demote="panel">
       <div className={styles.tabs}>
         {tabs.map((t) => (
           <button

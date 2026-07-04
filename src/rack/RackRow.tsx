@@ -310,6 +310,7 @@ export function RackRow({
     <div
       ref={containerRef}
       className={styles.panCanvas}
+      data-canvas-surface
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -369,7 +370,7 @@ export function RackRow({
           );
         })}
       </svg>
-      <div className={styles.zoomControls}>
+      <div className={styles.zoomControls} data-canvas-chrome data-demote="chrome">
         <button onClick={() => zoomStep(1 / 1.2)} aria-label="Zoom out" title="Zoom out">−</button>
         <span>{Math.round(vp.scale * 100)}%</span>
         <button onClick={() => zoomStep(1.2)} aria-label="Zoom in" title="Zoom in">+</button>

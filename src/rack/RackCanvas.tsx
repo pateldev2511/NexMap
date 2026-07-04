@@ -36,6 +36,7 @@ import { fit, panBy, zoomAt, zoomTo, type Viewport, IDENTITY } from './viewport'
 import { normalizeWheel, resolveWheel } from '@/input/wheel';
 import { getWheelAction } from '@/lib/prefs';
 import { consumeRackWheelHint, RACK_WHEEL_HINT_EVENT } from './wheelHint';
+import { markGestureComplete } from '@/input/quiet';
 import { SelectionToolbar, ToolbarSep, toolbarStyles } from '@/ui/SelectionToolbar';
 import { placeToolbar } from '@/ui/toolbarPlace';
 import { NexIcon } from '@/ui/icons/NexIcon';
@@ -352,6 +353,7 @@ export function RackCanvas({
         }
         break;
       case 'commit':
+        markGestureComplete(); // earned quiet (M3c)
         if (ef.gesture === 'move') {
           const u = hoverURef.current;
           hoverURef.current = null;
@@ -550,6 +552,7 @@ export function RackCanvas({
     <div
       ref={containerRef}
       className={styles.rackEditCanvas}
+      data-canvas-surface
       onPointerDown={onContainerDown}
       onPointerMove={onContainerMove}
       onPointerUp={onContainerUp}
@@ -738,7 +741,7 @@ export function RackCanvas({
           </g>
         )}
     </svg>
-      <div className={styles.zoomControls}>
+      <div className={styles.zoomControls} data-canvas-chrome data-demote="chrome">
         <button onClick={() => zoomStep(1 / 1.2)} aria-label="Zoom out" title="Zoom out">−</button>
         <span>{Math.round(vp.scale * 100)}%</span>
         <button onClick={() => zoomStep(1.2)} aria-label="Zoom in" title="Zoom in">+</button>

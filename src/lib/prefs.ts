@@ -33,6 +33,18 @@ export function setWheelAction(action: WheelAction): void {
   localStorage.setItem(WHEEL_KEY, action);
 }
 
+export type PanelId = 'left' | 'right' | 'bottom';
+
+/** Panel open/closed state survives reloads (M3c: collapse is a choice). */
+export function getPanelOpen(panel: PanelId, fallback: boolean): boolean {
+  const v = localStorage.getItem(`nexmap.panel.${panel}`);
+  return v === null ? fallback : v === '1';
+}
+
+export function setPanelOpen(panel: PanelId, open: boolean): void {
+  localStorage.setItem(`nexmap.panel.${panel}`, open ? '1' : '0');
+}
+
 const RM_KEY = 'nexmap.reduceMotion';
 
 export function getReduceMotion(): boolean {

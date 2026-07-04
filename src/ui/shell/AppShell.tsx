@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { NexIcon } from '@/ui/icons/NexIcon';
+import { getPanelOpen, setPanelOpen } from '@/lib/prefs';
 import { ErrorBoundary } from './ErrorBoundary';
 import styles from './AppShell.module.css';
 
@@ -43,8 +44,10 @@ export function AppShell({
   titleNode,
   fullBleed = false,
 }: AppShellProps) {
-  const [leftOpen, setLeftOpen] = useState(true);
-  const [rightOpen, setRightOpen] = useState(true);
+  // Collapse is a CHOICE — it survives reloads (M3c). The narrow-viewport
+  // auto-collapse is transient and never overwrites the saved preference.
+  const [leftOpen, setLeftOpen] = useState(() => getPanelOpen('left', true));
+  const [rightOpen, setRightOpen] = useState(() => getPanelOpen('right', true));
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 900px)');
@@ -53,14 +56,25 @@ export function AppShell({
         setLeftOpen(false);
         setRightOpen(false);
       } else {
-        setLeftOpen(true);
-        setRightOpen(true);
+        setLeftOpen(getPanelOpen('left', true));
+        setRightOpen(getPanelOpen('right', true));
       }
     };
     sync();
     mq.addEventListener('change', sync);
     return () => mq.removeEventListener('change', sync);
   }, []);
+
+  const toggleLeft = () =>
+    setLeftOpen((v) => {
+      setPanelOpen('left', !v);
+      return !v;
+    });
+  const toggleRight = () =>
+    setRightOpen((v) => {
+      setPanelOpen('right', !v);
+      return !v;
+    });
 
   const collapseLeft = fullBleed || !leftOpen;
   const collapseRight = fullBleed || !rightOpen;
@@ -80,7 +94,7 @@ export function AppShell({
           <div className={styles.panelToggles}>
             <button
               className={styles.topbarBtn}
-              onClick={() => setLeftOpen((v) => !v)}
+              onClick={toggleLeft}
               aria-pressed={leftOpen}
               title={leftOpen ? 'Hide library panel' : 'Show library panel'}
             >
@@ -89,7 +103,7 @@ export function AppShell({
             </button>
             <button
               className={styles.topbarBtn}
-              onClick={() => setRightOpen((v) => !v)}
+              onClick={toggleRight}
               aria-pressed={rightOpen}
               title={rightOpen ? 'Hide inspector panel' : 'Show inspector panel'}
             >
@@ -113,7 +127,11 @@ export function AppShell({
       </main>
 
       {!fullBleed && (
-        <aside className={styles.right} aria-label="Properties inspector">
+        <aside
+          className={styles.right}
+          aria-label="Properties inspector"
+          data-demote="panel"
+        >
           {right ?? <div className={styles.panelHeader}>Inspector</div>}
         </aside>
       )}

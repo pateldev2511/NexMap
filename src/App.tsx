@@ -19,6 +19,7 @@ import { OutlineDialog } from './ui/dialogs/OutlineDialog';
 import { UpdateToast } from './ui/UpdateToast';
 import { CommandPalette, type PaletteCommand } from './ui/CommandPalette';
 import { keyboardRouter } from './input/router';
+import { useQuietChrome } from './ui/useQuietChrome';
 import { ValidationAnnouncer } from './ui/ValidationAnnouncer';
 import { applyReduceMotion, getReduceMotion } from './lib/prefs';
 import { ReadOnlyBanner, ErrorToast, NoticeToast } from './ui/dialogs/ReadOnlyBanner';
@@ -308,6 +309,7 @@ export function App() {
   // app-wide). Text fields never reach this — Cmd+Z while typing is native
   // text undo, not model undo — and Cmd+Z mid-drag is consumed by the
   // router's gesture-cancel stage before it can pop history.
+  useQuietChrome(); // M3c: earned-quiet chrome demotion driver
   useEffect(() => {
     keyboardRouter.install();
     const unregister = keyboardRouter.registerApp((e) => {

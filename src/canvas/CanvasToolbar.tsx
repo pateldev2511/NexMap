@@ -38,6 +38,8 @@ export function CanvasToolbar({
       onClick={() => onMode(m)}
       title={`${title} (${key})`}
       aria-pressed={mode === m}
+      // Earned-quiet demotes per BUTTON so the active tool never dims (M3c).
+      data-demote={mode === m ? undefined : 'chrome-item'}
     >
       <NexIcon name={icon} className={styles.toolIcon} />
       <span className={styles.key}>{key}</span>
@@ -55,6 +57,7 @@ export function CanvasToolbar({
       <span className={styles.divider} />
       <button
         className={`${styles.tool} ${iso ? styles.active : ''}`}
+        data-demote={iso ? undefined : 'chrome-item'}
         onClick={onToggleProjection}
         title={iso ? 'Switch to flat view' : 'Switch to isometric view'}
         aria-pressed={iso}
