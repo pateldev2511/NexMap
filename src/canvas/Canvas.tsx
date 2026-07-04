@@ -53,13 +53,11 @@ import type { Box } from '@/lib/spatial-index';
 import styles from './Canvas.module.css';
 
 // Legacy gesture union — kinds migrate one by one onto src/input/machine.ts
-// ('drag' already lives there); this shrinks to nothing by end of M1.
+// (drag, marquee, lasso, shape already live there); this shrinks to nothing
+// by end of M1.
 type Gesture =
   | { kind: 'none' }
   | { kind: 'pan'; lastX: number; lastY: number; button: number; moved: boolean }
-  | { kind: 'marquee'; startX: number; startY: number; additive: boolean }
-  | { kind: 'lasso'; additive: boolean }
-  | { kind: 'shape'; startX: number; startY: number }
   | {
       kind: 'resize';
       id: string;
@@ -463,13 +461,6 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         );
         break;
       }
-      case 'marquee':
-      case 'shape':
-        setMarquee(null);
-        break;
-      case 'lasso':
-        setLassoPts(null);
-        break;
       default:
         break; // 'pan' and 'none': nothing to revert
     }
@@ -602,6 +593,15 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
             : undefined;
           if (m)
             setReadout({ sx: ef.x, sy: ef.y, text: `${Math.round(m.x)}, ${Math.round(m.y)}` });
+        } else if (ef.gesture === 'marquee' || ef.gesture === 'shape') {
+          setMarquee({
+            x: Math.min(ef.startX, ef.x),
+            y: Math.min(ef.startY, ef.y),
+            w: Math.abs(ef.x - ef.startX),
+            h: Math.abs(ef.y - ef.startY),
+          });
+        } else if (ef.gesture === 'lasso') {
+          setLassoPts((prev) => (prev ? [...prev, { x: ef.x, y: ef.y }] : [{ x: ef.x, y: ef.y }]));
         }
         break;
       case 'commit':
@@ -609,12 +609,61 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           store().endDrag();
           store().runValidation();
           setReadout(null);
+        } else if (ef.gesture === 'marquee') {
+          const d = ef.data as { additive: boolean; startX: number; startY: number };
+          const rect = {
+            x: Math.min(d.startX, ef.x),
+            y: Math.min(d.startY, ef.y),
+            w: Math.abs(ef.x - d.startX),
+            h: Math.abs(ef.y - d.startY),
+          };
+          if (rect.w > 2 || rect.h > 2) {
+            // Project all four screen corners so iso marquees cover correctly.
+            store().boxSelect(flatBoxFromScreenRect(rect, toFlat), d.additive);
+          } else if (!d.additive) {
+            store().clearSelection();
+          }
+          setMarquee(null);
+        } else if (ef.gesture === 'lasso') {
+          const d = ef.data as { additive: boolean };
+          if (lassoPts && lassoPts.length >= 3) {
+            store().lassoSelect(
+              lassoPts.map((p) => toFlat(p.x, p.y)),
+              d.additive,
+            );
+          }
+          setLassoPts(null);
+        } else if (ef.gesture === 'shape') {
+          const d = ef.data as { startX: number; startY: number };
+          const rect = {
+            x: Math.min(d.startX, ef.x),
+            y: Math.min(d.startY, ef.y),
+            w: Math.abs(ef.x - d.startX),
+            h: Math.abs(ef.y - d.startY),
+          };
+          const fb = flatBoxFromScreenRect(rect, toFlat);
+          const id =
+            fb.width > 8 && fb.height > 8
+              ? store().addShape(
+                  snap(fb.x, false),
+                  snap(fb.y, false),
+                  Math.round(fb.width),
+                  Math.round(fb.height),
+                )
+              : store().addShape(snap(fb.x, false), snap(fb.y, false), 160, 100);
+          store().select([id]);
+          store().setMode('select');
+          setMarquee(null);
         }
         break;
       case 'cancel':
         if (ef.gesture === 'drag') {
           store().cancelDrag();
           setReadout(null);
+        } else if (ef.gesture === 'marquee' || ef.gesture === 'shape') {
+          setMarquee(null);
+        } else if (ef.gesture === 'lasso') {
+          setLassoPts(null);
         }
         break;
       case 'click':
@@ -633,6 +682,18 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
             s.select(pc.members, false);
           }
           setReadout(null);
+        } else if (ef.gesture === 'marquee') {
+          // Unmoved press on empty canvas = plain click → deselect on release.
+          const d = ef.data as { additive: boolean };
+          if (!d.additive) store().clearSelection();
+          setMarquee(null);
+        } else if (ef.gesture === 'shape') {
+          // Tiny press → a default-sized zone at the press point.
+          const c = toFlat(ef.x, ef.y);
+          const id = store().addShape(snap(c.x, false), snap(c.y, false), 160, 100);
+          store().select([id]);
+          store().setMode('select');
+          setMarquee(null);
         }
         break;
       default:
@@ -882,22 +943,48 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         setEditingTextId(id);
         return;
       }
+      // MIGRATED: shape / lasso / marquee run on the input machine.
       if (store().mode === 'shape') {
-        gesture.current = { kind: 'shape', startX: sx, startY: sy };
         setMarquee({ x: sx, y: sy, w: 0, h: 0 });
+        dispatchRef.current({
+          type: 'arm',
+          gesture: 'shape',
+          data: { startX: sx, startY: sy },
+          pointerId: e.pointerId,
+          pointerType: e.pointerType as PointerKind,
+          x: sx,
+          y: sy,
+        });
         return;
       }
       if (store().mode === 'lasso') {
-        gesture.current = { kind: 'lasso', additive: e.shiftKey };
         setLassoPts([{ x: sx, y: sy }]);
+        dispatchRef.current({
+          type: 'arm',
+          gesture: 'lasso',
+          data: { additive: e.shiftKey },
+          immediate: true, // a lasso accumulates from the very first point
+          pointerId: e.pointerId,
+          pointerType: e.pointerType as PointerKind,
+          x: sx,
+          y: sy,
+        });
         return;
       }
       // Deselection resolves on RELEASE (like device clicks): a committed
       // marquee replaces the selection via boxSelect, an unmoved click
-      // clears it in onPointerUp, and an Escape-cancelled marquee leaves
-      // the existing selection untouched (behavior change 3).
-      gesture.current = { kind: 'marquee', startX: sx, startY: sy, additive: e.shiftKey };
+      // clears it via the machine's click effect, and an Escape-cancelled
+      // marquee leaves the existing selection untouched (behavior change 3).
       setMarquee({ x: sx, y: sy, w: 0, h: 0 });
+      dispatchRef.current({
+        type: 'arm',
+        gesture: 'marquee',
+        data: { additive: e.shiftKey, startX: sx, startY: sy },
+        pointerId: e.pointerId,
+        pointerType: e.pointerType as PointerKind,
+        x: sx,
+        y: sy,
+      });
     },
     [spaceHeld, store, localPoint, readOnly, toFlat],
   );
@@ -956,20 +1043,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         });
         return;
       }
-      // ('drag' is machine-owned now — see the dispatch guard at the top.)
-      if (g.kind === 'marquee' || g.kind === 'shape') {
-        setMarquee({
-          x: Math.min(g.startX, sx),
-          y: Math.min(g.startY, sy),
-          w: Math.abs(sx - g.startX),
-          h: Math.abs(sy - g.startY),
-        });
-        return;
-      }
-      if (g.kind === 'lasso') {
-        setLassoPts((pts) => (pts ? [...pts, { x: sx, y: sy }] : [{ x: sx, y: sy }]));
-        return;
-      }
+      // (drag/marquee/lasso/shape are machine-owned — dispatch guard above.)
       // Idle: track hovered device so the connect handle can appear.
       const hit = store().hitTest(canvasPt.x, canvasPt.y);
       const top = hit.find((id) => store().getDevice(id)) ?? null;
@@ -1032,40 +1106,8 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         // Drop on a valid device → re-wire; drop in air or on the other endpoint
         // (relinkEndpoint rejects self-loop) → snap back, no change.
         if (target) store().relinkEndpoint(g.linkId, g.endpoint, target);
-      } else if (g.kind === 'marquee' && marquee) {
-        // Project all four screen corners to flat so iso marquees cover correctly.
-        const fb = flatBoxFromScreenRect(marquee, toFlat);
-        if (marquee.w > 2 || marquee.h > 2) {
-          store().boxSelect(fb, g.additive);
-        } else if (!g.additive) {
-          // Unmoved press on empty canvas = a plain click: deselect on
-          // release (moved here from pointerdown so Escape-cancel preserves
-          // the selection — behavior change 3).
-          store().clearSelection();
-        }
-        setMarquee(null);
-      } else if (g.kind === 'lasso') {
-        if (lassoPts && lassoPts.length >= 3) {
-          const poly = lassoPts.map((p) => toFlat(p.x, p.y));
-          store().lassoSelect(poly, g.additive);
-        }
-        setLassoPts(null);
-      } else if (g.kind === 'shape' && marquee) {
-        const fb = flatBoxFromScreenRect(marquee, toFlat);
-        // Tiny drag → a default-sized zone at the press point.
-        const id =
-          fb.width > 8 && fb.height > 8
-            ? store().addShape(
-                snap(fb.x, false),
-                snap(fb.y, false),
-                Math.round(fb.width),
-                Math.round(fb.height),
-              )
-            : store().addShape(snap(fb.x, false), snap(fb.y, false), 160, 100);
-        store().select([id]);
-        store().setMode('select');
-        setMarquee(null);
       }
+      // (marquee/lasso/shape commit through the machine's effect table.)
     },
     [store, marquee, linkTarget, lassoPts, setPending, toFlat],
   );
