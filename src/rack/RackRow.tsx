@@ -17,8 +17,14 @@
  * Machine coords are CLIENT px (like RackCanvas). Capture lives on the
  * container, so native clicks retarget there — face/device clicks are routed
  * through machine click effects, NOT DOM onClick.
+ *
+ * Perf (M4f): pan/zoom only changes the CSS transform on the <svg>; the whole
+ * scene (shell/device innerHTML art, cables, budgets) lives in the memoized
+ * RowScene below, whose props are all identity-stable across viewport frames.
+ * rowScene.perf.test.tsx pins this: wheel-panning must not call the art
+ * generators again.
  */
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, useMemo, useCallback, memo } from 'react';
 import type { Device, Rack, RackCable } from '@/model/types';
 import { fit, panBy, zoomAt, zoomTo, type Viewport, IDENTITY } from './viewport';
 import { normalizeWheel, resolveWheel } from '@/input/wheel';
@@ -77,29 +83,38 @@ type PanData = { tx: number; ty: number; faceRackId: string | null; button: numb
 type MoveData = { deviceId: string; span: number; name: string; fromRackId: string; additive: boolean };
 type DropTarget = { rackId: string; face: 'front' | 'rear'; colX: number; u: number; ok: boolean; reason: string | null };
 type DragState = { deviceId: string; span: number; name: string; target: DropTarget | null };
+type Col = { rack: Rack; frontX: number; rearX: number; size: ReturnType<typeof cabinetSize> };
 
-export function RackRow({
-  racks, devices, cables, activeRackId, selectedId, selectedIds, searchHits, showRear, colorBy,
-  onFocusRack, onSelect, onReorder, onMoveDeviceToRack, gestureApi,
-}: RackRowProps) {
+/**
+ * Everything INSIDE the row svg except the drop preview. Memoized (M4f): all
+ * props hold identity across pan/zoom frames (cols/devices/cables are
+ * rev-memoized upstream, callbacks are stable), so viewport changes re-render
+ * only the transform wrapper — not N racks × M devices of innerHTML art.
+ */
+const RowScene = memo(function RowScene({
+  cols, devices, cables, activeRackId, selectedId, selectedIds, searchHits, showRear, colorBy,
+  dragRackId, dimmedId, onDevDown, onReorder,
+}: {
+  cols: Col[];
+  devices: Device[];
+  cables: RackCable[];
+  activeRackId?: string;
+  selectedId: string | null;
+  selectedIds?: Set<string>;
+  searchHits: Set<string>;
+  showRear: boolean;
+  colorBy: ColorByMode;
   /** Highlighted drop-target rack during a cross-rack device drag. */
-  const [dragRackId, setDragRackId] = useState<string | null>(null);
-  const [drag, setDrag] = useState<DragState | null>(null);
-  const dragRef = useRef<DragState | null>(null);
-  dragRef.current = drag;
-  // Front (and optionally rear) column per rack, laid out left-to-right.
-  let x = 0;
-  let height = 0;
-  const cols = racks.map((rack) => {
-    const size = cabinetSize(rack);
-    const frontX = x;
-    const rearX = showRear ? x + size.width + FACE_GAP : x;
-    x = (showRear ? rearX + size.width : frontX + size.width) + RACK_GUTTER;
-    height = Math.max(height, size.height);
-    return { rack, frontX, rearX, size };
-  });
-  const width = Math.max(0, x - RACK_GUTTER);
-
+  dragRackId: string | null;
+  /** Device being dragged over another rack (rendered faded at its old slot). */
+  dimmedId: string | null;
+  onDevDown: (e: React.PointerEvent, d: Device, rack: Rack) => void;
+  onReorder: (rackId: string, dir: -1 | 1) => void;
+}) {
+  if (import.meta.env.MODE === 'test') {
+    (globalThis as { __rowSceneRenders?: number }).__rowSceneRenders =
+      ((globalThis as { __rowSceneRenders?: number }).__rowSceneRenders ?? 0) + 1;
+  }
   // `${deviceId}:${ifaceId}` → visible port/NIC center, for cable routing. Rear devices are
   // only cabled when the rear face is shown.
   const portCenter = new Map<string, { x: number; y: number }>();
@@ -203,14 +218,13 @@ export function RackRow({
           const panel = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
           const sel = d.id === selectedId || (selectedIds?.has(d.id) ?? false);
           const hit = searchHits.has(d.id);
-          const dimmed = drag?.deviceId === d.id && drag.target != null;
           return (
             <g
               key={d.id}
               data-dev-id={d.id}
               onPointerDown={(e) => onDevDown(e, d, rack)}
               style={{ cursor: 'grab' }}
-              opacity={dimmed ? 0.35 : 1}
+              opacity={dimmedId === d.id ? 0.35 : 1}
             >
               <g dangerouslySetInnerHTML={{ __html: deviceFaceParts(d, panel, face).join('') }} />
               {colorBy !== 'gear' && (() => {
@@ -228,6 +242,80 @@ export function RackRow({
       </g>
     );
   };
+
+  return (
+    <>
+      {cols.map((c, i) => {
+        const b = rackBudget(c.rack, devices);
+        const bayH = c.rack.ruHeight * U_PX;
+        const groupRight = (showRear ? c.rearX : c.frontX) + c.size.width;
+        return (
+          <g key={c.rack.id}>
+            {renderFace(c.rack, c.frontX, 'front')}
+            {showRear && renderFace(c.rack, c.rearX, 'rear')}
+            {/* reorder chevrons over the rack group */}
+            {i > 0 && (
+              <text x={c.frontX + 10} y={c.size.height + 14} fontSize={13} fill="var(--accent)" style={{ cursor: 'pointer' }} onClick={() => onReorder(c.rack.id, -1)} aria-label="Move rack left">◀</text>
+            )}
+            {i < cols.length - 1 && (
+              <text x={groupRight - 16} y={c.size.height + 14} fontSize={13} fill="var(--accent)" style={{ cursor: 'pointer' }} onClick={() => onReorder(c.rack.id, 1)} aria-label="Move rack right">▶</text>
+            )}
+            {/* whole-rack budget under the front column */}
+            <text x={bayOrigin(c.frontX).x} y={FRAME_PAD + bayH + 16} fontSize={10} fontFamily="var(--font-mono)" fill={b.overWatts || b.overWeight ? '#dc2626' : 'var(--chrome-fg-muted)'}>
+              {b.usedU}/{c.rack.ruHeight}U · {b.freeU} free{b.maxWatts != null ? ` · ${b.watts}/${b.maxWatts}W` : b.watts ? ` · ${b.watts}W` : ''}{b.maxWeightKg != null ? ` · ${b.weightKg}/${b.maxWeightKg}kg` : ''}
+            </text>
+          </g>
+        );
+      })}
+
+      {/* cables — intra-rack bow, cross-rack arc up and over the gap */}
+      {cables.map((c, idx) => {
+        const pa = portCenter.get(`${c.aEnd.deviceId}:${c.aEnd.ifaceId}`) ?? deviceCenter.get(c.aEnd.deviceId);
+        const pb = portCenter.get(`${c.bEnd.deviceId}:${c.bEnd.ifaceId}`) ?? deviceCenter.get(c.bEnd.deviceId);
+        if (!pa || !pb) return null;
+        const crossRack = rackOf.get(c.aEnd.deviceId) !== rackOf.get(c.bEnd.deviceId);
+        const { d } = cablePath(pa, pb, idx, crossRack);
+        return (
+          <g key={c.id} pointerEvents="none">
+            <path d={d} fill="none" stroke="#020617" strokeWidth={7} strokeLinecap="round" opacity={0.22} filter="url(#rkCableShadow)" />
+            <path d={d} fill="none" stroke="#f8fafc" strokeWidth={5.2} strokeLinecap="round" opacity={0.82} />
+            <path d={d} fill="none" stroke={c.color} strokeWidth={3} strokeLinecap="round" />
+            <path d={d} fill="none" stroke="#ffffff" strokeWidth={0.8} strokeLinecap="round" opacity={0.45} />
+            <circle cx={pa.x} cy={pa.y} r={3.8} fill="#0f172a" stroke="#f8fafc" strokeWidth={1} />
+            <circle cx={pb.x} cy={pb.y} r={3.8} fill="#0f172a" stroke="#f8fafc" strokeWidth={1} />
+            <circle cx={pa.x} cy={pa.y} r={2} fill={c.color} />
+            <circle cx={pb.x} cy={pb.y} r={2} fill={c.color} />
+          </g>
+        );
+      })}
+    </>
+  );
+});
+
+export function RackRow({
+  racks, devices, cables, activeRackId, selectedId, selectedIds, searchHits, showRear, colorBy,
+  onFocusRack, onSelect, onReorder, onMoveDeviceToRack, gestureApi,
+}: RackRowProps) {
+  const [dragRackId, setDragRackId] = useState<string | null>(null);
+  const [drag, setDrag] = useState<DragState | null>(null);
+  const dragRef = useRef<DragState | null>(null);
+  dragRef.current = drag;
+
+  // Front (and optionally rear) column per rack, laid out left-to-right.
+  // Memoized so the RowScene's props hold identity across viewport frames.
+  const { cols, width, height } = useMemo(() => {
+    let x = 0;
+    let h = 0;
+    const cs: Col[] = racks.map((rack) => {
+      const size = cabinetSize(rack);
+      const frontX = x;
+      const rearX = showRear ? x + size.width + FACE_GAP : x;
+      x = (showRear ? rearX + size.width : frontX + size.width) + RACK_GUTTER;
+      h = Math.max(h, size.height);
+      return { rack, frontX, rearX, size };
+    });
+    return { cols: cs, width: Math.max(0, x - RACK_GUTTER), height: h };
+  }, [racks, showRear]);
 
   // ── Pan / zoom viewport ─────────────────────────────────────────────────────
   const containerRef = useRef<HTMLDivElement>(null);
@@ -424,7 +512,8 @@ export function RackRow({
     };
   }, [gestureApi]);
 
-  function onDevDown(e: React.PointerEvent, d: Device, rack: Rack) {
+  // Stable (touches refs only) so RowScene's memo isn't defeated by identity churn.
+  const onDevDown = useCallback((e: React.PointerEvent, d: Device, rack: Rack) => {
     if (machine.current.phase !== 'idle') return; // container routes second pointers
     if (e.button !== 0) return; // middle/right bubble to the container pan
     e.stopPropagation();
@@ -444,7 +533,7 @@ export function RackRow({
       x: e.clientX,
       y: e.clientY,
     });
-  }
+  }, []);
 
   function onContainerDown(e: React.PointerEvent) {
     if (machine.current.phase !== 'idle') {
@@ -557,49 +646,21 @@ export function RackRow({
         aria-label="All racks"
       >
         <g dangerouslySetInnerHTML={{ __html: RACK_ART_DEFS }} />
-        {cols.map((c, i) => {
-          const b = rackBudget(c.rack, devices);
-          const bayH = c.rack.ruHeight * U_PX;
-          const groupRight = (showRear ? c.rearX : c.frontX) + c.size.width;
-          return (
-            <g key={c.rack.id}>
-              {renderFace(c.rack, c.frontX, 'front')}
-              {showRear && renderFace(c.rack, c.rearX, 'rear')}
-              {/* reorder chevrons over the rack group */}
-              {i > 0 && (
-                <text x={c.frontX + 10} y={c.size.height + 14} fontSize={13} fill="var(--accent)" style={{ cursor: 'pointer' }} onClick={() => onReorder(c.rack.id, -1)} aria-label="Move rack left">◀</text>
-              )}
-              {i < cols.length - 1 && (
-                <text x={groupRight - 16} y={c.size.height + 14} fontSize={13} fill="var(--accent)" style={{ cursor: 'pointer' }} onClick={() => onReorder(c.rack.id, 1)} aria-label="Move rack right">▶</text>
-              )}
-              {/* whole-rack budget under the front column */}
-              <text x={bayOrigin(c.frontX).x} y={FRAME_PAD + bayH + 16} fontSize={10} fontFamily="var(--font-mono)" fill={b.overWatts || b.overWeight ? '#dc2626' : 'var(--chrome-fg-muted)'}>
-                {b.usedU}/{c.rack.ruHeight}U · {b.freeU} free{b.maxWatts != null ? ` · ${b.watts}/${b.maxWatts}W` : b.watts ? ` · ${b.watts}W` : ''}{b.maxWeightKg != null ? ` · ${b.weightKg}/${b.maxWeightKg}kg` : ''}
-              </text>
-            </g>
-          );
-        })}
-
-        {/* cables — intra-rack bow, cross-rack arc up and over the gap */}
-        {cables.map((c, idx) => {
-          const pa = portCenter.get(`${c.aEnd.deviceId}:${c.aEnd.ifaceId}`) ?? deviceCenter.get(c.aEnd.deviceId);
-          const pb = portCenter.get(`${c.bEnd.deviceId}:${c.bEnd.ifaceId}`) ?? deviceCenter.get(c.bEnd.deviceId);
-          if (!pa || !pb) return null;
-          const crossRack = rackOf.get(c.aEnd.deviceId) !== rackOf.get(c.bEnd.deviceId);
-          const { d } = cablePath(pa, pb, idx, crossRack);
-          return (
-            <g key={c.id} pointerEvents="none">
-              <path d={d} fill="none" stroke="#020617" strokeWidth={7} strokeLinecap="round" opacity={0.22} filter="url(#rkCableShadow)" />
-              <path d={d} fill="none" stroke="#f8fafc" strokeWidth={5.2} strokeLinecap="round" opacity={0.82} />
-              <path d={d} fill="none" stroke={c.color} strokeWidth={3} strokeLinecap="round" />
-              <path d={d} fill="none" stroke="#ffffff" strokeWidth={0.8} strokeLinecap="round" opacity={0.45} />
-              <circle cx={pa.x} cy={pa.y} r={3.8} fill="#0f172a" stroke="#f8fafc" strokeWidth={1} />
-              <circle cx={pb.x} cy={pb.y} r={3.8} fill="#0f172a" stroke="#f8fafc" strokeWidth={1} />
-              <circle cx={pa.x} cy={pa.y} r={2} fill={c.color} />
-              <circle cx={pb.x} cy={pb.y} r={2} fill={c.color} />
-            </g>
-          );
-        })}
+        <RowScene
+          cols={cols}
+          devices={devices}
+          cables={cables}
+          activeRackId={activeRackId}
+          selectedId={selectedId}
+          selectedIds={selectedIds}
+          searchHits={searchHits}
+          showRear={showRear}
+          colorBy={colorBy}
+          dragRackId={dragRackId}
+          dimmedId={drag && drag.target ? drag.deviceId : null}
+          onDevDown={onDevDown}
+          onReorder={onReorder}
+        />
         {renderDropPreview()}
       </svg>
       <div className={styles.zoomControls} data-canvas-chrome data-demote="chrome">

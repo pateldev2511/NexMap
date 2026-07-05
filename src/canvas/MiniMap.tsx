@@ -1,6 +1,7 @@
 import { useMemo, useRef } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import type { Box } from '@/lib/spatial-index';
+import { MiniDots } from './MiniDots';
 import styles from './MiniMap.module.css';
 
 const W = 168;
@@ -21,11 +22,14 @@ export function MiniMap({
   viewRect: Box | null;
   onJump: (flatX: number, flatY: number) => void;
 }) {
-  useProjectStore((s) => s.rev); // re-render when the model changes
-  const devices = useProjectStore.getState().devicesAll();
+  const rev = useProjectStore((s) => s.rev); // re-render when the model changes
+  // Stable array identity per model revision — MiniDots memoizes on it (M4f).
+  const devices = useMemo(() => useProjectStore.getState().devicesAll(), [rev]);
   const svgRef = useRef<SVGSVGElement>(null);
 
-  const bounds = useMemo(() => {
+  // Device-only bounds recompute per model change, NOT per pan frame. The
+  // viewport is merged in below with cheap scalar math each render.
+  const devBounds = useMemo(() => {
     if (devices.length === 0) return null;
     let minX = Infinity;
     let minY = Infinity;
@@ -37,17 +41,19 @@ export function MiniMap({
       maxX = Math.max(maxX, d.x + d.width);
       maxY = Math.max(maxY, d.y + d.height);
     }
-    // Include the viewport so the rect stays visible when panned past the devices.
-    if (viewRect) {
-      minX = Math.min(minX, viewRect.x);
-      minY = Math.min(minY, viewRect.y);
-      maxX = Math.max(maxX, viewRect.x + viewRect.width);
-      maxY = Math.max(maxY, viewRect.y + viewRect.height);
-    }
     return { minX, minY, maxX, maxY };
-  }, [devices, viewRect]);
+  }, [devices]);
 
-  if (!bounds) return null;
+  if (!devBounds) return null;
+  // Include the viewport so the rect stays visible when panned past the devices.
+  const bounds = viewRect
+    ? {
+        minX: Math.min(devBounds.minX, viewRect.x),
+        minY: Math.min(devBounds.minY, viewRect.y),
+        maxX: Math.max(devBounds.maxX, viewRect.x + viewRect.width),
+        maxY: Math.max(devBounds.maxY, viewRect.y + viewRect.height),
+      }
+    : devBounds;
 
   const sceneW = Math.max(1, bounds.maxX - bounds.minX);
   const sceneH = Math.max(1, bounds.maxY - bounds.minY);
@@ -89,20 +95,7 @@ export function MiniMap({
       }}
     >
       <rect className={styles.bg} x={0} y={0} width={W} height={H} rx={8} />
-      {devices.map((d) => {
-        const p = toMini(d.x, d.y);
-        return (
-          <rect
-            key={d.id}
-            className={styles.node}
-            x={p.x}
-            y={p.y}
-            width={Math.max(2, d.width * k)}
-            height={Math.max(2, d.height * k)}
-            rx={1}
-          />
-        );
-      })}
+      <MiniDots devices={devices} k={k} offX={offX} offY={offY} />
       {vTL && viewRect && (
         <rect
           className={styles.view}
