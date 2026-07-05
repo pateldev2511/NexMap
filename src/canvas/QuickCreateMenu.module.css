@@ -1,0 +1,53 @@
+.backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+}
+
+.menu {
+  position: absolute;
+  z-index: 6;
+  width: 176px;
+  padding: 4px;
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  animation: qcm-in 120ms ease-out;
+}
+
+@keyframes qcm-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--chrome-fg-muted);
+  padding: 4px 8px 4px;
+}
+
+.menu button {
+  text-align: left;
+  font-size: 12px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--chrome-fg);
+  cursor: pointer;
+}
+
+.menu button:hover,
+.menu button:focus-visible {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  outline: none;
+}

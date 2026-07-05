@@ -90,6 +90,7 @@ export function RackCanvas({
   onConnectPorts,
   onSelectCable,
   onMoveTo,
+  onQuickPlace,
   gestureApi,
   spaceHeld,
   deviceActions,
@@ -119,6 +120,8 @@ export function RackCanvas({
   onConnectPorts?: (a: { deviceId: string; ifaceId: string }, b: { deviceId: string; ifaceId: string }) => void;
   onSelectCable: (id: string | null) => void;
   onMoveTo: (id: string, u: number) => void;
+  /** Double-click an empty bay → place the armed or last-used preset (M4c). */
+  onQuickPlace?: (u: number) => void;
   /** Filled with cancel/active so the router can Escape-cancel rack gestures. */
   gestureApi?: React.MutableRefObject<RackGestureApi | null>;
   /** Space+drag pans (contract fallback) — tracked by the designer's key stage. */
@@ -627,6 +630,16 @@ export function RackCanvas({
         if (machine.current.phase !== 'idle') dispatchRef.current({ type: 'lostcapture' });
       }}
       onContextMenu={(e) => e.preventDefault() /* right-drag pans; no menu here */}
+      onDoubleClick={(e) => {
+        // Empty-bay double-click → quick place (M4c). Pointer capture lives on
+        // this container, so the browser retargets the dblclick here and
+        // e.target is NOT the element under the cursor — hit-test the point
+        // instead to skip devices and cables (they own their own clicks).
+        if (!onQuickPlace || machine.current.phase !== 'idle') return;
+        const under = document.elementFromPoint(e.clientX, e.clientY);
+        if (under?.closest('g[role="button"]') || under?.closest('g[style*="cursor: pointer"]')) return;
+        onQuickPlace(yToU(e.clientY));
+      }}
     >
     <svg
       ref={svgRef}

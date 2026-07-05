@@ -6,6 +6,7 @@ import { CanvasSearch } from './CanvasSearch';
 import { MiniMap } from './MiniMap';
 import { getConnectMode, getWheelAction } from '@/lib/prefs';
 import { SelectionToolbar, ToolbarSep } from '@/ui/SelectionToolbar';
+import { QuickCreateMenu } from './QuickCreateMenu';
 import { placeToolbar } from '@/ui/toolbarPlace';
 import { normalizeWheel, resolveWheel, MomentumGuard } from '@/input/wheel';
 import { keyboardRouter } from '@/input/router';
@@ -172,6 +173,14 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   const machine = useRef<MachineState>(IDLE);
   // Previous pan position (incremental viewport deltas between updates).
   const panPrev = useRef({ x: 0, y: 0 });
+  // Quick-create picker (M4b/M4c): opened at a screen point by dbl-clicking
+  // empty canvas, or by dropping a link on empty space (then sourceId is set
+  // and the pick also CONNECTS).
+  const [quickCreate, setQuickCreate] = useState<{
+    sx: number;
+    sy: number;
+    sourceId?: string;
+  } | null>(null);
   // Assigned each render (below, after its dependencies exist) so handlers
   // and the router shim always dispatch with fresh closures.
   const dispatchRef = useRef<
@@ -650,18 +659,28 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           setMarquee(null);
         } else if (ef.gesture === 'link') {
           // Release: connect on a valid target (drag mode), else arm
-          // click-to-connect per the connect-mode preference.
-          const d = ef.data as { sourceId: string };
+          // click-to-connect per the connect-mode preference — or, when a
+          // real drag lands on EMPTY canvas, open quick-create so the pick
+          // creates AND connects in one motion (M4b, the FigJam pattern).
+          const d = ef.data as { sourceId: string; startX: number; startY: number };
           const target = linkTarget;
           setLinkCursor(null);
           setLinkTarget(null);
           const cm = getConnectMode();
+          const movedFar = Math.hypot(ef.x - d.startX, ef.y - d.startY) > 8;
+          const releasePt = toFlat(ef.x, ef.y);
+          const overEmpty = !store()
+            .hitTest(releasePt.x, releasePt.y)
+            .some((id) => store().getDevice(id));
           if (cm !== 'click' && target && target !== d.sourceId) {
             const id = store().connect(d.sourceId, target);
             if (id) {
               store().select([id]);
               store().runValidation();
             }
+            setPending(null);
+          } else if (movedFar && overEmpty) {
+            setQuickCreate({ sx: ef.x, sy: ef.y, sourceId: d.sourceId });
             setPending(null);
           } else if (cm !== 'drag') {
             setPending(d.sourceId);
@@ -812,7 +831,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       dispatchRef.current({
         type: 'arm',
         gesture: 'link',
-        data: { sourceId: id },
+        data: { sourceId: id, startX: sx, startY: sy },
         immediate: true,
         pointerId: e.pointerId,
         pointerType: e.pointerType as PointerKind,
@@ -1169,12 +1188,16 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       if (readOnly) return;
       const { sx, sy } = localPoint(e);
       const c = toFlat(sx, sy);
-      const id = store()
-        .hitTest(c.x, c.y)
-        .find((id) => store().getObject(id)?.kind === 'text');
+      const hit = store().hitTest(c.x, c.y);
+      const id = hit.find((id) => store().getObject(id)?.kind === 'text');
       if (id) {
         store().select([id]);
         setEditingTextId(id);
+        return;
+      }
+      // Empty canvas double-click → quick-create at the point (M4c).
+      if (!hit.some((h) => store().getDevice(h) || store().getObject(h))) {
+        setQuickCreate({ sx, sy });
       }
     },
     [store, localPoint, toFlat, readOnly],
@@ -1948,6 +1971,28 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           <NexIcon name="zoom-selection" />
         </button>
       </div>
+
+      {/* Quick-create picker (M4b/M4c): create — and connect, when opened by
+          a link drop — in one motion. */}
+      {!readOnly && quickCreate && (
+        <QuickCreateMenu
+          left={quickCreate.sx}
+          top={quickCreate.sy}
+          vw={size.w}
+          vh={size.h}
+          title={quickCreate.sourceId ? 'Connect to new…' : 'Add device'}
+          onClose={() => setQuickCreate(null)}
+          onPick={(type) => {
+            const c = toFlat(quickCreate.sx, quickCreate.sy);
+            const s = store();
+            const id = s.addDeviceAt(type, snap(c.x - 28, false), snap(c.y - 20, false));
+            if (quickCreate.sourceId) s.connect(quickCreate.sourceId, id);
+            s.select([id]);
+            s.runValidation();
+            setQuickCreate(null);
+          }}
+        />
+      )}
 
       <MiniMap
         viewRect={

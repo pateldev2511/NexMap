@@ -243,6 +243,8 @@ export function RackDesigner() {
   // Declared BEFORE the no-racks early return so hook order stays stable;
   // nudge()/deleteSelected() are hoisted function declarations.
   const rackGestureApi = useRef<RackGestureApi | null>(null);
+  // Last placed preset — double-clicking an empty bay repeats it (M4c).
+  const lastPresetRef = useRef<RackDevicePreset | null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
   const handleRackKey = (e: KeyboardEvent): boolean => {
     if (e.code === 'Space') {
@@ -368,6 +370,7 @@ export function RackDesigner() {
       bay: useBay,
       depth,
     } as const;
+    lastPresetRef.current = preset;
     const occ = devices.filter((d) => d.rackId === rack.id);
     // Pre-check BEFORE creating anything — never leave an orphan device on rejection.
     const fit = canFit(rack, occ, slot);
@@ -1006,6 +1009,10 @@ export function RackDesigner() {
             </div>
             <div className={styles.focusCanvasWrap}>
               <RackCanvas
+                onQuickPlace={(u) => {
+                  const p = armed ?? lastPresetRef.current;
+                  if (p) placePreset(p, u);
+                }}
                 gestureApi={rackGestureApi}
                 spaceHeld={spaceHeld}
                 deviceActions={
