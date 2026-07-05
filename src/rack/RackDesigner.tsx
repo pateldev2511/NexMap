@@ -618,13 +618,15 @@ export function RackDesigner() {
   /** Drop a device into another rack at the nearest free U (keeps its span/side/bay).
       Surfaces a rejection (and does NOT move) when the target rack has no room — never a
       silent no-op. On success, follow the device to its new rack so the move is visible. */
-  function moveDeviceToRack(deviceId: string, targetRackId: string, follow = true): boolean {
+  function moveDeviceToRack(deviceId: string, targetRackId: string, follow = true, preferredU?: number): boolean {
     const d = devices.find((x) => x.id === deviceId);
     const target = racks.find((r) => r.id === targetRackId);
     if (!d || !target || d.rackId === targetRackId) return false;
     const sl = slotOf(d);
     const occ = devices.filter((x) => x.rackId === targetRackId);
-    const wanted = Math.max(1, Math.min(sl.ru, target.ruHeight - sl.ruSpan + 1));
+    // A pointer drag (row view) says WHERE the user pointed; the panel's
+    // "Move to rack" control has no cursor, so it keeps the device's old U.
+    const wanted = Math.max(1, Math.min(preferredU ?? sl.ru, target.ruHeight - sl.ruSpan + 1));
     const u = nearestFreeU(target, occ, sl.ruSpan, wanted, sl.side, sl.bay, sl.depth);
     const showReject = (reason: string) => {
       announce(`Move rejected: ${reason}`);
@@ -976,7 +978,8 @@ export function RackDesigner() {
                 else s().select([]);
               }}
               onReorder={reorderRack}
-              onMoveDeviceToRack={(deviceId, targetRackId) => moveDeviceToRack(deviceId, targetRackId, false)}
+              onMoveDeviceToRack={(deviceId, targetRackId, wantedU) => moveDeviceToRack(deviceId, targetRackId, false, wantedU)}
+              gestureApi={rackGestureApi}
             />
           </>
         ) : (
