@@ -1,12 +1,13 @@
-import { useRef, type ReactNode, type KeyboardEvent } from 'react';
+import { useRef, useEffect, type ReactNode, type KeyboardEvent } from 'react';
 import styles from './SelectionToolbar.module.css';
 
 /**
  * Generic shell for the floating selection toolbar (M3): positioned by
  * toolbarPlace.ts, marked data-canvas-chrome so canvas wheel handlers ignore
- * it, roving arrow-key focus, and Escape returns focus to the canvas WITHOUT
- * clearing the selection (stopPropagation keeps it from the keyboard
- * router's innermost chain).
+ * it, a REAL roving tabindex (one Tab stop for the whole toolbar, arrows move
+ * within — the WAI-ARIA toolbar pattern, not 14 Tab stops), and Escape
+ * returns focus to the canvas WITHOUT clearing the selection
+ * (stopPropagation keeps it from the keyboard router's innermost chain).
  */
 export function SelectionToolbar({
   left,
@@ -24,10 +25,35 @@ export function SelectionToolbar({
 }) {
   const localRef = useRef<HTMLDivElement | null>(null);
 
+  const focusables = (root: HTMLElement) =>
+    [...root.querySelectorAll<HTMLElement>('button, input, select')].filter(
+      (el) => !(el as HTMLButtonElement).disabled,
+    );
+
+  /** One Tab stop: only `active` keeps tabIndex 0, the rest go to -1. */
+  const setRoving = (active: HTMLElement | null) => {
+    const root = localRef.current;
+    if (!root) return;
+    const items = focusables(root);
+    const stop = active && items.includes(active) ? active : items[0] ?? null;
+    for (const el of items) el.tabIndex = el === stop ? 0 : -1;
+  };
+
+  // Re-assert after every render — the button matrix enables/disables per
+  // selection, and a newly-disabled element must not remain the Tab stop.
+  useEffect(() => {
+    const active = document.activeElement as HTMLElement | null;
+    setRoving(localRef.current?.contains(active) ? active : null);
+  });
+
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Escape') {
       e.stopPropagation();
-      (document.activeElement as HTMLElement | null)?.blur();
+      // Back to the canvas (containers carry tabIndex=-1), not document.body —
+      // a blur() stranded keyboard users at the top of the page.
+      const surface = localRef.current?.closest<HTMLElement>('[data-canvas-surface]');
+      if (surface) surface.focus();
+      else (document.activeElement as HTMLElement | null)?.blur();
       return;
     }
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
@@ -59,6 +85,7 @@ export function SelectionToolbar({
       aria-label={label}
       data-canvas-chrome
       onKeyDown={onKeyDown}
+      onFocus={(e) => setRoving(e.target as HTMLElement)}
       onPointerDown={(e) => e.stopPropagation() /* toolbar presses never reach the canvas */}
     >
       {children}

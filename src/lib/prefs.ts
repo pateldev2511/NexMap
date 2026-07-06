@@ -2,6 +2,8 @@
  * Small localStorage-backed preferences. Phase 2 introduces the connect-mode
  * preference; Phase 7 will grow this into a full settings surface.
  */
+import type { WheelAction } from '../input/wheel';
+
 export type ConnectMode = 'both' | 'click' | 'drag';
 
 const KEY = 'nexmap.connectMode';
@@ -15,7 +17,6 @@ export function setConnectMode(mode: ConnectMode): void {
   localStorage.setItem(KEY, mode);
 }
 
-import type { WheelAction } from '../input/wheel';
 
 const WHEEL_KEY = 'nexmap.wheelAction';
 

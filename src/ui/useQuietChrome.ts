@@ -46,12 +46,27 @@ export function useQuietChrome(): void {
       }
     };
 
+    // Touch fires little/no pointermove and has no hover, and keyboard-only
+    // users never move the pointer — a tap or keypress on chrome must also
+    // wake it, or quiet mode becomes a one-way door on those devices.
+    const onWake = (e: Event) => {
+      const t = e.target as Element | null;
+      if (t?.closest?.('[data-demote], [data-canvas-chrome]')) {
+        write('quiet', false);
+        arm();
+      }
+    };
+
     const offEarn = onQuietEarned(arm);
     window.addEventListener('pointermove', onMove, { passive: true });
+    window.addEventListener('pointerdown', onWake, { passive: true });
+    window.addEventListener('keydown', onWake);
     arm();
     return () => {
       offEarn();
       window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerdown', onWake);
+      window.removeEventListener('keydown', onWake);
       if (timer != null) window.clearTimeout(timer);
       delete root.dataset.quiet;
       delete root.dataset.canvasHover;

@@ -100,7 +100,10 @@ button {
 
 :root[data-quiet='true'] [data-demote='chrome']:not(:hover):not(:focus-within),
 :root[data-quiet='true'] [data-demote='chrome-item']:not(:hover):not(:focus-within) {
-  opacity: 0.6;
+  /* 0.8, not 0.6: the quiet state dominates during canvas work, and muted
+     chrome text composited at 60% fell to ~2.2:1 contrast — unreadable for
+     low-vision users who can't hover to restore it (a11y review 2026-07-05). */
+  opacity: 0.8;
 }
 
 :root[data-canvas-hover='true'] [data-demote='panel']:not(:hover):not(:focus-within) {
