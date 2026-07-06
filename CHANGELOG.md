@@ -6,6 +6,69 @@ minor/patch semantics are not yet enforced.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-07-05
+
+The pointer-native canvas release: both designers' input layers were rebuilt
+from scratch on one shared gesture engine, then hardened by a seven-reviewer
+audit. 33 commits; suite at 669 unit tests and 58 end-to-end specs.
+
+### Added
+
+- **One gesture engine for every canvas.** All pointer work on the network
+  designer, the rack editor, and the multi-rack row view now runs on a single
+  pure state machine (`src/input/`): identical 4px click-vs-drag feel at every
+  zoom level, Escape always cancels cleanly, and interrupted gestures (OS
+  popups, window switches, lost pointer capture) can never leave the canvas
+  stuck. Proven by a 3000-sequence fuzz harness.
+- **Touch and tablet support everywhere.** Two-finger pinch zooms at your
+  fingers, two-finger drag pans, a second finger mid-drag safely cancels into
+  a pinch — and lifting one finger from a pinch continues as a smooth
+  one-finger pan. Works on all three canvases.
+- **Quick-create.** Double-click empty canvas to place a device from a compact
+  picker; drop a connection on empty space to create AND wire the new device
+  in one motion (one undo entry). In the rack, double-click an empty bay to
+  repeat the last-used preset.
+- **Cross-rack drag in the row view.** Grab gear and drag it onto another
+  cabinet with a live drop preview that tells the truth: green when the span
+  fits at that U, amber naming the actual landing U when it doesn't.
+- **Click-click cabling** in the rack editor: tap one jack, tap another —
+  the low-dexterity alternative to drag-to-cable, gated on the same
+  connect-mode preference as the flat canvas.
+- **Quiet canvas.** A floating selection toolbar is now the primary quick-
+  action path on both designers (align/distribute, z-order, group, nudge,
+  unmount, cable editing at the cable itself); idle chrome gently fades to
+  80% after you start working and wakes on hover, tap, or keypress.
+- **Unified wheel contract.** Plain scroll pans, Ctrl/pinch zooms at the
+  cursor — the same on every canvas, flippable in Settings. Returning rack
+  users get a one-time toast (their wheel used to zoom).
+
+### Changed
+
+- Pan/zoom is now a pure CSS transform on every canvas: scenes (device art,
+  rack shells, cables, minimap dots) are memoized and no longer re-render per
+  frame — pinned by render-count perf tests on all three canvases.
+- Rejected rack drops always flash the slot, name the reason, and pulse the
+  nearest free U; screen-reader users hear the same announcements.
+- Accessibility: real one-Tab-stop toolbar with roving focus, keyboard-
+  reachable rack reorder buttons, focus returns to the canvas when menus
+  close, cable color swatches announce names ("green"), readable contrast on
+  drop-preview labels and quiet chrome.
+
+### Fixed
+
+- A stray release from a second pointer (touch + pen/mouse) could resolve an
+  armed press as a phantom click and orphan the real gesture.
+- An Escape-cancelled bend drag left a hidden no-op history entry that
+  silently ate the next undo; quick-create-with-connection was two undo
+  entries (one undo stranded an orphan device). Both are now exactly one.
+- Keys no longer leak through the open quick-create picker to the canvas
+  behind it (Delete could destroy the selection while picking).
+- Rail-mounted gear (0U PDUs) was falsely rejected when moved into a full
+  rack; double-clicking the rack zoom buttons could mount gear behind them;
+  wheel-panning under an open picker shifted where the device landed.
+- Cancelled drags no longer mark a freshly saved document as edited.
+
+
 ### Fixed
 
 - **Rack canvas pan/zoom no longer steals clicks (v0.6.1).** Capturing the pointer on

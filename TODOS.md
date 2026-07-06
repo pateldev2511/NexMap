@@ -39,7 +39,7 @@ behavior green and is undoable where it mutates the model.
       blur/Enter as one undoable update (Canvas.tsx).
 - [x] **P0 Resize handles** ✅ — 8 handles, MIN_OBJ_SIZE=16 clamp, one undoable
       endResize commit.
-- [x] **P1 Align & distribute** ✅ — AlignBar (6 align + 2 distribute) via store
+- [x] **P1 Align & distribute** ✅ — 6 align + 2 distribute via store (originally AlignBar; absorbed into the floating SelectionToolbar in the M3 quiet-canvas work)
       alignSelection/distributeSelection, one undo each.
 - [x] **P1 Canvas search (⌘F)** ✅ — CanvasSearch.tsx, find by name/IP/role,
       jump-to + select.
