@@ -32,6 +32,7 @@ import { getWheelAction } from '@/lib/prefs';
 import {
   reduce,
   IDLE,
+  ownsPointer,
   type MachineState,
   type MachineEvent,
   type Effect as MachineEffect,
@@ -50,7 +51,7 @@ import {
   FRAME_PAD,
   RACK_GUTTER,
 } from './rackLayout';
-import { isFullDepth, slotOf } from './rackModel';
+import { isFullDepth, slotOf, canFit, nearestFreeU, type Slot } from './rackModel';
 import { rackBudget, occupiedUnits } from './rackBudget';
 import { deviceFaceParts, deviceOppositeFaceParts, devicePortLayout, rackShellParts, RACK_ART_DEFS } from './rackDeviceArt';
 import { deviceColorBy, type ColorByMode } from './rackColorBy';
@@ -80,8 +81,8 @@ export interface RackRowProps {
 const FACE_GAP = 22;
 
 type PanData = { tx: number; ty: number; faceRackId: string | null; button: number };
-type MoveData = { deviceId: string; span: number; name: string; fromRackId: string; additive: boolean };
-type DropTarget = { rackId: string; face: 'front' | 'rear'; colX: number; u: number; ok: boolean; reason: string | null };
+type MoveData = { deviceId: string; slot: Slot; name: string; fromRackId: string; additive: boolean };
+type DropTarget = { rackId: string; colX: number; u: number; ok: boolean; reason: string | null };
 type DragState = { deviceId: string; span: number; name: string; target: DropTarget | null };
 type Col = { rack: Rack; frontX: number; rearX: number; size: ReturnType<typeof cabinetSize> };
 
@@ -182,7 +183,7 @@ const RowScene = memo(function RowScene({
         )}
         {/* U ticks (every 5) */}
         {Array.from({ length: rack.ruHeight }, (_, k) => k + 1).filter((u) => u % 5 === 0 || u === 1).map((u) => (
-          <text key={u} x={origin.x - 23} y={origin.y + uLabelCenterY(rack, u) + 3} textAnchor="end" fontSize={8} fontFamily="var(--font-mono)" fill="#64748b">{u}</text>
+          <text key={u} x={origin.x - 23} y={origin.y + uLabelCenterY(rack, u) + 3} textAnchor="end" fontSize={8} fontFamily="var(--font-mono)" fill="var(--chrome-fg-muted)">{u}</text>
         ))}
         {/* occupancy heatmap — a per-U track on the left edge: filled = used, faint = free */}
         {(() => {
@@ -253,12 +254,37 @@ const RowScene = memo(function RowScene({
           <g key={c.rack.id}>
             {renderFace(c.rack, c.frontX, 'front')}
             {showRear && renderFace(c.rack, c.rearX, 'rear')}
-            {/* reorder chevrons over the rack group */}
+            {/* reorder chevrons over the rack group — real buttons: keyboard
+                reachable (Enter/Space), 24px hit target, not just a 13px glyph */}
             {i > 0 && (
-              <text x={c.frontX + 10} y={c.size.height + 14} fontSize={13} fill="var(--accent)" style={{ cursor: 'pointer' }} onClick={() => onReorder(c.rack.id, -1)} aria-label="Move rack left">◀</text>
+              <g
+                role="button"
+                tabIndex={0}
+                aria-label={`Move ${c.rack.name} left`}
+                style={{ cursor: 'pointer' }}
+                onClick={() => onReorder(c.rack.id, -1)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onReorder(c.rack.id, -1); }
+                }}
+              >
+                <rect x={c.frontX} y={c.size.height + 2} width={24} height={20} fill="transparent" />
+                <text x={c.frontX + 10} y={c.size.height + 14} fontSize={13} fill="var(--accent)">◀</text>
+              </g>
             )}
             {i < cols.length - 1 && (
-              <text x={groupRight - 16} y={c.size.height + 14} fontSize={13} fill="var(--accent)" style={{ cursor: 'pointer' }} onClick={() => onReorder(c.rack.id, 1)} aria-label="Move rack right">▶</text>
+              <g
+                role="button"
+                tabIndex={0}
+                aria-label={`Move ${c.rack.name} right`}
+                style={{ cursor: 'pointer' }}
+                onClick={() => onReorder(c.rack.id, 1)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onReorder(c.rack.id, 1); }
+                }}
+              >
+                <rect x={groupRight - 24} y={c.size.height + 2} width={24} height={20} fill="transparent" />
+                <text x={groupRight - 16} y={c.size.height + 14} fontSize={13} fill="var(--accent)">▶</text>
+              </g>
             )}
             {/* whole-rack budget under the front column */}
             <text x={bayOrigin(c.frontX).x} y={FRAME_PAD + bayH + 16} fontSize={10} fontFamily="var(--font-mono)" fill={b.overWatts || b.overWeight ? '#dc2626' : 'var(--chrome-fg-muted)'}>
@@ -358,10 +384,22 @@ export function RackRow({
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
+  // Window blur mid-gesture = cancel (Cmd+Tab, Mission Control): pointer
+  // events stop arriving, so without this the gesture dangles with capture
+  // held. The machine's 'blur' path was unit-pinned but never wired.
+  useEffect(() => {
+    const onBlur = () => {
+      if (machine.current.phase !== 'idle') dispatchRef.current({ type: 'blur' });
+    };
+    window.addEventListener('blur', onBlur);
+    return () => window.removeEventListener('blur', onBlur);
+  }, []);
+
   // ── Gesture machine (M4d) ───────────────────────────────────────────────────
   const machine = useRef<MachineState>(IDLE);
   const dispatchRef = useRef<(e: MachineEvent, mods?: { alt?: boolean; shift?: boolean }) => void>(() => {});
   const suppressMenu = useRef(false);
+  const panPrev = useRef({ x: 0, y: 0 });
 
   /** Client px → SVG user space (the svg carries the pan/zoom CSS transform). */
   const svgPoint = (clientX: number, clientY: number): { x: number; y: number } => {
@@ -372,19 +410,21 @@ export function RackRow({
     return { x: (clientX - r.left) / scale, y: (clientY - r.top) / scale };
   };
 
-  /** Which rack column + face + U is under this client point (null = aisle/background). */
-  const hitTarget = (clientX: number, clientY: number): { rackId: string; face: 'front' | 'rear'; colX: number; u: number; rack: Rack } | null => {
+  /** Which rack column + U is under this client point (null = aisle/background/outside the bay). */
+  const hitTarget = (clientX: number, clientY: number): { col: Col; u: number } | null => {
     const p = svgPoint(clientX, clientY);
     for (const c of cols) {
-      let face: 'front' | 'rear' | null = null;
-      let colX = 0;
-      if (p.x >= c.frontX && p.x <= c.frontX + c.size.width) { face = 'front'; colX = c.frontX; }
-      else if (showRear && p.x >= c.rearX && p.x <= c.rearX + c.size.width) { face = 'rear'; colX = c.rearX; }
-      if (!face) continue;
+      let colX: number | null = null;
+      if (p.x >= c.frontX && p.x <= c.frontX + c.size.width) colX = c.frontX;
+      else if (showRear && p.x >= c.rearX && p.x <= c.rearX + c.size.width) colX = c.rearX;
+      if (colX == null) continue;
       const origin = bayOrigin(colX);
+      // Outside the bay vertically (rack title, budget line) is NOT a target —
+      // clamping here would show a confident preview the user isn't aiming at.
+      if (p.y < origin.y || p.y > origin.y + c.rack.ruHeight * U_PX) return null;
       const fromTop = Math.floor((p.y - origin.y) / U_PX);
       const u = Math.max(1, Math.min(c.rack.ruHeight, c.rack.ruHeight - fromTop));
-      return { rackId: c.rack.id, face, colX, u, rack: c.rack };
+      return { col: c, u };
     }
     return null;
   };
@@ -402,48 +442,70 @@ export function RackRow({
         }
         break;
       case 'begin':
-        if (ef.gesture === 'moveDev') {
+        if (ef.gesture === 'pan') {
+          // Delta-from-previous (like the other canvases): survives a
+          // machine-seeded survivor pan (data null) and never stomps
+          // concurrent viewport writers with an arm-time snapshot.
+          panPrev.current = { x: ef.x, y: ef.y };
+        } else if (ef.gesture === 'moveDev') {
           const d = ef.data as MoveData;
-          setDrag({ deviceId: d.deviceId, span: d.span, name: d.name, target: null });
+          const next = { deviceId: d.deviceId, span: d.slot.ruSpan, name: d.name, target: null };
+          dragRef.current = next; // ref first: commit may land before React flushes
+          setDrag(next);
         }
         break;
       case 'update':
         if (ef.gesture === 'pan') {
-          const d = ef.data as PanData;
-          setVp((v) => ({ ...v, tx: d.tx + (ef.x - ef.startX), ty: d.ty + (ef.y - ef.startY) }));
+          const prev = panPrev.current;
+          panPrev.current = { x: ef.x, y: ef.y };
+          setVp((v) => panBy(v, ef.x - prev.x, ef.y - prev.y));
         } else if (ef.gesture === 'moveDev') {
           const d = ef.data as MoveData;
+          const cur = dragRef.current;
+          if (!cur) break;
           const t = hitTarget(ef.x, ef.y);
           // Only a DIFFERENT rack is a drop target — same-rack repositioning
           // lives in the focused editor, and previewing it here would lie.
-          if (!t || t.rackId === d.fromRackId) {
+          if (!t || t.col.rack.id === d.fromRackId) {
             setDragRackId(null);
-            setDrag((prev) => (prev ? { ...prev, target: null } : prev));
+            const cleared = { ...cur, target: null };
+            dragRef.current = cleared;
+            setDrag(cleared);
             break;
           }
-          const uMax = t.rack.ruHeight - d.span + 1;
+          const rack = t.col.rack;
+          const sl = d.slot;
+          // Validate with the SAME predicate the commit uses (canFit on the
+          // device's own side/bay/depth/mount — the move KEEPS its side, so
+          // hovered-face occupancy would lie about full-depth and rail gear).
+          const uMax = rack.ruHeight - sl.ruSpan + 1;
           const u = Math.max(1, Math.min(t.u, Math.max(1, uMax)));
+          const occupants = devices.filter((x) => x.rackId === rack.id);
+          const fit = canFit(rack, occupants, { ...sl, ru: u }, d.deviceId);
           let reason: string | null = null;
-          if (uMax < 1) {
-            reason = `needs ${d.span}U — taller than ${t.rack.name}`;
-          } else {
-            const occ = occupiedUnits(t.rack, devices.filter((x) => x.id !== d.deviceId), t.face);
-            for (let k = u; k < u + d.span; k++) {
-              if (occ.has(k)) { reason = `U${u} occupied — will take nearest free U`; break; }
-            }
+          if (!fit.ok) {
+            const alt = nearestFreeU(rack, occupants, sl.ruSpan, u, sl.side, sl.bay, sl.depth, d.deviceId, sl.mount);
+            reason = alt != null ? `U${u} blocked — will land at U${alt}` : `no room in ${rack.name}`;
           }
-          setDragRackId(t.rackId);
-          setDrag((prev) => (prev ? { ...prev, target: { rackId: t.rackId, face: t.face, colX: t.colX, u, ok: !reason, reason } } : prev));
+          // Preview draws in the column of the device's OWN side (where it
+          // will actually land), not the hovered column.
+          const colX = sl.side === 'rear' ? t.col.rearX : t.col.frontX;
+          setDragRackId(rack.id);
+          const next = { ...cur, target: { rackId: rack.id, colX, u, ok: fit.ok, reason } };
+          dragRef.current = next;
+          setDrag(next);
         }
         break;
       case 'commit':
         markGestureComplete(); // earned quiet (M3c)
         if (ef.gesture === 'pan') {
-          const d = ef.data as PanData;
-          if (d.button === 2) suppressMenu.current = true; // no menu after a real right-pan
+          // Null data = machine-seeded survivor pan (touch, never a right-drag).
+          const d = ef.data as PanData | null;
+          if (d?.button === 2) suppressMenu.current = true; // no menu after a real right-pan
         } else if (ef.gesture === 'moveDev') {
           const d = ef.data as MoveData;
           const t = dragRef.current?.target ?? null;
+          dragRef.current = null;
           setDrag(null);
           setDragRackId(null);
           if (t) onMoveDeviceToRack?.(d.deviceId, t.rackId, t.u);
@@ -451,16 +513,18 @@ export function RackRow({
         break;
       case 'cancel':
         if (ef.gesture === 'moveDev') {
+          dragRef.current = null;
           setDrag(null);
           setDragRackId(null);
         }
         break;
       case 'click':
         if (ef.gesture === 'pan') {
-          const d = ef.data as PanData;
-          if (d.button === 0 && d.faceRackId) onFocusRack(d.faceRackId);
+          const d = ef.data as PanData | null;
+          if (d?.button === 0 && d.faceRackId) onFocusRack(d.faceRackId);
         } else if (ef.gesture === 'moveDev') {
           const d = ef.data as MoveData;
+          dragRef.current = null;
           setDrag(null);
           onSelect(d.deviceId, d.additive);
           if (!d.additive) onFocusRack(d.fromRackId); // shift/cmd builds a selection without drilling in
@@ -522,7 +586,7 @@ export function RackRow({
       gesture: 'moveDev',
       data: {
         deviceId: d.id,
-        span: slotOf(d).ruSpan,
+        slot: slotOf(d),
         name: d.name,
         fromRackId: rack.id,
         additive: e.shiftKey || e.metaKey || e.ctrlKey,
@@ -549,9 +613,9 @@ export function RackRow({
       return;
     }
     const t = e.target as Element;
-    // Chevrons and the zoom cluster keep their native clicks — arming would
-    // capture the pointer and retarget those clicks away from them.
-    if (t.closest('[data-canvas-chrome]') || t.closest('text[aria-label]')) return;
+    // Chevron buttons and the zoom cluster keep their native clicks — arming
+    // would capture the pointer and retarget those clicks away from them.
+    if (t.closest('[data-canvas-chrome]') || t.closest('g[role="button"]')) return;
     if (e.button !== 0 && e.button !== 1 && e.button !== 2) return;
     const faceAttr = t.closest('[data-rack-face]')?.getAttribute('data-rack-face') ?? null;
     dispatchRef.current({
@@ -611,12 +675,19 @@ export function RackRow({
     const y = origin.y + (col.rack.ruHeight - (t.u + drag.span - 1)) * U_PX;
     const h = drag.span * U_PX;
     const color = t.ok ? '#22c55e' : '#f59e0b';
+    const label = `${drag.name} → U${t.u}${drag.span > 1 ? `–U${t.u + drag.span - 1}` : ''}${t.reason ? ` · ${t.reason}` : ''}`;
     return (
       <g pointerEvents="none" data-testid="row-drop-preview">
         <rect x={origin.x} y={y} width={BAY_W} height={h} rx={3}
           fill={color} fillOpacity={0.14} stroke={color} strokeWidth={1.5} strokeDasharray="5 3" />
-        <text x={origin.x + 4} y={y - 4} fontSize={9} fontFamily="var(--font-mono)" fill={color}>
-          {drag.name} → U{t.u}{drag.span > 1 ? `–U${t.u + drag.span - 1}` : ''}{t.reason ? ` · ${t.reason}` : ''}
+        {/* Label sits on an opaque theme plate — raw green/amber 9px text on
+            the light canvas was ~2:1 contrast; the outline still carries the
+            ok/blocked color and the reason text is the non-color cue. */}
+        <rect x={origin.x} y={y - 17} width={label.length * 6.2 + 10} height={14} rx={3}
+          fill="var(--chrome-bg)" stroke={color} strokeWidth={1} />
+        <text x={origin.x + 5} y={y - 6.5} fontSize={10} fontFamily="var(--font-mono)"
+          fill="var(--chrome-fg)">
+          {label}
         </text>
       </g>
     );
@@ -627,12 +698,30 @@ export function RackRow({
       ref={containerRef}
       className={styles.panCanvas}
       data-canvas-surface
+      tabIndex={-1} /* programmatic focus target: Escape/menu-close land here */
       onPointerDown={onContainerDown}
       onPointerMove={onContainerMove}
       onPointerUp={onContainerUp}
       onPointerCancel={() => dispatchRef.current({ type: 'cancel' })}
-      onLostPointerCapture={() => {
-        if (machine.current.phase !== 'idle') dispatchRef.current({ type: 'lostcapture' });
+      onClickCapture={(e) => {
+        // Make the machine's trailing-click swallow REAL (it was designed and
+        // tested but never wired): after a commit that requested it, the next
+        // native click is consumed here. Capture retargeting usually eats the
+        // click first — this covers gestures that start AND end on the same
+        // element with its own onClick.
+        if (machine.current.swallowNextClick) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        dispatchRef.current({ type: 'nativeclick' });
+      }}
+      onLostPointerCapture={(e) => {
+        // Only a loss of the pointer the machine still OWNS cancels — the
+        // browser also fires this for fingers the machine itself released
+        // (pinch → survivor pan must keep panning).
+        if (machine.current.phase !== 'idle' && ownsPointer(machine.current, e.pointerId)) {
+          dispatchRef.current({ type: 'lostcapture' });
+        }
       }}
       onContextMenu={onContextMenu}
     >

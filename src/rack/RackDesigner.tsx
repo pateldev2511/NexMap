@@ -8,6 +8,11 @@ import { RackRow } from './RackRow';
 import { keyboardRouter } from '@/input/router';
 import { announce } from '@/ui/announce';
 import { RACK_WHEEL_HINT_EVENT, RACK_WHEEL_HINT_TEXT } from './wheelHint';
+
+/** Rejected-drop flash duration — keep in sync with the CSS pulse. */
+const REJECT_FLASH_MS = 2400;
+/** One-time wheel-migration toast auto-dismiss. */
+const WHEEL_HINT_MS = 8000;
 import { ConnectPortsDialog, CABLE_COLORS, type CableSeedEnd } from './ConnectPortsDialog';
 import {
   buildRackSvg,
@@ -308,7 +313,8 @@ export function RackDesigner() {
   useEffect(() => {
     const onHint = () => {
       setWheelHint(RACK_WHEEL_HINT_TEXT);
-      window.setTimeout(() => setWheelHint(null), 8000);
+      announce(RACK_WHEEL_HINT_TEXT); // live region: role=status mounted WITH text is often silent to SRs
+      window.setTimeout(() => setWheelHint(null), WHEEL_HINT_MS);
     };
     window.addEventListener(RACK_WHEEL_HINT_EVENT, onHint);
     return () => window.removeEventListener(RACK_WHEEL_HINT_EVENT, onHint);
@@ -382,7 +388,7 @@ export function RackDesigner() {
         pulseU: nearestFreeU(rack, occ, span, slot.ru, side, useBay, depth),
       });
       announce(`Placement rejected: ${rejectReason(fit)}`);
-      window.setTimeout(() => setReject(null), 2400);
+      window.setTimeout(() => setReject(null), REJECT_FLASH_MS);
       return;
     }
     setReject(null);
@@ -439,7 +445,7 @@ export function RackDesigner() {
         pulseU: nearestFreeU(rack, others, slot.ruSpan, ru, slot.side, slot.bay, slot.depth),
       });
       announce(`Move rejected: ${rejectReason(fit)}`);
-      window.setTimeout(() => setReject(null), 2400);
+      window.setTimeout(() => setReject(null), REJECT_FLASH_MS);
     }
   }
 
@@ -627,13 +633,13 @@ export function RackDesigner() {
     // A pointer drag (row view) says WHERE the user pointed; the panel's
     // "Move to rack" control has no cursor, so it keeps the device's old U.
     const wanted = Math.max(1, Math.min(preferredU ?? sl.ru, target.ruHeight - sl.ruSpan + 1));
-    const u = nearestFreeU(target, occ, sl.ruSpan, wanted, sl.side, sl.bay, sl.depth);
+    const u = nearestFreeU(target, occ, sl.ruSpan, wanted, sl.side, sl.bay, sl.depth, undefined, sl.mount);
     const showReject = (reason: string) => {
       announce(`Move rejected: ${reason}`);
       setReject({ u: wanted, span: sl.ruSpan, reason, pulseU: null });
       setRowReject(reason);
-      window.setTimeout(() => setReject(null), 2400);
-      window.setTimeout(() => setRowReject(null), 2400);
+      window.setTimeout(() => setReject(null), REJECT_FLASH_MS);
+      window.setTimeout(() => setRowReject(null), REJECT_FLASH_MS);
     };
     if (u == null) { showReject(`No room in ${target.name}`); return false; }
     const fit = s().placeInRack(deviceId, targetRackId, { ...sl, ru: u });
@@ -693,7 +699,7 @@ export function RackDesigner() {
     <div className={styles.root}>
       {wheelHint && (
         <div
-          role="status"
+          aria-hidden="true" /* announced via the shared live region instead */
           style={{
             position: 'fixed',
             bottom: 18,

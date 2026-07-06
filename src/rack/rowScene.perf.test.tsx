@@ -53,16 +53,21 @@ describe('RowScene memoization (M4f)', () => {
     buildTwoRacks();
   });
 
-  it('wheel-pan frames do not re-render the scene', () => {
+  it('wheel-pan frames pan the viewport WITHOUT re-rendering the scene', () => {
     const { container } = renderRow();
     const surface = container.querySelector('[data-canvas-surface]')!;
+    const svg = surface.querySelector('svg')!;
     expect(renders()).toBeGreaterThan(0); // scene rendered at least once
 
+    const styleBefore = svg.getAttribute('style');
     const before = renders();
     // 30 pan frames — the wheel contract pans on plain wheel.
     for (let i = 0; i < 30; i++) {
       fireEvent.wheel(surface, { deltaX: 3, deltaY: 7, deltaMode: 0 });
     }
+    // The pan must have REALLY happened (transform moved) — otherwise a
+    // detached wheel listener would make the render assertion pass vacuously.
+    expect(svg.getAttribute('style')).not.toBe(styleBefore);
     expect(renders()).toBe(before);
   });
 

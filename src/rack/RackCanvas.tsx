@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback, memo } from 'react';
 import type { Device, Rack, RackCable } from '@/model/types';
 import {
   cabinetSize,
@@ -27,6 +27,7 @@ import { portAt, portCenter, type PortTarget } from './portHit';
 import {
   reduce,
   IDLE,
+  ownsPointer,
   type MachineState,
   type MachineEvent,
   type Effect as MachineEffect,
@@ -40,6 +41,21 @@ import { markGestureComplete } from '@/input/quiet';
 import { SelectionToolbar, ToolbarSep, toolbarStyles } from '@/ui/SelectionToolbar';
 import { placeToolbar } from '@/ui/toolbarPlace';
 import { NexIcon } from '@/ui/icons/NexIcon';
+
+/** Screen readers should hear "green", not "#22c55e" (CABLE_COLORS hexes). */
+const CABLE_COLOR_NAMES: Record<string, string> = {
+  '#2563eb': 'blue',
+  '#16a34a': 'green',
+  '#dc2626': 'red',
+  '#f59e0b': 'amber',
+  '#7c3aed': 'violet',
+  '#06b6d4': 'cyan',
+  '#6b7280': 'gray',
+  '#111827': 'black',
+};
+function cableColorName(hex: string): string {
+  return CABLE_COLOR_NAMES[hex.toLowerCase()] ?? hex;
+}
 
 /** Cancel/inspect handle the keyboard router uses for in-flight rack gestures. */
 export interface RackGestureApi {
@@ -68,6 +84,173 @@ export interface RackCableActions {
   colors: string[];
 }
 import styles from './RackDesigner.module.css';
+
+type ScenePanel = { d: Device; panel: Rect; jacks: ReturnType<typeof devicePortLayout> };
+interface RackLayout {
+  mounted: Device[];
+  portCenters: Map<string, { x: number; y: number }>;
+  deviceRects: { id: string; box: Box }[];
+  ports: PortTarget[];
+  panels: ScenePanel[];
+  ghosts: { d: Device; panel: Rect }[];
+}
+
+/**
+ * The static rack scene: shell art, U gutter, ghosts, device panels, cables.
+ * Memoized (perf review 2026-07-05): pan/zoom is a CSS transform on the svg,
+ * so viewport frames must not regenerate rackShellParts/deviceFaceParts
+ * innerHTML (a 42U rack with dense gear is 1000+ SVG elements). Re-renders
+ * only on model/selection changes — rackScene.perf.test.tsx pins this.
+ * Live overlays (drop preview, reject flash, marquee, rubber cable, pending
+ * port ring) render OUTSIDE, in RackCanvas itself.
+ */
+const RackFocusScene = memo(function RackFocusScene({
+  rack,
+  cables,
+  side,
+  selectedId,
+  selectedIds,
+  selectedCableId,
+  layout,
+  onDevDown,
+  onSelectCable,
+}: {
+  rack: Rack;
+  cables: RackCable[];
+  side: 'front' | 'rear';
+  selectedId: string | null;
+  selectedIds?: Set<string>;
+  selectedCableId: string | null;
+  layout: RackLayout;
+  onDevDown: (e: React.PointerEvent, d: Device) => void;
+  onSelectCable: (id: string | null) => void;
+}) {
+  if (import.meta.env.MODE === 'test') {
+    (globalThis as { __rackSceneRenders?: number }).__rackSceneRenders =
+      ((globalThis as { __rackSceneRenders?: number }).__rackSceneRenders ?? 0) + 1;
+  }
+  const { width, height } = cabinetSize(rack);
+  const origin = bayOrigin();
+  const bayH = rack.ruHeight * U_PX;
+  return (
+    <>
+      <g dangerouslySetInnerHTML={{ __html: RACK_ART_DEFS }} />
+      <g dangerouslySetInnerHTML={{
+        __html: rackShellParts({
+          rackName: rack.name,
+          ruHeight: rack.ruHeight,
+          face: side,
+          x: 0,
+          y: 0,
+          width,
+          height,
+          bayX: origin.x,
+          bayY: origin.y,
+          bayW: BAY_W,
+          bayH,
+          title: true,
+          active: true,
+        }).join(''),
+      }} />
+
+      {/* U-number gutter */}
+      {Array.from({ length: rack.ruHeight }, (_, i) => {
+        const u = i + 1;
+        return (
+          <text key={u} x={origin.x - 23} y={origin.y + uLabelCenterY(rack, u) + 3} textAnchor="end"
+            fontFamily="var(--font-mono)" fontSize={9} style={{ fill: 'var(--chrome-fg-muted)' }}>{u}</text>
+        );
+      })}
+
+      {/* opposite-face ghosts (behind), then live devices. Full-depth gear
+          shows its rear hardware; shallow gear is a muted occupancy hint. */}
+      {layout.ghosts.map(({ d, panel }) => (
+        <g key={`ghost-${d.id}`} pointerEvents="none" aria-hidden="true">
+          <title>{`${d.name} — mounted on the ${slotOf(d).side} face`}</title>
+          <g dangerouslySetInnerHTML={{ __html: deviceOppositeFaceParts(d, panel, side).join('') }} />
+        </g>
+      ))}
+      {layout.panels.map(({ d, panel, jacks }) => {
+        const isSel = d.id === selectedId || (selectedIds?.has(d.id) ?? false);
+        return (
+          <g
+            key={d.id}
+            className={styles.devhit}
+            onPointerDown={(e) => onDevDown(e, d)}
+            role="button"
+            tabIndex={0}
+            aria-label={`${d.name}, U${d.ru}${(d.ruSpan ?? 1) > 1 ? `–U${(d.ru ?? 0) + (d.ruSpan ?? 1) - 1}` : ''}`}
+          >
+            {/* realistic device art (shared, hex SVG strings) */}
+            <g dangerouslySetInnerHTML={{ __html: deviceFaceParts(d, panel, side).join('') }} />
+            {/* transparent hit area so the whole panel drags/selects */}
+            <rect x={panel.x} y={panel.y} width={panel.w} height={panel.h} fill="transparent" />
+            {/* per-jack markers: hit-testing uses portAt(); these exist so e2e
+                specs (and devtools) can FIND ports */}
+            {jacks.map((j) => (
+              <rect
+                key={`port-${d.id}-${j.ifaceId}`}
+                data-port={`${d.id}:${j.ifaceId}`}
+                x={j.x}
+                y={j.y}
+                width={j.w}
+                height={j.h}
+                fill="transparent"
+                pointerEvents="none"
+              />
+            ))}
+            {isSel && (
+              <rect x={panel.x} y={panel.y} width={panel.w} height={panel.h} rx={3}
+                fill="none" style={{ stroke: 'var(--accent)', strokeWidth: 2 }} pointerEvents="none" />
+            )}
+          </g>
+        );
+      })}
+
+      {/* cables: haloed, bowed, selectable curves. Each cable bows by a different
+          amount so parallel runs separate; a contrasting halo keeps crossings legible;
+          selecting one (here or in the schedule) highlights it and dims the rest. */}
+      {cables.map((c, i) => {
+        const a = layout.portCenters.get(`${c.aEnd.deviceId}:${c.aEnd.ifaceId}`);
+        const b = layout.portCenters.get(`${c.bEnd.deviceId}:${c.bEnd.ifaceId}`);
+        if (!a || !b) return null;
+        const sel = c.id === selectedCableId;
+        const anySel = selectedCableId != null;
+        const { d: dPath, control } = cablePath(a, b, i, false);
+        const op = anySel ? (sel ? 1 : 0.16) : 0.94;
+        const w = sel ? 4.4 : 3.1;
+        return (
+          <g
+            key={c.id}
+            data-cable-id={c.id}
+            style={{ cursor: 'pointer' }}
+            onClick={(e) => { e.stopPropagation(); onSelectCable(sel ? null : c.id); }}
+          >
+            {/* layered cable: soft shadow, pale jacket highlight, colored core, plug ends */}
+            <path d={dPath} fill="none" stroke="#020617" strokeWidth={w + 5} strokeLinecap="round" opacity={op * 0.24} filter="url(#rkCableShadow)" />
+            <path d={dPath} fill="none" stroke="#f8fafc" strokeWidth={w + 2.4} strokeLinecap="round" opacity={op * 0.86} />
+            <path d={dPath} fill="none" stroke={c.color} strokeWidth={w} strokeLinecap="round" opacity={op} />
+            <path d={dPath} fill="none" stroke="#ffffff" strokeWidth={0.9} strokeLinecap="round" opacity={op * 0.5} />
+            <circle cx={a.x} cy={a.y} r={sel ? 4.8 : 3.9} fill="#0f172a" opacity={op} stroke="#f8fafc" strokeWidth={1.1} />
+            <circle cx={b.x} cy={b.y} r={sel ? 4.8 : 3.9} fill="#0f172a" opacity={op} stroke="#f8fafc" strokeWidth={1.1} />
+            <circle cx={a.x} cy={a.y} r={sel ? 2.6 : 2.1} fill={c.color} opacity={op} />
+            <circle cx={b.x} cy={b.y} r={sel ? 2.6 : 2.1} fill={c.color} opacity={op} />
+            {sel && c.label && (
+              <text
+                x={control.x} y={control.y - 5} textAnchor="middle"
+                fontFamily="var(--font-mono)" fontSize={10}
+                stroke="var(--chrome-bg)" strokeWidth={3} paintOrder="stroke"
+                style={{ fill: 'var(--chrome-fg)' }}
+              >
+                {c.label}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </>
+  );
+});
 
 /**
  * Live SVG rack editor. Shares the rack/device/cable drawing primitives used by export,
@@ -133,7 +316,6 @@ export function RackCanvas({
 }) {
   const { width, height } = cabinetSize(rack);
   const origin = bayOrigin();
-  const bayH = rack.ruHeight * U_PX;
   const svgRef = useRef<SVGSVGElement>(null);
   const [hoverU, setHoverU] = useState<number | null>(null);
   const [dragU, setDragU] = useState<number | null>(null); // external drag-from-library
@@ -242,6 +424,17 @@ export function RackCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Window blur mid-gesture = cancel (Cmd+Tab, Mission Control): pointer
+  // events stop arriving, so without this the gesture dangles with capture
+  // held. The machine's 'blur' path was unit-pinned but never wired.
+  useEffect(() => {
+    const onBlur = () => {
+      if (machine.current.phase !== 'idle') dispatchRef.current({ type: 'blur' });
+    };
+    window.addEventListener('blur', onBlur);
+    return () => window.removeEventListener('blur', onBlur);
+  }, []);
+
   // Container-level pointer routing: the machine owns every gesture; the
   // container is the single event owner (svg events bubble up to it) and the
   // capture target, so moves/ups keep arriving off-element.
@@ -298,10 +491,38 @@ export function RackCanvas({
     setVp((v) => zoomTo(v, v.scale * k, r?.width ?? 800, r?.height ?? 600));
   };
 
-  const mounted = devices.filter((d) => d.rackId === rack.id && d.ru != null);
-  const portCenters = new Map<string, { x: number; y: number }>(); // `${devId}:${ifaceId}`
-  const deviceRects: { id: string; box: Box }[] = []; // selectable device panels, in SVG space
-  const ports: PortTarget[] = []; // every visible jack, in SVG space, for drag-to-cable hit-testing
+  // Scene geometry per MODEL change, not per viewport frame: panel rects,
+  // jack layouts, and the hit-test tables shared by the memoized scene, the
+  // pointer handlers, and the floating toolbars. (The focus editor gets the
+  // same memo boundary RackRow's RowScene got — rackScene.perf.test pins it.)
+  const layout = useMemo<RackLayout>(() => {
+    const mounted = devices.filter((d) => d.rackId === rack.id && d.ru != null);
+    const portCenters = new Map<string, { x: number; y: number }>(); // `${devId}:${ifaceId}`
+    const deviceRects: { id: string; box: Box }[] = [];
+    const ports: PortTarget[] = [];
+    const panels: ScenePanel[] = [];
+    const ghosts: { d: Device; panel: Rect }[] = [];
+    for (const d of mounted) {
+      const r = deviceRect(rack, d);
+      const panel: Rect = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
+      if (slotOf(d).side === side) {
+        deviceRects.push({ id: d.id, box: { x: panel.x, y: panel.y, w: panel.w, h: panel.h } });
+        const jacks = devicePortLayout(d, panel);
+        for (const j of jacks) {
+          portCenters.set(`${d.id}:${j.ifaceId}`, { x: j.x + j.w / 2, y: j.y + j.h / 2 });
+          ports.push({ deviceId: d.id, ifaceId: j.ifaceId, x: j.x, y: j.y, w: j.w, h: j.h });
+        }
+        panels.push({ d, panel, jacks });
+      } else if (slotOf(d).mount !== 'rail') {
+        // Ghosts (opposite face, rack-mounted) render BEHIND the live panels.
+        ghosts.push({ d, panel });
+      }
+    }
+    return { mounted, portCenters, deviceRects, ports, panels, ghosts };
+    // origin is layout-constant (bayOrigin() has no inputs here).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rack, devices, side]);
+  const { deviceRects, ports } = layout;
 
   /** Map a client point to SVG user-space coordinates (uniform scale via the viewBox). */
   const clientToSvg = (clientX: number, clientY: number): { x: number; y: number } => {
@@ -544,100 +765,73 @@ export function RackCanvas({
     });
   };
 
-  const cssVar = (name: string): string => `var(${name})`;
+  // Anchor for the cable mini-controls: the selected cable's curve control
+  // point (same bow math the scene draws with).
+  const selCableControl = useMemo(() => {
+    if (!selectedCableId) return null;
+    const i = cables.findIndex((c) => c.id === selectedCableId);
+    if (i < 0) return null;
+    const c = cables[i]!;
+    const a = layout.portCenters.get(`${c.aEnd.deviceId}:${c.aEnd.ifaceId}`);
+    const b = layout.portCenters.get(`${c.bEnd.deviceId}:${c.bEnd.ifaceId}`);
+    if (!a || !b) return null;
+    return cablePath(a, b, i, false).control;
+  }, [cables, selectedCableId, layout]);
 
-  /** Live device panel as SVG JSX (themeable). */
-  const renderPanel = (d: Device) => {
-    const r = deviceRect(rack, d);
-    const panel: Rect = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
-    const isSel = d.id === selectedId || (selectedIds?.has(d.id) ?? false);
-    deviceRects.push({ id: d.id, box: { x: panel.x, y: panel.y, w: panel.w, h: panel.h } });
-
-    // Jack/NIC centers feed cable endpoints; the shared art draws onto these same rects.
-    const jacks = devicePortLayout(d, panel);
-    for (const j of jacks) {
-      portCenters.set(`${d.id}:${j.ifaceId}`, { x: j.x + j.w / 2, y: j.y + j.h / 2 });
-      ports.push({ deviceId: d.id, ifaceId: j.ifaceId, x: j.x, y: j.y, w: j.w, h: j.h });
-    }
-
-    return (
-      <g
-        key={d.id}
-        className={styles.devhit}
-        onPointerDown={(e) => onDevDown(e, d)}
-        role="button"
-        tabIndex={0}
-        aria-label={`${d.name}, U${d.ru}${(d.ruSpan ?? 1) > 1 ? `–U${(d.ru ?? 0) + (d.ruSpan ?? 1) - 1}` : ''}`}
-      >
-        {/* realistic device art (shared, hex SVG strings) */}
-        <g dangerouslySetInnerHTML={{ __html: deviceFaceParts(d, panel, side).join('') }} />
-        {/* transparent hit area so the whole panel drags/selects */}
-        <rect x={panel.x} y={panel.y} width={panel.w} height={panel.h} fill="transparent" />
-        {/* per-jack markers: hit-testing uses portAt(); these exist so e2e
-            specs (and devtools) can FIND ports — the old "no stable
-            selectors" excuse for skipping cabling e2e is retired */}
-        {jacks.map((j) => (
-          <rect
-            key={`port-${d.id}-${j.ifaceId}`}
-            data-port={`${d.id}:${j.ifaceId}`}
-            x={j.x}
-            y={j.y}
-            width={j.w}
-            height={j.h}
-            fill="transparent"
-            pointerEvents="none"
-          />
-        ))}
-        {isSel && (
-          <rect x={panel.x} y={panel.y} width={panel.w} height={panel.h} rx={3}
-            fill="none" style={{ stroke: cssVar('--accent'), strokeWidth: 2 }} pointerEvents="none" />
-        )}
-      </g>
-    );
-  };
-
-  /** A device on the OTHER face. Full-depth gear shows its rear hardware; shallow gear
-   *  remains a muted occupancy hint. Non-interactive; editing lives on the mounted face. */
-  const renderGhost = (d: Device) => {
-    const r = deviceRect(rack, d);
-    const panel: Rect = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
-    return (
-      <g key={`ghost-${d.id}`} pointerEvents="none" aria-hidden="true">
-        <title>{`${d.name} — mounted on the ${slotOf(d).side} face`}</title>
-        <g dangerouslySetInnerHTML={{ __html: deviceOppositeFaceParts(d, panel, side).join('') }} />
-      </g>
-    );
-  };
-
-  // Captured while rendering the cable curves; anchors the mini-controls.
-  let selCableControl: { x: number; y: number } | null = null;
-  // Ghosts (opposite face, rack-mounted) render BEHIND the live panels.
-  const ghosts = mounted
-    .filter((d) => slotOf(d).side !== side && slotOf(d).mount !== 'rail')
-    .map(renderGhost);
-  const panels = mounted.filter((d) => slotOf(d).side === side).map(renderPanel);
+  // Stable identities for the memoized scene (dispatchRef pattern): a scene
+  // re-render must mean the MODEL changed, never that a closure was re-minted.
+  const sceneApiRef = useRef({ onDevDown, onSelectCable });
+  sceneApiRef.current = { onDevDown, onSelectCable };
+  const onDevDownStable = useCallback(
+    (e: React.PointerEvent, d: Device) => sceneApiRef.current.onDevDown(e, d),
+    [],
+  );
+  const onSelectCableStable = useCallback(
+    (id: string | null) => sceneApiRef.current.onSelectCable(id),
+    [],
+  );
 
   return (
     <div
       ref={containerRef}
       className={styles.rackEditCanvas}
       data-canvas-surface
+      tabIndex={-1} /* programmatic focus target: Escape/menu-close land here */
       onPointerDown={onContainerDown}
       onPointerMove={onContainerMove}
       onPointerUp={onContainerUp}
       onPointerCancel={onContainerCancel}
-      onLostPointerCapture={() => {
-        if (machine.current.phase !== 'idle') dispatchRef.current({ type: 'lostcapture' });
+      onClickCapture={(e) => {
+        // Make the machine's trailing-click swallow REAL (it was designed and
+        // tested but never wired): after a commit that requested it, the next
+        // native click is consumed here. Capture retargeting usually eats the
+        // click first — this covers gestures that start AND end on the same
+        // element with its own onClick.
+        if (machine.current.swallowNextClick) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        dispatchRef.current({ type: 'nativeclick' });
+      }}
+      onLostPointerCapture={(e) => {
+        // Fires for EVERY released pointer — including the lifted finger the
+        // machine itself just released (pinch → survivor pan). Only a loss of
+        // the pointer the machine still OWNS is a real cancellation.
+        if (machine.current.phase !== 'idle' && ownsPointer(machine.current, e.pointerId)) {
+          dispatchRef.current({ type: 'lostcapture' });
+        }
       }}
       onContextMenu={(e) => e.preventDefault() /* right-drag pans; no menu here */}
       onDoubleClick={(e) => {
         // Empty-bay double-click → quick place (M4c). Pointer capture lives on
         // this container, so the browser retargets the dblclick here and
         // e.target is NOT the element under the cursor — hit-test the point
-        // instead to skip devices and cables (they own their own clicks).
+        // instead to skip devices, cables, and floating chrome (zoom cluster,
+        // device/cable toolbars — double-clicking "+" must not mount gear).
         if (!onQuickPlace || machine.current.phase !== 'idle') return;
         const under = document.elementFromPoint(e.clientX, e.clientY);
-        if (under?.closest('g[role="button"]') || under?.closest('g[style*="cursor: pointer"]')) return;
+        if (!under || under.closest('[data-canvas-chrome]')) return;
+        if (under.closest('g[role="button"]') || under.closest('g[style*="cursor: pointer"]')) return;
         onQuickPlace(yToU(e.clientY));
       }}
     >
@@ -665,42 +859,22 @@ export function RackCanvas({
         onDropPreset(key, yToU(e.clientY));
       }}
     >
-      <g dangerouslySetInnerHTML={{ __html: RACK_ART_DEFS }} />
-      <g dangerouslySetInnerHTML={{
-        __html: rackShellParts({
-          rackName: rack.name,
-          ruHeight: rack.ruHeight,
-          face: side,
-          x: 0,
-          y: 0,
-          width,
-          height,
-          bayX: origin.x,
-          bayY: origin.y,
-          bayW: BAY_W,
-          bayH,
-          title: true,
-          active: true,
-        }).join(''),
-      }} />
-
-      {/* U-number gutter */}
-      {Array.from({ length: rack.ruHeight }, (_, i) => {
-        const u = i + 1;
-        return (
-          <text key={u} x={origin.x - 23} y={origin.y + uLabelCenterY(rack, u) + 3} textAnchor="end"
-            fontFamily="var(--font-mono)" fontSize={9} style={{ fill: '#64748b' }}>{u}</text>
-        );
-      })}
-
-      {/* opposite-face ghosts (behind), then live devices */}
-      {ghosts}
-      {panels}
+      <RackFocusScene
+        rack={rack}
+        cables={cables}
+        side={side}
+        selectedId={selectedId}
+        selectedIds={selectedIds}
+        selectedCableId={selectedCableId}
+        layout={layout}
+        onDevDown={onDevDownStable}
+        onSelectCable={onSelectCableStable}
+      />
 
       {/* empty-face hint — so flipping to a bare face never reads as "gear vanished".
           Anchored near the TOP of the bay (not its vertical center) so it stays visible
           without scrolling a tall 42U cabinet. */}
-      {panels.length === 0 && ghosts.length === 0 && !armed && dragU == null && (
+      {layout.panels.length === 0 && layout.ghosts.length === 0 && !armed && dragU == null && (
         <text
           x={origin.x + BAY_W / 2} y={origin.y + 110} textAnchor="middle"
           fontFamily="var(--font-ui)" fontSize={13} style={{ fill: 'var(--chrome-fg-muted)' }}
@@ -708,48 +882,6 @@ export function RackCanvas({
           Nothing on the {side} face yet — drag gear from the left
         </text>
       )}
-
-      {/* cables: haloed, bowed, selectable curves. Each cable bows by a different
-          amount so parallel runs separate; a contrasting halo keeps crossings legible;
-          selecting one (here or in the schedule) highlights it and dims the rest. */}
-      {cables.map((c, i) => {
-        const a = portCenters.get(`${c.aEnd.deviceId}:${c.aEnd.ifaceId}`);
-        const b = portCenters.get(`${c.bEnd.deviceId}:${c.bEnd.ifaceId}`);
-        if (!a || !b) return null;
-        const sel = c.id === selectedCableId;
-        const anySel = selectedCableId != null;
-        const { d: dPath, control } = cablePath(a, b, i, false);
-        if (sel) selCableControl = control;
-        const op = anySel ? (sel ? 1 : 0.16) : 0.94;
-        const w = sel ? 4.4 : 3.1;
-        return (
-          <g
-            key={c.id}
-            style={{ cursor: 'pointer' }}
-            onClick={(e) => { e.stopPropagation(); onSelectCable(sel ? null : c.id); }}
-          >
-            {/* layered cable: soft shadow, pale jacket highlight, colored core, plug ends */}
-            <path d={dPath} fill="none" stroke="#020617" strokeWidth={w + 5} strokeLinecap="round" opacity={op * 0.24} filter="url(#rkCableShadow)" />
-            <path d={dPath} fill="none" stroke="#f8fafc" strokeWidth={w + 2.4} strokeLinecap="round" opacity={op * 0.86} />
-            <path d={dPath} fill="none" stroke={c.color} strokeWidth={w} strokeLinecap="round" opacity={op} />
-            <path d={dPath} fill="none" stroke="#ffffff" strokeWidth={0.9} strokeLinecap="round" opacity={op * 0.5} />
-            <circle cx={a.x} cy={a.y} r={sel ? 4.8 : 3.9} fill="#0f172a" opacity={op} stroke="#f8fafc" strokeWidth={1.1} />
-            <circle cx={b.x} cy={b.y} r={sel ? 4.8 : 3.9} fill="#0f172a" opacity={op} stroke="#f8fafc" strokeWidth={1.1} />
-            <circle cx={a.x} cy={a.y} r={sel ? 2.6 : 2.1} fill={c.color} opacity={op} />
-            <circle cx={b.x} cy={b.y} r={sel ? 2.6 : 2.1} fill={c.color} opacity={op} />
-            {sel && c.label && (
-              <text
-                x={control.x} y={control.y - 5} textAnchor="middle"
-                fontFamily="var(--font-mono)" fontSize={10}
-                stroke="var(--chrome-bg)" strokeWidth={3} paintOrder="stroke"
-                style={{ fill: 'var(--chrome-fg)' }}
-              >
-                {c.label}
-              </text>
-            )}
-          </g>
-        );
-      })}
 
       {/* drop / move preview — click-arm, device-drag, OR drag-from-library */}
       {(() => {
@@ -1022,8 +1154,9 @@ function RackCableControls({
       {actions.colors.map((color) => (
         <button
           key={color}
-          title={`Cable color ${color}`}
-          aria-label={`Cable color ${color}`}
+          title={`Cable color: ${cableColorName(color)}`}
+          aria-label={`Cable color: ${cableColorName(color)}`}
+          aria-pressed={color === cable.color}
           onClick={() => actions.setColor(color)}
           style={{
             width: 18,
