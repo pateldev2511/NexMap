@@ -101,6 +101,13 @@ test('Cmd+Z mid-drag reverts the drag and leaves history for a second press', as
   const startX = hit.x + hit.width / 2;
   const startY = hit.y + hit.height / 2;
 
+  const count = await page.locator('g[data-id][role="button"]').count();
+  // Give the second Cmd+Z something observable to undo: add a device first.
+  const svg = (await page.locator('svg:has(g[data-id])').first().boundingBox())!;
+  await page.mouse.dblclick(svg.x + 40, svg.y + 40);
+  await page.getByRole('menu', { name: 'Add device' }).getByRole('menuitem', { name: 'Switch' }).click();
+  await expect(page.locator('g[data-id][role="button"]')).toHaveCount(count + 1);
+
   await page.mouse.move(startX, startY);
   await page.mouse.down();
   await page.mouse.move(startX + 60, startY + 40, { steps: 4 });
@@ -109,6 +116,10 @@ test('Cmd+Z mid-drag reverts the drag and leaves history for a second press', as
 
   // The device is back at its origin (drag reverted, not committed) …
   await expect(node).toHaveAttribute('transform', before!);
-  // … and the model itself was not undone (all devices still present).
-  await expect(page.locator('g[data-id][role="button"]').first()).toBeVisible();
+  // … and the model itself was NOT undone: the added device is still there.
+  await expect(page.locator('g[data-id][role="button"]')).toHaveCount(count + 1);
+
+  // The SECOND press performs the real undo (removes the added device).
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(page.locator('g[data-id][role="button"]')).toHaveCount(count);
 });

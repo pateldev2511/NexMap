@@ -25,7 +25,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 const cableCount = (page: Page) =>
-  page.locator('[data-testid="rack-canvas"] g[style*="cursor: pointer"]').count();
+  page.locator('[data-testid="rack-canvas"] g[data-cable-id]').count();
 
 /** First port, and a port on a DIFFERENT device. */
 async function twoPorts(page: Page): Promise<[Locator, Locator]> {

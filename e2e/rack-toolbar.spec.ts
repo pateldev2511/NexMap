@@ -97,10 +97,10 @@ test('cable mini-controls: connect → edit label inline → delete on canvas', 
 
   // Delete from the canvas controls.
   const cableCount = await page
-    .locator('[data-testid="rack-canvas"] g[style*="cursor: pointer"]')
+    .locator('[data-testid="rack-canvas"] g[data-cable-id]')
     .count();
   await controls.getByRole('button', { name: 'Delete cable' }).click();
   await expect(
-    page.locator('[data-testid="rack-canvas"] g[style*="cursor: pointer"]'),
+    page.locator('[data-testid="rack-canvas"] g[data-cable-id]'),
   ).toHaveCount(cableCount - 1);
 });

@@ -108,3 +108,57 @@ test('rack: double-click an empty bay repeats the last-used preset (M4c)', async
   await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height * 0.7);
   await expect(page.locator('[data-testid="rack-canvas"] g[role="button"]')).toHaveCount(2);
 });
+
+test('keys do not leak past the open picker (Delete must not touch the canvas)', async ({ page }) => {
+  await openBranchOffice(page);
+  // Select a device so a leaked Delete would have something to destroy.
+  const dev = page.locator('g[data-id][role="button"]').first();
+  const hit = (await dev.locator('rect').first().boundingBox())!;
+  await page.mouse.click(hit.x + hit.width / 2, hit.y + hit.height / 2);
+  await expect(dev).toHaveAttribute('aria-pressed', 'true');
+  const count = await deviceCount(page);
+
+  const svg = (await page.locator('svg:has(g[data-id])').first().boundingBox())!;
+  await page.mouse.dblclick(svg.x + 40, svg.y + 40);
+  await expect(page.getByRole('menu', { name: 'Add device' })).toBeVisible();
+
+  await page.keyboard.press('Delete'); // router overlay swallows this
+  await expect(page.getByRole('menu', { name: 'Add device' })).toBeVisible();
+  expect(await deviceCount(page)).toBe(count); // selection survived
+
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu', { name: 'Add device' })).toHaveCount(0);
+});
+
+test('quick-create with connection is ONE undo entry (no orphan device)', async ({ page }) => {
+  await openBranchOffice(page);
+  const devBefore = await deviceCount(page);
+  const lnkBefore = await linkCount(page);
+
+  const hit = (await page
+    .locator('g[data-id][role="button"]')
+    .first()
+    .locator('rect')
+    .first()
+    .boundingBox())!;
+  await page.mouse.move(hit.x + hit.width / 2, hit.y + hit.height / 2);
+  const port = page.locator('[class*="connectHandle"]').first();
+  await expect(port).toBeVisible();
+  const pb = (await port.boundingBox())!;
+  const svg = (await page.locator('svg:has(g[data-id])').first().boundingBox())!;
+
+  await page.mouse.move(pb.x + pb.width / 2, pb.y + pb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(svg.x + svg.width - 60, svg.y + 60, { steps: 8 });
+  await page.mouse.up();
+  await page
+    .getByRole('menu', { name: 'Connect to new…' })
+    .getByRole('menuitem', { name: 'Router' })
+    .click();
+  await expect(page.locator('g[data-id][role="button"]')).toHaveCount(devBefore + 1);
+  await expect(page.locator('path[class*="linkHit"]')).toHaveCount(lnkBefore + 1);
+
+  await page.keyboard.press('ControlOrMeta+z'); // ONE undo removes device AND link
+  await expect(page.locator('g[data-id][role="button"]')).toHaveCount(devBefore);
+  await expect(page.locator('path[class*="linkHit"]')).toHaveCount(lnkBefore);
+});

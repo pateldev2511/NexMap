@@ -150,3 +150,61 @@ test('second finger mid-drag cancels the drag into a pinch (device reverts)', as
 
   await expect(node).toHaveAttribute('transform', before!); // reverted, not moved
 });
+
+test('pinch → lift one finger → the SURVIVOR keeps panning (no cancel)', async ({ page }) => {
+  const svg = (await page.locator('svg:has(g[data-id])').first().boundingBox())!;
+  const cx = svg.x + svg.width / 2;
+  const cy = svg.y + svg.height / 2;
+
+  const s = await cdp(page);
+  await s.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ x: cx - 100, y: cy }],
+  });
+  await s.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [
+      { x: cx - 100, y: cy },
+      { x: cx + 100, y: cy },
+    ],
+  });
+  // Establish the pinch with a small two-finger move.
+  await s.send('Input.dispatchTouchEvent', {
+    type: 'touchMove',
+    touchPoints: [
+      { x: cx - 100, y: cy + 10 },
+      { x: cx + 100, y: cy + 10 },
+    ],
+  });
+
+  // Lift the LEFT finger; the right one stays down. The lifted finger's
+  // lostpointercapture must NOT cancel the survivor pan (the ownsPointer
+  // filter in the adapters).
+  await s.send('Input.dispatchTouchEvent', {
+    type: 'touchEnd',
+    touchPoints: [{ x: cx + 100, y: cy + 10 }],
+  });
+
+  const nodeYBefore = (await page
+    .locator('g[data-id][role="button"]')
+    .first()
+    .locator('rect')
+    .first()
+    .boundingBox())!.y;
+
+  for (let i = 1; i <= 5; i++) {
+    await s.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ x: cx + 100, y: cy + 10 + i * 14 }],
+    });
+  }
+  await s.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+
+  const nodeYAfter = (await page
+    .locator('g[data-id][role="button"]')
+    .first()
+    .locator('rect')
+    .first()
+    .boundingBox())!.y;
+  expect(Math.abs(nodeYAfter - nodeYBefore)).toBeGreaterThan(30); // survivor panned
+});

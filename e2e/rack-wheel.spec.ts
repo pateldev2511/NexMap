@@ -66,6 +66,20 @@ test('row view: plain wheel pans, scale readout unchanged', async ({ page }) => 
   await expect(row).not.toHaveAttribute('style', styleBefore!);
 });
 
+test('the wheelAction=zoom pref applies to the ROW view too (separate wheel path)', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('nexmap.wheelAction', 'zoom'));
+  await openRackTemplate(page);
+  const row = page.getByRole('img', { name: 'All racks' });
+  await expect(row).toBeVisible();
+  const pctBefore = await zoomPct(page).textContent();
+
+  const box = (await row.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -120);
+
+  await expect(zoomPct(page)).not.toHaveText(pctBefore!); // plain wheel zooms
+});
+
 test('the wheelAction=zoom pref applies to the rack canvas too', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('nexmap.wheelAction', 'zoom'));
   await openRackTemplate(page);

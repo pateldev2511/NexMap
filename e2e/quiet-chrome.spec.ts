@@ -65,7 +65,8 @@ test('chrome does not dim before quiet is EARNED, dims after gesture + 4s, hover
   await expect
     .poll(() => zoomBarOpacity(page), { timeout: 7000 })
     .toBeLessThan(0.95);
-  expect(await zoomBarOpacity(page)).toBeCloseTo(0.6, 1);
+  // 0.8 floor (a11y review 2026-07-05): quiet must stay readable, not just calm.
+  expect(await zoomBarOpacity(page)).toBeCloseTo(0.8, 1);
 
   // The ACTIVE tool button never dims; its idle siblings do.
   const activeOpacity = await page
@@ -95,10 +96,13 @@ test('inspector collapse and bottom-panel state survive a reload', async ({ page
 
   await page.reload();
   // The autosaved draft triggers the recovery prompt — take the recovery.
+  // The dialog rides an async IndexedDB read — a one-shot isVisible() races
+  // it on slow CI; wait briefly, then dismiss if it appeared.
   const recover = page.getByRole('dialog').getByRole('button').first();
   const dialogShown = await page
     .getByText('Recover your work?')
-    .isVisible()
+    .waitFor({ timeout: 2000 })
+    .then(() => true)
     .catch(() => false);
   if (dialogShown) await recover.click();
   await expect(page.getByRole('button', { name: 'Inspector', exact: true })).toBeVisible();
