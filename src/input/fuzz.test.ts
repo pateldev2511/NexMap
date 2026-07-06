@@ -62,6 +62,21 @@ function trackCaptures(captured: Set<number>, effects: Effect[]) {
   }
 }
 
+/**
+ * begin/commit/cancel pairing: every 'begin' is eventually closed by exactly
+ * one 'commit' or 'cancel', and two gestures are never live at once. An
+ * unpaired begin is precisely the store-side leak (stale dragOrigins) this
+ * machine exists to kill.
+ */
+function trackGestureDepth(depth: { n: number }, effects: Effect[], ctx: string) {
+  for (const ef of effects) {
+    if (ef.kind === 'begin') depth.n++;
+    if (ef.kind === 'commit' || ef.kind === 'cancel') depth.n--;
+    expect(depth.n, `two live gestures are unrepresentable — ${ctx}`).toBeLessThanOrEqual(1);
+    expect(depth.n, `commit/cancel without a begin — ${ctx}`).toBeGreaterThanOrEqual(0);
+  }
+}
+
 describe('fuzz: the reducer is total and always recoverable', () => {
   const SEED = 20260703;
 
@@ -70,6 +85,7 @@ describe('fuzz: the reducer is total and always recoverable', () => {
     for (let seq = 0; seq < 3000; seq++) {
       let state: MachineState = IDLE;
       const captured = new Set<number>();
+      const depth = { n: 0 };
       const len = 1 + Math.floor(rnd() * 12);
       const trail: string[] = [];
       for (let i = 0; i < len; i++) {
@@ -85,17 +101,24 @@ describe('fuzz: the reducer is total and always recoverable', () => {
         }
         state = r.state;
         trackCaptures(captured, r.effects);
+        trackGestureDepth(depth, r.effects, `seq ${seq} (seed ${SEED}) [${trail.join(',')}]`);
       }
       // Recovery: cancel + escape from wherever we ended up → idle, captures drained.
       const c = reduce(state, { type: 'cancel' });
       trackCaptures(captured, c.effects);
+      trackGestureDepth(depth, c.effects, `seq ${seq} recovery-cancel`);
       const esc = reduce(c.state, { type: 'escape' });
       trackCaptures(captured, esc.effects);
+      trackGestureDepth(depth, esc.effects, `seq ${seq} recovery-escape`);
       expect(esc.state.phase, `seq ${seq} (seed ${SEED}) [${trail.join(',')}]`).toBe('idle');
       expect(
         [...captured],
         `dangling captures on seq ${seq} (seed ${SEED}) [${trail.join(',')}]`,
       ).toEqual([]);
+      expect(
+        depth.n,
+        `unpaired begin (= store-side leak) on seq ${seq} (seed ${SEED}) [${trail.join(',')}]`,
+      ).toBe(0);
     }
   });
 });

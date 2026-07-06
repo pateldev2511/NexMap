@@ -4,6 +4,7 @@ import {
   IDLE,
   CLICK_DRAG_THRESHOLD_PX,
   hasActiveGesture,
+  ownsPointer,
   type MachineState,
   type MachineEvent,
   type Effect,
@@ -182,5 +183,52 @@ describe('defensive totality', () => {
   it('hasActiveGesture counts armed presses (they are cancellable)', () => {
     expect(hasActiveGesture(IDLE)).toBe(false);
     expect(hasActiveGesture(run([arm()]).state)).toBe(true);
+  });
+});
+
+describe('pointer identity (mixed touch + mouse/pen)', () => {
+  it("a different pointer's up while ARMED is a no-op (no phantom click, capture kept)", () => {
+    const armed = run([arm({ pointerId: 1 })]);
+    const r = reduce(armed.state, { type: 'up', pointerId: 9 });
+    expect(r.effects).toEqual([]);
+    expect(r.state.phase).toBe('armed');
+    expect(r.state.pointerId).toBe(1);
+  });
+
+  it('ownsPointer: true for the gesture pointer, false for strangers', () => {
+    const armed = run([arm({ pointerId: 7 })]);
+    expect(ownsPointer(armed.state, 7)).toBe(true);
+    expect(ownsPointer(armed.state, 8)).toBe(false);
+    expect(ownsPointer(IDLE, 7)).toBe(false);
+  });
+
+  it('ownsPointer: both pinch fingers count; the LIFTED finger stops counting after survivor-pan', () => {
+    const pinch = run([
+      arm({ pointerId: 1, pointerType: 'touch' }),
+      { type: 'move', pointerId: 1, buttons: 1, x: 120, y: 100 },
+      { type: 'down', pointerId: 2, pointerType: 'touch', x: 300, y: 100 },
+    ]);
+    expect(pinch.state.phase).toBe('pinch');
+    expect(ownsPointer(pinch.state, 1)).toBe(true);
+    expect(ownsPointer(pinch.state, 2)).toBe(true);
+
+    const survivor = reduce(pinch.state, { type: 'up', pointerId: 1 });
+    expect(survivor.state.phase).toBe('active');
+    expect(survivor.state.gesture).toBe('pan');
+    // The adapter filters lostpointercapture through ownsPointer — the lifted
+    // finger's async capture-loss event must NOT cancel the survivor pan.
+    expect(ownsPointer(survivor.state, 1)).toBe(false);
+    expect(ownsPointer(survivor.state, 2)).toBe(true);
+  });
+
+  it('survivor pan begins with null data — adapters must not dereference it', () => {
+    const pinch = run([
+      arm({ pointerId: 1, pointerType: 'touch' }),
+      { type: 'move', pointerId: 1, buttons: 1, x: 120, y: 100 },
+      { type: 'down', pointerId: 2, pointerType: 'touch', x: 300, y: 100 },
+    ]);
+    const survivor = reduce(pinch.state, { type: 'up', pointerId: 1 });
+    const begin = survivor.effects.find((e) => e.kind === 'begin');
+    expect(begin && begin.kind === 'begin' ? begin.data : 'missing').toBeNull();
   });
 });

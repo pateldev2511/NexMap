@@ -208,13 +208,9 @@ export function reduce(
         }
         return no(state); // mouse/pen second button: captured gesture keeps ownership
       }
-      if (state.phase === 'idle' && e.pointerType === 'touch' && state.pinch === null) {
-        // First touch with nothing armed: the adapter arms gestures itself,
-        // so an unarmed touch down is just remembered implicitly by the DOM;
-        // nothing for the machine to do.
-        return no({ ...state, swallowNextClick: false });
-      }
       if (state.phase === 'pinch') return no(state); // 3rd finger: ignored
+      // Idle (incl. first unarmed touch — the adapter arms gestures itself):
+      // nothing to do beyond expiring a pending click swallow.
       return no({ ...state, swallowNextClick: false });
     }
 
@@ -294,6 +290,12 @@ export function reduce(
 
     case 'up': {
       if (state.phase === 'armed') {
+        // A different pointer's release must not resolve this press as a
+        // click (mixed touch+mouse/pen: a stray finger lift would otherwise
+        // fire a phantom click AND drop the real pointer's capture).
+        if (e.pointerId != null && state.pointerId != null && e.pointerId !== state.pointerId) {
+          return no(state);
+        }
         // Below threshold: this was a click. Selection rules live in the
         // adapter's click handler for the armed gesture kind.
         const effects: Effect[] = [
@@ -378,4 +380,19 @@ export function reduce(
 /** True when the machine owns an in-flight gesture (armed counts: a press is cancellable). */
 export function hasActiveGesture(state: MachineState): boolean {
   return state.phase !== 'idle';
+}
+
+/**
+ * Does this pointer belong to the machine's current gesture (or pinch)?
+ * Adapters MUST filter lostpointercapture through this: the browser fires it
+ * for EVERY released pointer — including ones the machine itself just
+ * released, e.g. the lifted finger of a pinch → survivor-pan transition.
+ * Dispatching 'lostcapture' for that stale pointer would cancel the survivor.
+ */
+export function ownsPointer(state: MachineState, pointerId: number): boolean {
+  return (
+    state.pointerId === pointerId ||
+    state.pinch?.a.id === pointerId ||
+    state.pinch?.b.id === pointerId
+  );
 }

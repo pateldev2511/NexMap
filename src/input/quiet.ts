@@ -22,8 +22,3 @@ export function onQuietEarned(fn: () => void): () => void {
   listeners.add(fn);
   return () => listeners.delete(fn);
 }
-
-/** Test hook. */
-export function resetQuietForTests(): void {
-  earned = false;
-}

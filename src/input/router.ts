@@ -109,8 +109,11 @@ export class KeyboardRouter {
     if (isTextTarget(e.target)) return;
 
     // 2) Overlays, innermost first. A throw = not handled, next layer runs.
-    for (let i = this.overlays.length - 1; i >= 0; i--) {
-      const overlay = this.overlays[i];
+    // Iterate a snapshot: a handler that unregisters an overlay (its own or a
+    // lower one) must not shift indices mid-walk and run a neighbor twice.
+    const overlays = [...this.overlays];
+    for (let i = overlays.length - 1; i >= 0; i--) {
+      const overlay = overlays[i];
       if (!overlay) continue;
       try {
         if (overlay(e)) return;
