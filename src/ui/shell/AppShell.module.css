@@ -100,6 +100,18 @@
   gap: 6px;
   min-width: 0;
   justify-content: flex-end;
+  /* This child SHRINKS (min-width 0) while its buttons don't (flex 0 0 auto),
+     so it must contain its own overflow at EVERY width — not just below the
+     breakpoints. Without this, wider font metrics (Linux) made the buttons
+     spill leftward OVER the panel toggles around ~1280px, painting an
+     unclickable Inspector button (caught by CI, quiet-chrome persistence
+     spec: "Open" intercepted the toggle's clicks). */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.topbarActions::-webkit-scrollbar {
+  display: none;
 }
 
 /* When the topbar gets tight, collapse action buttons to icons (tooltips remain)
@@ -295,14 +307,7 @@ select.topbarBtn {
     padding-inline: 8px;
   }
 
-  .topbarActions {
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .topbarActions::-webkit-scrollbar {
-    display: none;
-  }
+  /* (overflow containment on .topbarActions is unconditional now — see above) */
 
   .titleInput {
     width: 160px;
