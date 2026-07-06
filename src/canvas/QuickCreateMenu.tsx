@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { DeviceType } from '@/model/types';
 import { defaultDeviceName } from '@/model/schema';
+import { keyboardRouter } from '@/input/router';
 import styles from './QuickCreateMenu.module.css';
 
 /**
@@ -40,13 +41,39 @@ export function QuickCreateMenu({
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Clamp inside the canvas (estimated box; small enough that estimate ≈ real).
-  const W = 176;
-  const H = 34 + QUICK_CREATE_TYPES.length * 26;
+  // Coarse pointers get 44px rows (see the CSS) — the estimate must match or
+  // the clamp lets the taller menu run off-screen.
+  const coarse =
+    typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+  const W = coarse ? 200 : 176;
+  const H = 34 + QUICK_CREATE_TYPES.length * (coarse ? 44 : 26);
   const cl = Math.max(8, Math.min(left, vw - W - 8));
   const ct = Math.max(8, Math.min(top, vh - H - 8));
 
   useEffect(() => {
     menuRef.current?.querySelector('button')?.focus();
+    // On close (pick, Escape, click-away) the focused button unmounts, which
+    // would strand keyboard focus at document.body — hand it back to the
+    // canvas container instead.
+    const surface = menuRef.current?.closest<HTMLElement>('[data-canvas-surface]');
+    return () => surface?.focus?.();
+  }, []);
+
+  // Router overlay while open: without this, Delete/Cmd+Z/tool-mode keys fall
+  // through to the canvas BEHIND the menu (deleting the selection, popping the
+  // history entry the pending pick depends on). Escape closes here even if
+  // focus escaped the menu. Returning true only stops the ROUTER — the menu's
+  // own React handlers and native button activation are unaffected. Tab stays
+  // free so keyboard users can leave.
+  useEffect(() => {
+    return keyboardRouter.registerOverlay((e) => {
+      if (e.key === 'Escape') {
+        onClose();
+        return true;
+      }
+      return e.key !== 'Tab';
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (

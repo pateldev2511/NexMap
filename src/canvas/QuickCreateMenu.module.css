@@ -46,8 +46,24 @@
   cursor: pointer;
 }
 
-.menu button:hover,
+.menu button:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+/* Keyboard focus keeps a REAL ring (the 14% tint alone fails the 3:1
+   non-text contrast bar) — same treatment as SelectionToolbar. */
 .menu button:focus-visible {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
-  outline: none;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Touch: menu items must be finger-sized (matches SelectionToolbar's rule). */
+@media (pointer: coarse) {
+  .menu {
+    width: 200px;
+  }
+  .menu button {
+    min-height: 44px;
+  }
 }

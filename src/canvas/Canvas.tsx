@@ -14,6 +14,7 @@ import { markGestureComplete } from '@/input/quiet';
 import {
   reduce,
   IDLE,
+  ownsPointer,
   type MachineState,
   type MachineEvent,
   type Effect as MachineEffect,
@@ -177,9 +178,11 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   // empty canvas, or by dropping a link on empty space (then sourceId is set
   // and the pick also CONNECTS).
   const [quickCreate, setQuickCreate] = useState<{
-    sx: number;
+    sx: number; // screen: anchors the menu
     sy: number;
-    sourceId?: string;
+    fx: number; // FLAT world point captured at open — the viewport can pan
+    fy: number; // under the open menu (wheel over the backdrop), so mapping
+    sourceId?: string; // at pick time would land the device somewhere else.
   } | null>(null);
   // Assigned each render (below, after its dependencies exist) so handlers
   // and the router shim always dispatch with fresh closures.
@@ -187,6 +190,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     (e: MachineEvent, mods?: { alt?: boolean; shift?: boolean }) => void
   >(() => {});
   const viewportRef = useRef<Viewport>(initialViewport);
+  const projectionRef = useRef<'flat' | 'iso'>('flat');
   const altHeld = useRef(false);
   // Set after a right-button drag-pan so the trailing contextmenu is suppressed.
   const suppressMenu = useRef(false);
@@ -414,10 +418,10 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     [store, size, readOnly, projection, marquee, lassoPts],
   );
 
-  // Gesture-cancel shim over the legacy gesture ref: reverts whatever is in
-  // flight WITHOUT touching history (store.cancelDrag/cancelResize), so the
-  // router can consume Escape / Cmd+Z safely mid-gesture. Each per-gesture
-  // machine migration swaps its case here for the machine path.
+  // Cancel whatever gesture is in flight WITHOUT touching history: dispatches
+  // 'escape' into the machine, whose cancel effects restore the store
+  // (cancelDrag/cancelResize) and release capture. This is what the router
+  // calls to consume Escape / Cmd+Z safely mid-gesture.
   const cancelActiveGesture = useCallback(() => {
     momentum.current.block(performance.now());
     // ALL gestures are machine-owned: cancel through the reducer — its
@@ -496,6 +500,17 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     };
   }, []);
 
+  // Window blur mid-gesture = cancel (Cmd+Tab, Mission Control): pointer
+  // events stop arriving, so without this the gesture dangles with capture
+  // held. The machine's 'blur' path was unit-pinned but never wired.
+  useEffect(() => {
+    const onBlur = () => {
+      if (machine.current.phase !== 'idle') dispatchRef.current({ type: 'blur' });
+    };
+    window.addEventListener('blur', onBlur);
+    return () => window.removeEventListener('blur', onBlur);
+  }, []);
+
   const localPoint = useCallback((e: { clientX: number; clientY: number }) => {
     const rect = rootRef.current!.getBoundingClientRect();
     return { sx: e.clientX - rect.left, sy: e.clientY - rect.top };
@@ -503,28 +518,35 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
 
   // Screen pixel → FLAT model coordinate (projection-aware). In iso mode the
   // pointer lands in iso screen space, so we invert the projection too.
-  const toFlat = useCallback(
-    (sx: number, sy: number): { x: number; y: number } => {
-      const c = screenToCanvas(viewport, sx, sy);
-      return projection === 'iso' ? isoUnprojectPx(c.x, c.y, GRID_SIZE, ISO_TILE) : c;
-    },
-    [viewport, projection],
-  );
+  // IDENTITY-STABLE on purpose: both viewport and projection are read through
+  // refs (assigned every render, above/below), so this callback — and the
+  // whole chain hanging off it (startLinkFrom → onDevicePointerDown → every
+  // DeviceNode's onPointerDown prop) — never changes identity. A viewport-dep
+  // version re-minted the chain on EVERY pan frame and defeated the node
+  // memo: all N devices re-rendered per frame (flatScene.perf.test pins this).
+  // History note: an earlier bug came from closing over viewport with a
+  // [projection]-only dep list — refs for BOTH inputs are what make dep-free
+  // safe here.
+  const toFlat = useCallback((sx: number, sy: number): { x: number; y: number } => {
+    const c = screenToCanvas(viewportRef.current, sx, sy);
+    return projectionRef.current === 'iso' ? isoUnprojectPx(c.x, c.y, GRID_SIZE, ISO_TILE) : c;
+  }, []);
 
   // Screen-space delta (already divided by scale) → FLAT delta. The projection is
   // linear, so the same inverse applies to vectors (no translation).
   const toFlatVec = useCallback(
     (dx: number, dy: number): { x: number; y: number } =>
-      projection === 'iso'
+      projectionRef.current === 'iso'
         ? isoUnprojectPx(dx, dy, GRID_SIZE, ISO_TILE)
         : { x: dx, y: dy },
-    [projection],
+    [],
   );
 
   // ── Machine dispatch + per-gesture effect table (strangler) ─────────────
   // The reducer owns lifecycle (capture, threshold, cancellation, second-
   // pointer policy); these handlers own the store semantics per gesture.
   viewportRef.current = viewport;
+  projectionRef.current = projection;
   const runMachineEffect = (ef: MachineEffect): void => {
     switch (ef.kind) {
       case 'capture':
@@ -663,15 +685,19 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           // real drag lands on EMPTY canvas, open quick-create so the pick
           // creates AND connects in one motion (M4b, the FigJam pattern).
           const d = ef.data as { sourceId: string; startX: number; startY: number };
-          const target = linkTarget;
           setLinkCursor(null);
           setLinkTarget(null);
           const cm = getConnectMode();
           const movedFar = Math.hypot(ef.x - d.startX, ef.y - d.startY) > 8;
           const releasePt = toFlat(ef.x, ef.y);
-          const overEmpty = !store()
-            .hitTest(releasePt.x, releasePt.y)
-            .some((id) => store().getDevice(id));
+          // Resolve the drop target from a FRESH hit-test at the release
+          // point — the linkTarget hover state can lag one pointermove when
+          // move and up land in the same frame (fast flick, touch).
+          const releaseHits = store().hitTest(releasePt.x, releasePt.y);
+          const target =
+            releaseHits.find((id) => store().getDevice(id) && id !== d.sourceId) ??
+            linkTarget;
+          const overEmpty = !releaseHits.some((id) => store().getDevice(id));
           if (cm !== 'click' && target && target !== d.sourceId) {
             const id = store().connect(d.sourceId, target);
             if (id) {
@@ -680,7 +706,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
             }
             setPending(null);
           } else if (movedFar && overEmpty) {
-            setQuickCreate({ sx: ef.x, sy: ef.y, sourceId: d.sourceId });
+            setQuickCreate({ sx: ef.x, sy: ef.y, fx: releasePt.x, fy: releasePt.y, sourceId: d.sourceId });
             setPending(null);
           } else if (cm !== 'drag') {
             setPending(d.sourceId);
@@ -700,9 +726,11 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           // endpoint (relinkEndpoint rejects self-loop) → snap back.
           if (target) store().relinkEndpoint(d.linkId, d.endpoint, target);
         } else if (ef.gesture === 'pan') {
-          const d = ef.data as { button: number; startX: number; startY: number };
+          // data is null for a machine-seeded survivor pan (pinch → one
+          // finger) — that's a touch pan, never a right-drag.
+          const d = ef.data as { button: number; startX: number; startY: number } | null;
           // A right-drag that actually panned must not pop the context menu.
-          if (d.button === 2 && Math.hypot(ef.x - d.startX, ef.y - d.startY) > 2) {
+          if (d && d.button === 2 && Math.hypot(ef.x - d.startX, ef.y - d.startY) > 2) {
             suppressMenu.current = true;
           }
         } else if (ef.gesture === 'resize') {
@@ -839,9 +867,9 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         y: sy,
       });
     },
-    // toFlat carries BOTH viewport and projection — depending on viewport
-    // alone left a stale projection in this closure after a flat↔iso toggle
-    // (drops/link starts landed at mis-projected coordinates).
+    // toFlat reads viewport+projection through refs, so this stays
+    // identity-stable (feeds every DeviceNode's onPointerDown via
+    // onDevicePointerDown — churn here defeats the node memo).
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [toFlat],
   );
@@ -1028,6 +1056,14 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     [spaceHeld, store, localPoint, startLinkFrom, setPending, readOnly],
   );
 
+  const onLabelDoubleClick = useCallback(
+    (e: React.MouseEvent, id: string) => {
+      e.stopPropagation();
+      if (!readOnly) setEditingDeviceId(id);
+    },
+    [readOnly],
+  );
+
   const onRootPointerDown = useCallback(
     (e: React.PointerEvent) => {
       const { sx, sy } = localPoint(e);
@@ -1143,7 +1179,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       const top = hit.find((id) => store().getDevice(id)) ?? null;
       if (top !== hoveredId) setHoveredId(top);
     },
-    [store, localPoint, viewport, hoveredId, toFlat, toFlatVec],
+    [store, localPoint, hoveredId, toFlat],
   );
 
   const onPointerUp = useCallback(
@@ -1161,7 +1197,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       }
       setReadout(null);
     },
-    [store, marquee, linkTarget, lassoPts, setPending, toFlat],
+    [], // body touches only refs (machine/dispatchRef) + stable setters
   );
 
   const onDrop = useCallback(
@@ -1197,7 +1233,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       }
       // Empty canvas double-click → quick-create at the point (M4c).
       if (!hit.some((h) => store().getDevice(h) || store().getObject(h))) {
-        setQuickCreate({ sx, sy });
+        setQuickCreate({ sx, sy, fx: c.x, fy: c.y });
       }
     },
     [store, localPoint, toFlat, readOnly],
@@ -1411,6 +1447,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       ref={rootRef}
       className={styles.root}
       data-canvas-surface
+      tabIndex={-1} /* programmatic focus target: Escape/menu-close land here */
       onDragOver={(e) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'copy';
@@ -1424,12 +1461,27 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={cancelActiveGesture}
-        onLostPointerCapture={() => {
+        onClickCapture={(e) => {
+          // Make the machine's trailing-click swallow REAL (it was designed and
+          // tested but never wired): after a commit that requested it, the next
+          // native click is consumed here. Capture retargeting usually eats the
+          // click first — this covers gestures that start AND end on the same
+          // element with its own onClick.
+          if (machine.current.swallowNextClick) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+          dispatchRef.current({ type: 'nativeclick' });
+        }}
+        onLostPointerCapture={(e) => {
           // A capture we lose without a pointerup is a cancelled gesture
-          // (OS interrupt, element churn). pointerup fires lostpointercapture
-          // too, but by then the up handler already reset gesture to 'none',
-          // so this is a no-op on the normal path.
-          if (machine.current.phase !== 'idle') cancelActiveGesture();
+          // (OS interrupt, element churn). On the normal path the up dispatch
+          // already reduced the machine to idle, so this is a no-op. Filter
+          // by ownership: the browser fires this for fingers the machine
+          // itself released (pinch → survivor pan must keep panning).
+          if (machine.current.phase !== 'idle' && ownsPointer(machine.current, e.pointerId)) {
+            cancelActiveGesture();
+          }
         }}
         onPointerLeave={() => setHoveredId(null)}
         onDoubleClick={onCanvasDoubleClick}
@@ -1730,10 +1782,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
                 hasIssue={errorIds.has(dev.id)}
                 onPointerDown={onDevicePointerDown}
                 onActivate={onActivateNode}
-                onLabelDoubleClick={(e, id) => {
-                  e.stopPropagation();
-                  if (!readOnly) setEditingDeviceId(id);
-                }}
+                onLabelDoubleClick={onLabelDoubleClick}
               />
             ))}
 
@@ -1823,10 +1872,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
                   hasIssue={errorIds.has(dev.id)}
                   onPointerDown={onDevicePointerDown}
                   onActivate={onActivateNode}
-                  onLabelDoubleClick={(e, id) => {
-                    e.stopPropagation();
-                    if (!readOnly) setEditingDeviceId(id);
-                  }}
+                  onLabelDoubleClick={onLabelDoubleClick}
                 />
               ))}
             {texts.map((o) =>
@@ -1983,10 +2029,14 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           title={quickCreate.sourceId ? 'Connect to new…' : 'Add device'}
           onClose={() => setQuickCreate(null)}
           onPick={(type) => {
-            const c = toFlat(quickCreate.sx, quickCreate.sy);
             const s = store();
-            const id = s.addDeviceAt(type, snap(c.x - 28, false), snap(c.y - 20, false));
-            if (quickCreate.sourceId) s.connect(quickCreate.sourceId, id);
+            const x = snap(quickCreate.fx - 28, false);
+            const y = snap(quickCreate.fy - 20, false);
+            // One gesture = ONE undo entry: device + link land as a single
+            // transaction (a lone Cmd+Z must not strand an orphan device).
+            const id = quickCreate.sourceId
+              ? s.addDeviceAndConnect(type, x, y, quickCreate.sourceId)
+              : s.addDeviceAt(type, x, y);
             s.select([id]);
             s.runValidation();
             setQuickCreate(null);
@@ -2135,7 +2185,6 @@ function PageBoundaries({
   return <g pointerEvents="none">{cells}</g>;
 }
 
-/** Floating alignment toolbar shown when 2+ movable entities are selected. */
 /**
  * Flat-canvas selection toolbar content (M3). Button-matrix rule: buttons
  * never appear/disappear per selection — inapplicable actions DISABLE, so

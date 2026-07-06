@@ -39,6 +39,10 @@ function DeviceNodeImpl({
   onLabelDoubleClick,
   onActivate,
 }: DeviceNodeProps) {
+  if (import.meta.env.MODE === 'test') {
+    (globalThis as { __deviceNodeRenders?: number }).__deviceNodeRenders =
+      ((globalThis as { __deviceNodeRenders?: number }).__deviceNodeRenders ?? 0) + 1;
+  }
   const visual = deviceVisual(device.type);
   const typeName = defaultDeviceName(device.type);
   const ariaLabel = `${device.name || typeName}, ${typeName}${
