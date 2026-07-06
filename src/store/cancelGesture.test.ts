@@ -80,3 +80,65 @@ describe('cancelResize', () => {
     expect(s().canUndo).toBe(undoBefore);
   });
 });
+
+describe('history identity-drop (cancelled waypoint drags leave no entry)', () => {
+  it('a live-merged link edit that collapses back to its origin is dropped', () => {
+    const a = s().addDeviceAt('router', 0, 0);
+    const b = s().addDeviceAt('switch', 200, 0);
+    const linkId = s().connect(a, b)!;
+
+    // Simulates a waypoint drag + Escape: moves merge into one entry, the
+    // cancel collapses it to identity (before == after) — History must drop
+    // it, or the next Cmd+Z is silently eaten by a no-op.
+    s().updateLink(linkId, { waypoints: undefined }, { waypoints: [{ x: 50, y: 50 }] });
+    s().updateLink(linkId, { waypoints: [{ x: 50, y: 50 }] }, { waypoints: undefined });
+
+    s().undo(); // must undo the CONNECT, not the phantom edit
+    expect(s().getLink(linkId)).toBeUndefined();
+  });
+
+  it('a zero-move identity edit records nothing', () => {
+    const a = s().addDeviceAt('router', 0, 0);
+    const b = s().addDeviceAt('switch', 200, 0);
+    const linkId = s().connect(a, b)!;
+    s().updateLink(linkId, { waypoints: undefined }, { waypoints: undefined });
+    s().undo();
+    expect(s().getLink(linkId)).toBeUndefined();
+  });
+});
+
+describe('addDeviceAndConnect (quick-create "Connect to new…")', () => {
+  it('one gesture = ONE undo entry: undo removes the device AND its link', () => {
+    const src = s().addDeviceAt('router', 0, 0);
+    const id = s().addDeviceAndConnect('switch', 200, 100, src);
+
+    expect(s().getDevice(id)).toBeDefined();
+    expect(s().linksAll()).toHaveLength(1);
+
+    s().undo(); // a single Cmd+Z must not strand an orphan device
+    expect(s().getDevice(id)).toBeUndefined();
+    expect(s().linksAll()).toHaveLength(0);
+    expect(s().getDevice(src)).toBeDefined(); // and must not eat the source
+  });
+
+  it('missing source degrades to a plain device add (still one entry)', () => {
+    const id = s().addDeviceAndConnect('switch', 200, 100, 'no-such-device');
+    expect(s().getDevice(id)).toBeDefined();
+    expect(s().linksAll()).toHaveLength(0);
+    s().undo();
+    expect(s().getDevice(id)).toBeUndefined();
+  });
+});
+
+describe('cancelled gestures do not dirty a clean document', () => {
+  it('cancelDrag restores the pre-gesture dirty flag', () => {
+    const a = s().addDeviceAt('router', 100, 100);
+    s().select([a]);
+    useProjectStore.setState({ dirty: false }); // simulate a freshly saved doc
+    s().beginDrag();
+    s().dragTo(60, 40, true);
+    expect(s().dirty).toBe(true); // transient move marks dirty…
+    s().cancelDrag();
+    expect(s().dirty).toBe(false); // …but the abort restores clean
+  });
+});

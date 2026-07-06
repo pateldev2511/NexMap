@@ -43,11 +43,19 @@ export class History {
     if (!this.breakCoalesce && last?.mergeWith) {
       const merged = last.mergeWith(command);
       if (merged) {
-        this.past[this.past.length - 1] = merged;
+        if (merged.isIdentity?.()) {
+          // The coalesced entry collapsed to a no-op (an Escape-cancelled
+          // drag restored its origin): drop it, else it eats the next undo.
+          this.past.pop();
+          this.breakCoalesce = true;
+        } else {
+          this.past[this.past.length - 1] = merged;
+        }
         return;
       }
     }
 
+    if (command.isIdentity?.()) return; // no-op command: nothing to record
     this.breakCoalesce = false;
     this.past.push(command);
     if (this.past.length > this.limit) this.past.shift();

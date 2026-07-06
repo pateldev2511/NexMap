@@ -33,6 +33,12 @@ export interface Command {
   apply(state: ModelState): void;
   undo(state: ModelState): void;
   /**
+   * True when applying and undoing are the same (before == after). History
+   * drops identity commands — a cancelled drag that collapsed back to its
+   * origin must not leave an entry that eats the next undo.
+   */
+  isIdentity?(): boolean;
+  /**
    * If this command can absorb `next` (same kind, same target, contiguous in
    * time), return the merged command; otherwise null. Both have already been
    * applied to state when this is called, so the merged command's undo must
@@ -139,6 +145,9 @@ export class UpdateLinkCommand implements Command {
       return new UpdateLinkCommand(this.id, this.before, next.after);
     }
     return null;
+  }
+  isIdentity(): boolean {
+    return JSON.stringify(this.before) === JSON.stringify(this.after);
   }
 }
 

@@ -102,6 +102,10 @@ const history = new History();
 const index = new SpatialIndex();
 /** Origin positions captured at drag start (transient, not in history). */
 let dragOrigins: Map<string, { x: number; y: number }> | null = null;
+/** dirty as of gesture start — a cancelled gesture must not mark the doc
+    edited (or arm an autosave draft of a byte-identical project). */
+let dirtyBeforeDrag = false;
+let dirtyBeforeResize = false;
 /**
  * Waypoint origins for links whose BOTH endpoints are in the moving selection.
  * Such links translate rigidly with the group (waypoints follow); links with only
@@ -289,6 +293,9 @@ export interface ProjectStore {
   /** Abort an in-flight resize: restore the original box, record nothing. */
   cancelResize(): void;
   connect(sourceId: string, targetId: string): string | null;
+  /** Quick-create "Connect to new…" (M4b): create the device AND its link as
+      ONE undoable transaction — one gesture, one Cmd+Z. Returns the device id. */
+  addDeviceAndConnect(type: DeviceType, x: number, y: number, sourceId: string): string;
   /** Apply imported devices+links as ONE atomic, undoable transaction (DA-T2). */
   importObjects(devices: Device[], links: Link[]): void;
   /** Apply imported VLANs/subnets as one atomic, undoable transaction. */
@@ -576,6 +583,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     },
 
     beginDrag() {
+      dirtyBeforeDrag = get().dirty;
       const origins = new Map<string, { x: number; y: number }>();
       for (const id of get().selection) {
         const m = movable(id);
@@ -716,6 +724,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     },
 
     beginResize(id) {
+      dirtyBeforeResize = get().dirty;
       const o = model.objects.get(id);
       if (!o || o.locked || model.layers.get(o.layerId)?.locked) {
         resizeOrig = null;
@@ -769,7 +778,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       if (!o) return;
       model.objects.set(id, { ...o, ...box });
       index.update(id, { x: box.x, y: box.y, width: box.width, height: box.height });
-      set({ rev: get().rev + 1 });
+      set({ rev: get().rev + 1, dirty: dirtyBeforeResize });
     },
 
     endDrag() {
@@ -850,7 +859,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       }
       dragLinkWaypoints = null;
       dragOrigins = null;
-      set({ rev: get().rev + 1 });
+      set({ rev: get().rev + 1, dirty: dirtyBeforeDrag });
     },
 
     connect(sourceId, targetId) {
@@ -860,6 +869,24 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       commit(new AddLinkCommand(link));
       history.commitCoalesceBoundary();
       return link.id;
+    },
+
+    addDeviceAndConnect(type, x, y, sourceId) {
+      const device = createDevice(type, x, y, firstLayerId());
+      const cmds: Command[] = [new AddDeviceCommand(device)];
+      if (model.devices.has(sourceId)) {
+        cmds.push(new AddLinkCommand(createLink(sourceId, device.id, firstLayerId())));
+      }
+      history.dispatch(transaction('Quick-create device', cmds), model);
+      index.insert(device.id, deviceBox(device));
+      history.commitCoalesceBoundary();
+      set({
+        rev: get().rev + 1,
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+      });
+      return device.id;
     },
 
     importObjects(devices, links) {

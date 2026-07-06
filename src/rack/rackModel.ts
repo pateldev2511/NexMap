@@ -203,11 +203,14 @@ export function nearestFreeU(
   bay: Bay = 'full',
   depth: Depth = 'full',
   ignoreId?: string,
+  mount: Mount = 'rack',
 ): number | null {
   if (span < 1 || span > rack.ruHeight) return null;
   const maxRu = rack.ruHeight - span + 1;
+  // The mount matters: a rail item (0U PDU) fits where rack-mount gear can't,
+  // so probing with a hardcoded 'rack' would falsely report a full rack.
   const fits = (ru: number) =>
-    ru >= 1 && ru <= maxRu && canFit(rack, occupants, { ru, ruSpan: span, mount: 'rack', side, bay, depth }, ignoreId).ok;
+    ru >= 1 && ru <= maxRu && canFit(rack, occupants, { ru, ruSpan: span, mount, side, bay, depth }, ignoreId).ok;
   const start = Math.max(1, Math.min(maxRu, Math.round(target)));
   for (let d = 0; d <= rack.ruHeight; d++) {
     if (fits(start - d)) return start - d;
