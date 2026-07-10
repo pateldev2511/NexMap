@@ -6,6 +6,51 @@ import type { CanvasObject } from '@/model/types';
 
 const L = 'layer';
 
+describe('buildSvg — link direction arrows (W1b, canvas parity)', () => {
+  it('emits the arrow marker def and defaults a link to an end arrow', () => {
+    const a = createDevice('router', 0, 0, L, { name: 'R1' });
+    const b = createDevice('switch', 200, 0, L, { name: 'SW1' });
+    const link = createLink(a.id, b.id, L); // no arrow field → canvas default 'end'
+    const svg = buildSvg([a, b], [link], { background: '#fff', includeLabels: true });
+    expect(svg).toContain('<marker id="nexmap-arrow"');
+    expect(svg).toContain('fill="#6b7785"'); // literal, not a CSS var
+    expect(svg).toContain('marker-end="url(#nexmap-arrow)"');
+    expect(svg).not.toContain('marker-start=');
+  });
+
+  it("arrow: 'both' emits start AND end markers", () => {
+    const a = createDevice('router', 0, 0, L);
+    const b = createDevice('switch', 200, 0, L);
+    const link = createLink(a.id, b.id, L, { arrow: 'both' });
+    const svg = buildSvg([a, b], [link], { background: '#fff', includeLabels: true });
+    expect(svg).toContain('marker-end="url(#nexmap-arrow)"');
+    expect(svg).toContain('marker-start="url(#nexmap-arrow)"');
+  });
+
+  it("arrow: 'none' emits no markers on the link", () => {
+    const a = createDevice('router', 0, 0, L);
+    const b = createDevice('switch', 200, 0, L);
+    const link = createLink(a.id, b.id, L, { arrow: 'none' });
+    const svg = buildSvg([a, b], [link], { background: '#fff', includeLabels: true });
+    // The def still exists (cheap, shared), but this link references no marker.
+    const linkPath = svg.slice(svg.indexOf(`data-id="${link.id}"`));
+    expect(linkPath.slice(0, linkPath.indexOf('/>'))).not.toContain('marker-');
+  });
+
+  it('iso export carries arrows too (separate builder path)', () => {
+    const a = createDevice('router', 0, 0, L);
+    const b = createDevice('switch', 200, 0, L);
+    const link = createLink(a.id, b.id, L);
+    const svg = buildSvg([a, b], [link], {
+      background: '#fff',
+      includeLabels: true,
+      projection: 'iso',
+    });
+    expect(svg).toContain('<marker id="nexmap-arrow"');
+    expect(svg).toContain('marker-end="url(#nexmap-arrow)"');
+  });
+});
+
 describe('buildSvg — connectors + annotation cards', () => {
   it('applies manual link color and width in the export', () => {
     const a = createDevice('router', 0, 0, L, { name: 'R1' });

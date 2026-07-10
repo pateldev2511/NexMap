@@ -96,6 +96,26 @@ function linkStrokeAttrs(l: Link, health: StrokeHealth | null, sole: boolean): s
 }
 
 /**
+ * The link direction arrowhead, mirroring the canvas marker (Canvas.tsx
+ * `#nexmap-arrow`) so exports carry the arrows the editor shows. The canvas
+ * fills it with `var(--chrome-fg-muted)`; CSS vars can't survive to non-browser
+ * export consumers, so it's resolved to a literal neutral slate here.
+ */
+const EXPORT_ARROW_FILL = '#6b7785';
+const ARROW_MARKER_DEF =
+  `<defs><marker id="nexmap-arrow" viewBox="0 0 10 10" refX="9" refY="5" ` +
+  `markerWidth="7" markerHeight="7" orient="auto-start-reverse">` +
+  `<path d="M0 0 L10 5 L0 10 z" fill="${EXPORT_ARROW_FILL}"/></marker></defs>`;
+
+/** marker-start/-end attrs for a link, matching the canvas default (arrow: 'end'). */
+function linkArrowAttrs(l: Link): string {
+  const arrow = l.arrow ?? 'end';
+  const end = arrow === 'end' || arrow === 'both' ? ' marker-end="url(#nexmap-arrow)"' : '';
+  const start = arrow === 'both' ? ' marker-start="url(#nexmap-arrow)"' : '';
+  return end + start;
+}
+
+/**
  * Annotation card → stacked, escaped SVG text (heading / subheading / body). Absent
  * fields collapse. Used by both flat and iso export so they match the canvas.
  */
@@ -141,6 +161,7 @@ export function buildSvg(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" ` +
       `viewBox="${b.minX} ${b.minY} ${w} ${h}" font-family="sans-serif">`,
   );
+  parts.push(ARROW_MARKER_DEF);
   if (opts.background) {
     parts.push(
       `<rect x="${b.minX}" y="${b.minY}" width="${w}" height="${h}" fill="${escapeXml(opts.background)}"/>`,
@@ -185,7 +206,7 @@ export function buildSvg(
         ? orthogonalIconPoints(a, t)
         : connectorIconPoints(l, a, t);
     parts.push(
-      `<path data-id="${escapeXml(l.id)}" d="${pathD(pts)}" fill="none" ${linkStrokeAttrs(l, health, (pairCount.get(pairKey(l)) ?? 0) === 1)} stroke-linecap="round" stroke-linejoin="round"/>`,
+      `<path data-id="${escapeXml(l.id)}" d="${pathD(pts)}" fill="none" ${linkStrokeAttrs(l, health, (pairCount.get(pairKey(l)) ?? 0) === 1)}${linkArrowAttrs(l)} stroke-linecap="round" stroke-linejoin="round"/>`,
     );
   }
 
@@ -265,6 +286,7 @@ function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): 
     `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" ` +
       `viewBox="${minX} ${minY} ${w} ${h}" font-family="sans-serif">`,
   );
+  parts.push(ARROW_MARKER_DEF);
   if (opts.background) {
     parts.push(
       `<rect x="${minX}" y="${minY}" width="${w}" height="${h}" fill="${escapeXml(opts.background)}"/>`,
@@ -302,7 +324,7 @@ function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): 
         ? orthogonalIconPoints(s, t)
         : connectorIconPoints(l, s, t);
     parts.push(
-      `<path d="${pathD(pts)}" fill="none" ${linkStrokeAttrs(l, health, (pairCount.get(pairKey(l)) ?? 0) === 1)} stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`,
+      `<path d="${pathD(pts)}" fill="none" ${linkStrokeAttrs(l, health, (pairCount.get(pairKey(l)) ?? 0) === 1)}${linkArrowAttrs(l)} stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`,
     );
   }
   parts.push(`</g>`);
