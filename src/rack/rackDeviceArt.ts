@@ -179,6 +179,11 @@ export function devicePortLayout(device: Device, panel: Rect): PortRect[] {
     // bottom via the column-major fill), separated into banks of 6.
     return portLayout(panel, ports, { groupEvery: 6, groupGap: 6 });
   }
+  if (kind === 'appliance') {
+    // Router / LB / WLC: a single sparse row of interface ports, room on the
+    // left for a console/mgmt port (drawn by the art, not an interface).
+    return portLayout(panel, ports, { rows: 1, nameZone: 120, maxJack: 13 });
+  }
   return portLayout(panel, ports);
 }
 
@@ -354,6 +359,27 @@ export function deviceFaceParts(device: Device, panel: Rect, face: 'front' | 're
       out.push(`<rect x="${n(panel.x + 8)}" y="${n(panel.y + panel.h - 7)}" width="26" height="3" rx="1" fill="#dc2626"/>`);
       out.push(`<rect x="${n(panel.x + 38)}" y="${n(panel.y + panel.h - 7)}" width="26" height="3" rx="1" fill="#2563eb"/>`);
     }
+  } else if (kind === 'appliance') {
+    // Router / load-balancer / WLAN controller: a solid appliance body with a
+    // console (light-blue) + management (amber) port pair on the left, a sparse
+    // single row of data ports, an activity LED bar, and a type-colored accent
+    // stripe — NO dense jack rows or SFP cages (the switch signature).
+    const accent =
+      device.type === 'router' ? '#2563eb'
+      : device.type === 'load-balancer' ? '#ef4444'
+      : '#14b8a6'; // wireless-controller / access-point
+    out.push(chassis(device, panel, { led: accent }));
+    const cy = panel.y + panel.h / 2;
+    // Console + mgmt ports (left).
+    out.push(`<rect x="${n(panel.x + 62)}" y="${n(cy - 5)}" width="10" height="10" rx="1.5" fill="${C.cage}" stroke="#38bdf8" stroke-width="0.9"/>`);
+    out.push(`<rect x="${n(panel.x + 76)}" y="${n(cy - 5)}" width="10" height="10" rx="1.5" fill="${C.cage}" stroke="#f59e0b" stroke-width="0.9"/>`);
+    // Sparse data ports.
+    for (const j of devicePortLayout(device, panel)) out.push(rj45(j.x, j.y, j.w, j.h));
+    // Activity LED bar + accent stripe under the name.
+    for (let i = 0; i < 5; i++) {
+      out.push(`<circle cx="${n(panel.x + 96 + i * 5)}" cy="${n(panel.y + 7)}" r="1.4" fill="${i < 3 ? 'url(#rkLedG)' : C.vent}"/>`);
+    }
+    out.push(`<rect x="${n(panel.x + 8)}" y="${n(panel.y + panel.h - 7)}" width="40" height="3" rx="1" fill="${accent}"/>`);
   } else if (kind === 'patch') {
     out.push(chassis(device, panel, { faceplate: 'url(#rkPatch)', led: '#3a4654' }));
     const jacks = devicePortLayout(device, panel);

@@ -8,6 +8,7 @@ import type { DeviceType } from '@/model/types';
 
 export type PanelKind =
   | 'switch' // jack rows + SFP cages
+  | 'appliance' // router / LB / WLC: solid body, few ports, console + accent
   | 'patch' // dense keystone port grid
   | 'server' // drive-bay array
   | 'firewall' // copper body + few ports
@@ -20,11 +21,12 @@ export type PanelKind =
 export function panelKindFor(type: DeviceType): PanelKind {
   switch (type) {
     case 'switch':
+      return 'switch';
     case 'router':
     case 'load-balancer':
     case 'access-point':
     case 'wireless-controller':
-      return 'switch';
+      return 'appliance';
     case 'patch-panel':
       return 'patch';
     case 'server':

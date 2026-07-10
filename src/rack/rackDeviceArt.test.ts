@@ -100,6 +100,33 @@ describe('devicePortLayout — faceplate realism (W2)', () => {
     expect(svg).toContain('#7f1d1d'); // the APC skin's red UPS badge — skin took precedence
   });
 
+  it('router / LB / WLC render as appliances (accent + console, no SFP cages)', () => {
+    const cases: [DeviceType, string][] = [
+      ['router', '#2563eb'],
+      ['load-balancer', '#ef4444'],
+      ['wireless-controller', '#14b8a6'],
+    ];
+    for (const [type, accent] of cases) {
+      const svg = join(deviceFaceParts(withPorts(type, 8), panel));
+      expect(svg).toContain(accent); // type-colored accent stripe
+      expect(svg).toContain('#38bdf8'); // console port (light-blue border)
+      expect(svg).toContain('#f59e0b'); // mgmt port (amber border)
+    }
+  });
+
+  it('a vendor-skinned appliance still uses its photo skin, not the fallback', () => {
+    const f5: Device = {
+      id: 'l', kind: 'device', type: 'load-balancer', name: 'LB', vendor: 'F5', model: 'BIG-IP',
+      x: 0, y: 0, width: 56, height: 40, layerId: 'L',
+      interfaces: [{ id: 'p0', name: '1.1' }],
+    };
+    const svg = join(deviceFaceParts(f5, panel));
+    // The load-balancer skin (applianceFrontSkin) runs before panelKindFor; it
+    // does not emit the fallback's amber mgmt port + blue console pair.
+    const hasFallbackConsolePair = svg.includes('#38bdf8') && svg.includes('#f59e0b');
+    expect(hasFallbackConsolePair).toBe(false);
+  });
+
   it('a rail-mounted PDU renders a vertical outlet strip (not a horizontal panel)', () => {
     const pdu: Device = {
       id: 'p', kind: 'device', type: 'ups', name: 'PDU 1', mount: 'rail',
