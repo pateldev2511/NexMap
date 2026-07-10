@@ -80,6 +80,25 @@ describe('devicePortLayout — faceplate realism (W2)', () => {
     // Every drawn jack sits at a hit-marker x (same layout → same coordinates).
     expect(jackXs.every((jx) => markerXs.some((mx) => Math.abs(mx - jx) <= 1))).toBe(true);
   });
+
+  it('a generic UPS renders a battery+LCD faceplate, not PSU fan grilles', () => {
+    const ups: Device = {
+      id: 'u', kind: 'device', type: 'ups', name: 'UPS 1', x: 0, y: 0, width: 56, height: 88, layerId: 'L',
+      interfaces: [],
+    };
+    const svg = join(deviceFaceParts(ups, { x: 100, y: 50, w: 560, h: 88 }));
+    expect(svg).toContain('url(#rkLCD)'); // status LCD
+    expect((svg.match(/url\(#rkLedG\)/g) ?? []).length).toBeGreaterThanOrEqual(3); // charge bar segments
+  });
+
+  it('a vendor-skinned APC UPS uses its photo skin, not the fallback', () => {
+    const apc: Device = {
+      id: 'u', kind: 'device', type: 'ups', name: 'UPS 1', vendor: 'APC', model: 'Smart-UPS SRT 2200',
+      x: 0, y: 0, width: 56, height: 88, layerId: 'L', interfaces: [],
+    };
+    const svg = join(deviceFaceParts(apc, { x: 100, y: 50, w: 560, h: 88 }));
+    expect(svg).toContain('#7f1d1d'); // the APC skin's red UPS badge — skin took precedence
+  });
 });
 
 function dev(type: DeviceType, over: Partial<Device> = {}): Device {

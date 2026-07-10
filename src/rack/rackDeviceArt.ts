@@ -168,7 +168,7 @@ export function devicePortLayout(device: Device, panel: Rect): PortRect[] {
       maxJack: 12,
     });
   }
-  if (kind === 'psu' || kind === 'cable-mgr' || kind === 'blank') return [];
+  if (kind === 'ups' || kind === 'psu' || kind === 'cable-mgr' || kind === 'blank') return [];
   if (kind === 'patch') {
     // Real 1U patch panels run ALL keystones in ONE row, banked in 6s. Shared
     // opts with the photo skin so drawn ports and hit markers always align.
@@ -354,9 +354,42 @@ export function deviceFaceParts(device: Device, panel: Rect, face: 'front' | 're
     // status LCD + recessed power button near the label, similar to enterprise servers.
     out.push(`<rect x="${n(panel.x + 8)}" y="${n(panel.y + panel.h - 11)}" width="34" height="8" rx="1.5" fill="url(#rkLCD)" stroke="#2dd4bf" stroke-width="0.6"/>`);
     out.push(`<circle cx="${n(panel.x + 54)}" cy="${n(panel.y + panel.h - 7)}" r="3.4" fill="${C.cage}" stroke="${C.jackBd}" stroke-width="0.75"/>`);
+  } else if (kind === 'ups') {
+    // A rack UPS: a big battery module (left), a status LCD with a charge/load
+    // bar, and a row of C13 outlets (right). Distinct from a PSU's fan grilles.
+    out.push(chassis(device, panel));
+    const cy = panel.y + panel.h / 2;
+    // Battery module block (left of the name), with cell divider lines.
+    const battX = panel.x + 72;
+    const battW = Math.max(60, panel.w * 0.28);
+    const battY = panel.y + 6;
+    const battH = Math.max(12, panel.h - 12);
+    out.push(`<rect x="${n(battX)}" y="${n(battY)}" width="${n(battW)}" height="${n(battH)}" rx="2.5" fill="#0d1219" stroke="${C.cageBd}" stroke-width="0.8"/>`);
+    const cells = Math.max(3, Math.round(battW / 22));
+    for (let i = 1; i < cells; i++) {
+      const dx = battX + (battW / cells) * i;
+      out.push(`<path d="M ${n(dx)} ${n(battY + 2)} v ${n(battH - 4)}" stroke="${C.chassisBd}" stroke-width="0.7"/>`);
+    }
+    // Status LCD + a green charge bar (batteries full / online).
+    const lcdX = battX + battW + 12;
+    const lcdW = Math.min(52, panel.w - (lcdX - panel.x) - 90);
+    if (lcdW > 16) {
+      out.push(`<rect x="${n(lcdX)}" y="${n(cy - 9)}" width="${n(lcdW)}" height="18" rx="2" fill="url(#rkLCD)" stroke="#2dd4bf" stroke-width="0.7"/>`);
+      const segs = 5;
+      const segW = (lcdW - 8) / segs;
+      for (let i = 0; i < segs; i++) {
+        out.push(`<rect x="${n(lcdX + 4 + i * segW)}" y="${n(cy - 3)}" width="${n(segW - 1.5)}" height="6" rx="0.8" fill="url(#rkLedG)" opacity="${(0.55 + i * 0.09).toFixed(2)}"/>`);
+      }
+    }
+    // C13 outlets on the right edge.
+    for (let i = 0; i < 4; i++) {
+      const cx = panel.x + panel.w - 16 - i * 16;
+      out.push(`<rect x="${n(cx - 5.5)}" y="${n(cy - 6)}" width="11" height="12" rx="1.5" fill="${C.cage}" stroke="${C.jackBd}" stroke-width="0.75"/>`);
+      out.push(`<path d="M ${n(cx - 2.4)} ${n(cy - 2.4)} h 4.8 M ${n(cx)} ${n(cy + 0.4)} v 3" stroke="${C.notch}" stroke-width="1.1" stroke-linecap="round"/>`);
+    }
   } else if (kind === 'psu') {
     out.push(chassis(device, panel));
-    // outlets + vents (UPS/PSU)
+    // fan grilles + vents (a raw PSU shelf, not a UPS)
     const cy = panel.y + panel.h / 2;
     for (let i = 0; i < 3; i++) {
       const cx = panel.x + panel.w - 18 - i * 18;

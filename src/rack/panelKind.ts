@@ -12,6 +12,7 @@ export type PanelKind =
   | 'server' // drive-bay array
   | 'firewall' // copper body + few ports
   | 'blade' // vertical blade modules
+  | 'ups' // battery module + status LCD + outlets
   | 'psu' // fan grilles + vents
   | 'cable-mgr' // horizontal slotted bar
   | 'blank'; // featureless 1U filler
@@ -34,7 +35,7 @@ export function panelKindFor(type: DeviceType): PanelKind {
     case 'firewall':
       return 'firewall';
     case 'ups':
-      return 'psu';
+      return 'ups';
     default:
       return 'blank';
   }
