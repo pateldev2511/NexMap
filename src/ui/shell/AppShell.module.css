@@ -115,10 +115,10 @@
 }
 
 /* When the topbar gets tight, collapse action buttons to icons (tooltips remain)
-   so they never overlap. The "More" menu panel labels are unaffected. */
+   so they never overlap. The More trigger (a plain .topbarBtn) collapses too;
+   its aria-label keeps the accessible name stable regardless of the span. */
 @media (max-width: 1240px) {
-  .topbarActions > .topbarBtn span,
-  .topbarActions .moreMenu > summary span {
+  .topbarActions > .topbarBtn span {
     display: none;
   }
 }
@@ -172,22 +172,11 @@ select.topbarBtn {
   border-color: var(--accent);
 }
 
-.moreMenu {
-  position: relative;
-}
-
-.moreMenu summary {
-  list-style: none;
-}
-
-.moreMenu summary::-webkit-details-marker {
-  display: none;
-}
-
+/* .menuPanel is portaled to <body> by MoreMenu.tsx and positioned `fixed`
+   inline — it is NOT a child of .topbarActions, so the overflow-x:auto scroll
+   container can no longer clip it (the v0.6.2 CI regression). The old
+   .moreMenu / <details> wrapper rules are gone with it. */
 .menuPanel {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
   width: 190px;
   z-index: 40;
   display: grid;

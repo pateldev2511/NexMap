@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AppShell } from './ui/shell/AppShell';
+import { MoreMenu } from './ui/shell/MoreMenu';
 import { LeftPanel } from './ui/LeftSidebar/LeftPanel';
 import { Inspector } from './ui/Inspector/Inspector';
 import { BottomPanel } from './ui/BottomPanel/BottomPanel';
@@ -247,61 +248,59 @@ export function App() {
         <NexIcon name={mode === 'rack' ? 'rack' : 'connect'} />
         <span>{mode === 'rack' ? 'Rack designer' : 'Network designer'}</span>
       </button>
-      <details className={shell.moreMenu}>
-        <summary className={shell.topbarBtn} title="More actions">
-          <NexIcon name="settings" />
-          <span>More</span>
-        </summary>
-        <div className={shell.menuPanel}>
-          {mode === 'network' && (
-            <>
-              <button
-                className={shell.menuItem}
-                onClick={() => setShowPages((p) => !p)}
-                aria-pressed={showPages}
-              >
-                <NexIcon name="pages" />
-                <span>{showPages ? 'Hide pages' : 'Show pages'}</span>
-              </button>
-              <button className={shell.menuItem} onClick={() => setPresentation(true)}>
-                <NexIcon name="presentation" />
-                <span>Presentation</span>
-              </button>
-              <button
-                className={shell.menuItem}
-                onClick={() => setView((v) => (v === 'editor' ? 'perf' : 'editor'))}
-              >
-                <NexIcon name="inspector" />
-                <span>{view === 'editor' ? 'Performance harness' : 'Editor'}</span>
-              </button>
-              <button className={shell.menuItem} onClick={() => setShowOutline(true)}>
-                <NexIcon name="library" />
-                <span>Topology outline</span>
-              </button>
-            </>
-          )}
-          <button className={shell.menuItem} onClick={switchDesigner}>
-            <NexIcon name="rack" />
-            <span>Switch designer…</span>
-          </button>
-          <button className={shell.menuItem} onClick={toggleTheme}>
-            <NexIcon name="theme" />
-            <span>{theme === 'light' ? 'Dark theme' : 'Light theme'}</span>
-          </button>
-          <button className={shell.menuItem} onClick={() => setShowSettings(true)}>
-            <NexIcon name="settings" />
-            <span>Settings</span>
-          </button>
-          <button className={shell.menuItem} onClick={() => setShowHelp(true)}>
-            <NexIcon name="help" />
-            <span>Keyboard shortcuts</span>
-          </button>
-          <button className={shell.menuItem} onClick={() => setShowAbout(true)}>
-            <NexIcon name="help" />
-            <span>About &amp; privacy</span>
-          </button>
-        </div>
-      </details>
+      <MoreMenu>
+        {(close) => (
+          <>
+            {mode === 'network' && (
+              <>
+                <button
+                  className={shell.menuItem}
+                  onClick={() => { setShowPages((p) => !p); close(); }}
+                  aria-pressed={showPages}
+                >
+                  <NexIcon name="pages" />
+                  <span>{showPages ? 'Hide pages' : 'Show pages'}</span>
+                </button>
+                <button className={shell.menuItem} onClick={() => { setPresentation(true); close(); }}>
+                  <NexIcon name="presentation" />
+                  <span>Presentation</span>
+                </button>
+                <button
+                  className={shell.menuItem}
+                  onClick={() => { setView((v) => (v === 'editor' ? 'perf' : 'editor')); close(); }}
+                >
+                  <NexIcon name="inspector" />
+                  <span>{view === 'editor' ? 'Performance harness' : 'Editor'}</span>
+                </button>
+                <button className={shell.menuItem} onClick={() => { setShowOutline(true); close(); }}>
+                  <NexIcon name="library" />
+                  <span>Topology outline</span>
+                </button>
+              </>
+            )}
+            <button className={shell.menuItem} onClick={() => { switchDesigner(); close(); }}>
+              <NexIcon name="rack" />
+              <span>Switch designer…</span>
+            </button>
+            <button className={shell.menuItem} onClick={() => { toggleTheme(); close(); }}>
+              <NexIcon name="theme" />
+              <span>{theme === 'light' ? 'Dark theme' : 'Light theme'}</span>
+            </button>
+            <button className={shell.menuItem} onClick={() => { setShowSettings(true); close(); }}>
+              <NexIcon name="settings" />
+              <span>Settings</span>
+            </button>
+            <button className={shell.menuItem} onClick={() => { setShowHelp(true); close(); }}>
+              <NexIcon name="help" />
+              <span>Keyboard shortcuts</span>
+            </button>
+            <button className={shell.menuItem} onClick={() => { setShowAbout(true); close(); }}>
+              <NexIcon name="help" />
+              <span>About &amp; privacy</span>
+            </button>
+          </>
+        )}
+      </MoreMenu>
     </>
   );
 
