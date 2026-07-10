@@ -157,6 +157,10 @@ export function App() {
   function switchDesigner() {
     if (dirty && !confirm('Discard unsaved changes and switch designer?')) return;
     newProject(new Date().toISOString());
+    // Drop the stale draft too — the confirm already said "discard", and a
+    // lingering recoverable would otherwise pop a recovery prompt over the
+    // chooser after switching.
+    persistence.discardDraft();
     localStorage.removeItem('nexmap.mode');
     setMode(null);
     setFirstRunDone(false);
@@ -244,6 +248,7 @@ export function App() {
         className={shell.topbarBtn}
         onClick={switchDesigner}
         title="Switch between the Network and Rack designers"
+        aria-label="Switch designer"
       >
         <NexIcon name={mode === 'rack' ? 'rack' : 'connect'} />
         <span>{mode === 'rack' ? 'Rack designer' : 'Network designer'}</span>
@@ -407,8 +412,14 @@ export function App() {
   const showFirstRun =
     !firstRunDone && persistence.recoverable === null && mode === 'network';
 
-  // Entry chooser: ask which designer when none is active and nothing to recover.
-  if (mode === null && persistence.recoverable === null) {
+  // Entry chooser: ask which designer whenever none is active. This must NOT
+  // also require `recoverable === null` — a lingering autosave draft used to
+  // bypass the chooser and fall through to `isRack = false`, silently
+  // rendering the Network Designer. So picking Rack after a switch-designer
+  // with a draft present landed you in Network. The chooser owns the
+  // mode===null state; the recovery prompt appears inside whichever designer
+  // is then chosen.
+  if (mode === null) {
     return <DesignerChooser onPick={pickMode} onOpen={() => void handleOpen()} />;
   }
   const isRack = mode === 'rack';
