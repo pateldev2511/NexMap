@@ -88,9 +88,28 @@ interface TextObject /* existing, upgraded */ {
 - Copy/paste & duplicate anchor rule: if the anchor target is part of the same
   copied payload, the pasted callout's anchor REMAPS to the new copy; otherwise
   the pasted callout's anchor clears to null (free note).
-- Store placement of rack-scoped objects (flat objects collection with rackScope
-  filter vs rack model) is the one point delegated to /plan-eng-review with the
-  store open — the field is settled, the shelf is not.
+- Store placement DECIDED (/plan-eng-review 2026-07-09, evidence-backed):
+  rack-scoped callouts live in the OBJECTS collection with a `rackScope` filter.
+  ModelState already holds devices/links/objects/racks in one store
+  (modelState.ts:29-35); objects are already spatially indexed (hit-test/marquee
+  free) and contentBounds already unions objects — the W3 bounds criterion holds
+  by construction. Rack-delete cascade = one filtered delete in the existing
+  rack-delete transaction.
+- MIGRATION DECIDED (eng review): HARD migration — the v4 loader converts
+  text/heading/subheading → blocks once; old fields deleted from the type; all
+  five consumers (flat note renderer, IsoTextNode, textObjectSvg, inline text
+  editor, createTextObject) switch to blocks inside W3. Migration test corpus
+  MUST include v2-era files (heading/subheading shipped in schema v2).
+- RENDER RULE (eng review): textObjectSvg is DELETED in the same commit that
+  introduces calloutParts — no two text renderers coexist, even for one commit.
+  Rack callouts render in a separately-memoized CalloutLayer OUTSIDE
+  RackFocusScene (a keystroke re-renders one callout, never 42U of faceplate art).
+- WATCH-ITEM (eng review): live-preview editing commits per keystroke (mergeWith
+  keeps undo clean); if typing feels heavy on dense diagrams the fallback is a
+  150ms commit debounce. Added tests from the eng coverage pass: empty-blocks
+  auto-delete, leaderGeometry unit (edges/quadrants/degenerate), v2-file
+  migration, annotate-all idempotency, editor-open-during-target-delete chaos,
+  devicePortLayout bounds pin for every kind × 8/24/48 ports.
 - `.nexmap` schema bumps to v4. FORWARD-COMPAT DECISION (spec-review corrected: the
   loader deliberately REFUSES newer-than-supported schemas — migrate.ts:107, pinned
   by migrate.test.ts:63 as a data-safety property): older app builds will refuse v4
@@ -333,3 +352,15 @@ suite — this bug class dies here.
 - Every gesture = exactly one undo entry (History identity contract from v0.6.2).
 - Exports must render in non-browser consumers (no foreignObject anywhere).
 - Existing e2e suite (16 spec files) + the current unit suite (~690) stay green at every milestone commit.
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 1 | CLEAR (2026-07-09) | 3 proposals, 3 accepted, 0 deferred |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | CLEAR (PLAN, 2026-07-09) | 5 findings (1 decision, 4 stated rules), 0 critical gaps |
+| Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | optional before W3 editor |
+| Outside Voice | subagent | Independent 2nd opinion | 1 | ran (CEO stage) | 10 findings, 9 integrated, 1 rejected w/ evidence |
+
+- **UNRESOLVED:** 0
+- **VERDICT:** CEO + ENG CLEARED — ready to implement (W1 first)
