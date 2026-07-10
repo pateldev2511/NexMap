@@ -15,7 +15,7 @@
  */
 import type { Device } from '@/model/types';
 import { escapeXml } from '@/io/export/buildSvg';
-import { portLayout, type Rect, type PortRect } from './rackLayout';
+import { portLayout, PATCH_PORT_OPTS, type Rect, type PortRect } from './rackLayout';
 import { panelKindFor } from './panelKind';
 import { isFullDepth } from './rackModel';
 import { rackPhotoSkinParts } from './rackPhotoSkins';
@@ -170,17 +170,9 @@ export function devicePortLayout(device: Device, panel: Rect): PortRect[] {
   }
   if (kind === 'psu' || kind === 'cable-mgr' || kind === 'blank') return [];
   if (kind === 'patch') {
-    // Real 1U patch panels run ALL keystones in ONE row, grouped in banks of 6
-    // (or 12 on high-density blocks). A 24-port panel is 1×24, never 2×12.
-    return portLayout(panel, ports, {
-      rows: 1,
-      nameZone: 28, // patch panels have a minimal left label, not a brand strip
-      rightInset: 12,
-      gap: 2,
-      groupEvery: 6,
-      groupGap: 7,
-      maxJack: 16,
-    });
+    // Real 1U patch panels run ALL keystones in ONE row, banked in 6s. Shared
+    // opts with the photo skin so drawn ports and hit markers always align.
+    return portLayout(panel, ports, PATCH_PORT_OPTS);
   }
   if (kind === 'switch') {
     // Switches DO stack 24/48 ports in two staggered rows (odd top / even

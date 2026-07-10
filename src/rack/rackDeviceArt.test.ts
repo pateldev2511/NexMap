@@ -43,6 +43,43 @@ describe('devicePortLayout — faceplate realism (W2)', () => {
     const rects = devicePortLayout(withPorts('switch', 48), panel);
     expect(rowCount(rects)).toBe(2);
   });
+
+  // The bug my first W2a attempt missed: the VISIBLE patch panel is drawn by a
+  // photo skin (rackPhotoSkins.patchPanelSkin), a different code path from
+  // devicePortLayout. Testing devicePortLayout alone passed while the rendered
+  // panel still showed 2 rows AND its ports no longer lined up with the cable
+  // hit markers. This tests the ACTUAL rendered output + the alignment.
+  it('the RENDERED patch panel (deviceFaceParts) draws port numbers in one row', () => {
+    // Panduit/patch-panel matches the photo-skin path, not the fallback art.
+    const dev = withPorts('patch-panel', 24);
+    dev.vendor = 'Panduit';
+    const svg = join(deviceFaceParts(dev, panel));
+    // Port numbers are the small mono <text ... font-size="5">N</text> the skin
+    // draws. Match the whole tag (attribute order varies), keep the font-size=5
+    // ones, pull their y.
+    const ys = [...svg.matchAll(/<text\b[^>]*>/g)]
+      .map((m) => m[0])
+      .filter((t) => t.includes('font-size="5"'))
+      .map((t) => Math.round(parseFloat(/\by="([\d.]+)"/.exec(t)![1]!)));
+    expect(ys.length).toBeGreaterThanOrEqual(20); // most of 24 ports numbered
+    expect(new Set(ys).size).toBe(1); // ONE row, not two
+  });
+
+  it('drawn patch ports align with the cable hit markers (no click desync)', () => {
+    const dev = withPorts('patch-panel', 24);
+    dev.vendor = 'Panduit';
+    // Hit markers come from devicePortLayout; both must use the same layout.
+    const markerXs = devicePortLayout(dev, panel).map((r) => Math.round(r.x));
+    const svg = join(deviceFaceParts(dev, panel));
+    // The skin's jack rects (fill #111827) — the visible port bodies.
+    const jackXs = [...svg.matchAll(/<rect\b[^>]*>/g)]
+      .map((m) => m[0])
+      .filter((r) => r.includes('fill="#111827"'))
+      .map((r) => Math.round(parseFloat(/\bx="([\d.]+)"/.exec(r)![1]!)));
+    expect(jackXs.length).toBe(24);
+    // Every drawn jack sits at a hit-marker x (same layout → same coordinates).
+    expect(jackXs.every((jx) => markerXs.some((mx) => Math.abs(mx - jx) <= 1))).toBe(true);
+  });
 });
 
 function dev(type: DeviceType, over: Partial<Device> = {}): Device {

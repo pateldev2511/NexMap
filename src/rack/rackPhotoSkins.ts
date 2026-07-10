@@ -8,7 +8,7 @@
  */
 import type { Device } from '@/model/types';
 import { escapeXml } from '@/io/export/buildSvg';
-import { portLayout, type Rect } from './rackLayout';
+import { portLayout, PATCH_PORT_OPTS, type Rect } from './rackLayout';
 import { isRasterPhotoDataUri } from './rackPhotoUpload';
 
 type RackFace = 'front' | 'rear';
@@ -312,7 +312,10 @@ function applianceFrontSkin(device: Device, p: Rect, opts: { faceplate: string; 
 
 function patchPanelSkin(device: Device, p: Rect): string[] {
   const out = base(device, p, { fill: 'url(#rkPatch)', darkText: true });
-  const ports = portLayout(p, devicePorts(device));
+  // ONE row banked in 6s (W2a) — and the SAME opts devicePortLayout uses, so the
+  // drawn ports sit exactly where the cable hit markers do. A 24-port panel is
+  // 1×24, never 2×12.
+  const ports = portLayout(p, devicePorts(device), PATCH_PORT_OPTS);
   out.push(`<rect x="${n(p.x + 5)}" y="${n(p.y + 5)}" width="${n(p.w - 10)}" height="${n(p.h - 10)}" rx="2" fill="#dbe3ec" fill-opacity="0.34" stroke="#64748b" stroke-width="0.55"/>`);
   ports.forEach((j, i) => {
     out.push(`<rect x="${n(j.x)}" y="${n(j.y)}" width="${n(j.w)}" height="${n(j.h)}" rx="1" fill="#111827" stroke="#6b7280" stroke-width="0.65"/>`);

@@ -116,6 +116,24 @@ export interface PortRect extends Rect {
  * banks) — real gear separates its ports into groups, not one undifferentiated strip.
  * Returns one rect per interface (panel-local coords) for BOTH drawing and hit-testing.
  */
+
+/**
+ * The realistic patch-panel port layout — ONE row, banked in 6s. Shared by BOTH
+ * the photo skin (the pixels users see) AND devicePortLayout (the hit markers +
+ * cable endpoints) so the two can never drift: a 24-port panel draws 1×24 and
+ * you can click exactly where the ports are. (A 2-row skin + 1-row hit markers
+ * is precisely the desync this constant prevents.)
+ */
+export const PATCH_PORT_OPTS = {
+  rows: 1,
+  nameZone: 28,
+  rightInset: 12,
+  gap: 2,
+  groupEvery: 6,
+  groupGap: 7,
+  maxJack: 16,
+} as const;
+
 export function portLayout(
   panel: Rect,
   ports: { id: string; name: string }[],
