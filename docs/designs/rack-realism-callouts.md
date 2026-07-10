@@ -45,7 +45,13 @@ Because exports must show callouts, the text model is a constrained block struct
 rendered to native SVG text — never HTML/foreignObject (breaks PNG converters and
 design-tool imports). Zero new runtime dependencies.
 
-### Callout data model (schema v4 addition)
+### Callout data model (schema v4 — OUTSIDE-VOICE REVISED: object variant, not a
+### parallel collection)
+
+A callout is NOT a new subsystem. It is an upgrade of the EXISTING text-note
+CanvasObject (TextObject already has heading/subheading — types.ts:234 — plus
+selection, marquee, multi-drag, duplicate, copy/paste, lock/group, one-undo drag,
+and export bounds union, all inherited for free):
 
 ```ts
 type RichSpan   = { text: string; bold?: true; italic?: true };
@@ -57,24 +63,34 @@ type CalloutBlock =
 
 type CalloutAnchor =
   | { type: 'device'; id: string }             // flat device / rack device / object
-  | { type: 'point'; x: number; y: number }    // detached (survives target deletion)
+  | { type: 'point'; x: number; y: number }
   | null;                                      // free note, no leader
 
-interface Callout {
-  id: string;
-  scope: 'flat' | `rack:${string}`;            // which canvas owns it (rackId-scoped)
-  x: number; y: number;                        // box top-left, scene coords
-  width: number;                               // wrap width (resizable)
-  blocks: CalloutBlock[];
-  anchor: CalloutAnchor;
-  leader: { color: string; dash: 'dotted' | 'dashed' | 'solid'; width: number };
-  role?: 'callout' | 'title-block' | 'legend'; // cherry-pick 3 reuses the renderer
+// Extends the existing text CanvasObject kind:
+interface TextObject /* existing, upgraded */ {
+  // ...existing fields (id, x, y, width, lock, layer, ...)
+  blocks: CalloutBlock[];                      // REPLACES heading/subheading/body
+  anchor?: CalloutAnchor;                      // presence ⇒ it's a "callout"
+  leader?: { color: string; dash: 'dotted' | 'dashed' | 'solid'; width: number };
+  rackScope?: string;                          // rackId ⇒ renders on that rack's
+                                               // focus canvas + elevation export
+  role?: 'title-block' | 'legend';             // cherry-pick 3
 }
 ```
 
-- Stored in projectStore as a first-class collection; Add/Update/Delete commands with
-  `mergeWith` for drag coalescing and `isIdentity()` (v0.6.2 History contract).
-  One gesture = one undo entry, including create-with-content.
+- ONE user-facing concept: existing text notes migrate in the v4 loader
+  (heading/subheading/body → equivalent blocks) — no "note vs callout" split, no
+  dedup story needed. Update commands reuse the object command family with
+  `mergeWith`/`isIdentity()` (v0.6.2 History contract). One gesture = one undo
+  entry, including create-with-content; a full EDITING SESSION (open editor →
+  Escape) also coalesces to ONE undo entry (content updates merge; coalesce
+  boundary on editor close).
+- Copy/paste & duplicate anchor rule: if the anchor target is part of the same
+  copied payload, the pasted callout's anchor REMAPS to the new copy; otherwise
+  the pasted callout's anchor clears to null (free note).
+- Store placement of rack-scoped objects (flat objects collection with rackScope
+  filter vs rack model) is the one point delegated to /plan-eng-review with the
+  store open — the field is settled, the shelf is not.
 - `.nexmap` schema bumps to v4. FORWARD-COMPAT DECISION (spec-review corrected: the
   loader deliberately REFUSES newer-than-supported schemas — migrate.ts:107, pinned
   by migrate.test.ts:63 as a data-safety property): older app builds will refuse v4
@@ -101,36 +117,42 @@ inconsistently). Verification is priced concretely: the W6 parity e2e injects th
 exported SVG into the live page and compares justified line widths via getBBox()
 against the wrap width (no new raster infra — the Playwright page IS the renderer);
 external-converter variance stays a documented limitation. Iso: box renders upright via the existing
-ISO_COUNTER matrix (IsoTextNode pattern); leaders render in the screen-space overlay
-layer (see Leader line section) — the box is screen-aligned, so leader geometry is
-computed post-projection. ARCHITECTURAL REQUIREMENT (spec-review iter 2): iso
-exports flow through the separate `buildSvgIso` path, so leader endpoint math MUST
-live in one shared pure function — `leaderGeometry(box, targetBbox, projection) →
-{x1,y1,x2,y2}` — consumed by the FLAT renderer, the live iso overlay, AND
-buildSvgIso (all three; parity-by-construction for every leader everywhere).
-Implementation note: W6 endpoint assertions use numeric tolerance (±0.5), never
-exact float string matching. Without this
+ISO_COUNTER matrix (IsoTextNode pattern). Leaders are SCENE-SPACE lines (outside-
+voice revision): endpoints are scene coordinates (box anchor point → target bbox
+edge) drawn inside the projected group, so they transform with the iso matrix like
+every other scene element — ZERO per-frame recompute (no tension with the W1 perf
+pins; an iso leader renders as a projected line, which is visually correct for an
+elevation-style annotation). Shared pure function `leaderGeometry(box, targetBbox)
+→ {x1,y1,x2,y2}` in scene space, consumed by the flat renderer, the iso scene, AND
+buildSvg/buildSvgIso/buildRackSvg — parity-by-construction for every leader
+everywhere. W6 endpoint assertions use numeric tolerance (±0.5), never exact float
+string matching. Without this
 extraction the parity-by-construction claim is false for iso; it is a W3
 deliverable, not an option.
 
 ### Editor (in-canvas, no deps)
 
-RISK NOTE (spec-review): the editor is the highest-risk piece of this plan —
-cross-block caret management, Safari span-splitting, and IME composition make
-freeform multi-block contentEditable 2-3× costlier than it looks. V1 therefore uses
-SINGLE-BLOCK EDITING: exactly one block is editable at a time (click a block to edit
-it; one contentEditable). Enter commits the block and creates/focuses the next;
-Backspace at the start of an EMPTY block deletes it and focuses the previous block's
-end; there is NO cross-block text selection or caret traversal in v1. IME: commit
-only on compositionend. Paste: plain text only (length-capped at 10k chars — the
-hostile-QA 5MB paste must not freeze the UI), marks re-applied manually.
-Parser: restricted DOM→`RichSpan[]` (only `<b>/<strong>/<i>/<em>`+text survive;
-everything else stripped → XSS-safe by construction, no raw HTML ever stored).
+FORM (outside-voice revised): a DOCKED FLOATING PANEL (cable mini-controls / M3
+pattern), NOT an in-place overlay. Rationale: an overlay lays text out with the
+browser's HTML engine while the canvas wraps via measureText — two layout engines
+guarantee visible reflow on commit, and CSS-scaled contentEditable carets misbehave
+at zoom ≠ 100%. With the docked panel, THE CANVAS ITSELF IS THE LIVE PREVIEW —
+store updates re-render the SVG truth as you type, so what you see is literally
+what exports. No reflow surprise, no zoom/caret bug class.
+Inside the panel: SINGLE-BLOCK editing (one contentEditable at a time, at UI scale
+— the spec-review caret/IME constraints still apply but in a friendly coordinate
+space). Enter commits the block and creates/focuses the next; Backspace at the
+start of an EMPTY block deletes it and focuses the previous block's end; no
+cross-block selection in v1. IME: commit on compositionend. Paste: plain text only,
+10k-char cap (the hostile-QA 5MB paste must not freeze the UI), marks re-applied
+manually. Parser: restricted DOM→`RichSpan[]` (only `<b>/<strong>/<i>/<em>`+text
+survive → XSS-safe by construction, no raw HTML ever stored).
 Toolbar: block-type select (Heading/Subheading/Paragraph/Bullets/Numbers/Code),
 B, I, align ×4, leader color swatches + dash select, delete. Keyboard: Cmd+B/I,
-Shift+Enter=soft break, Escape=commit+close (router overlay while open — v0.6.2
+Shift+Enter=soft break, Escape=commit+close (router overlay while open — the
 QuickCreateMenu lesson: keys must not leak to canvas). Double-click a callout opens
-the editor; the callout body is a normal machine-owned drag target (4px threshold).
+the panel; the callout body stays a normal machine-owned drag target (4px
+threshold).
 
 ### Leader line
 
@@ -141,9 +163,10 @@ resolution is LAZY at render time: unresolvable target ⇒ leader simply not dra
 (box stays visible and selectable). Undoing the device deletion restores the leader
 automatically with zero extra history entries — the one-gesture-one-undo contract
 holds by construction. Explicit permanent detach (anchor → point/none) is available
-in the editor. In ISO mode, leaders render in the SCREEN-SPACE overlay layer
-(outside the iso matrix): endpoints = the upright box edge and the projected target
-bbox edge, both computed post-projection in screen coordinates.
+in the editor. Leaders are scene-space in ALL projections (see renderer section) —
+no per-frame geometry work on the pan path. Hidden-face rule (rack): a leader whose
+target device is mounted on the NON-VISIBLE face is not drawn (same lazy-resolution
+treatment as a deleted target); annotate-all is already face-aware.
 Width resize: right-edge handle, min 120 / max 480 scene px, machine-owned drag
 coalescing to one undo entry (same contract as move).
 Selecting a callout shows leader controls in the selection toolbar (M3 pattern).
@@ -170,6 +193,11 @@ the feature).
 - **More menu portal**: `createPortal` the panel to body; position from summary
   rect; close on outside-pointerdown, Escape (router overlay), resize/scroll;
   `aria-expanded`. E2e: opens + item clickable at default AND 1100px widths.
+- **Export parity harness SKELETON** (outside-voice resequenced from W6): lands
+  WITH the arrow fix — fixture + string-capture plumbing + the arrows assertion.
+  Every later milestone EXTENDS the fixture as it adds export surface (callouts,
+  iso leaders, hide-faceplate, title block); W6 is completion + the getBBox
+  justify check, not a retroactive audit.
 - **Export arrows**: the canvas uses ONE neutral marker (`fill: var(--chrome-fg-muted)`,
   Canvas.tsx:1514) — not per-color (spec-review verified). buildSvg emits one marker
   def with the CSS var RESOLVED to the export theme's literal hex (CSS vars are
@@ -185,17 +213,17 @@ the feature).
 
 ### W2 — Rack realism (per-kind faceplate truth)
 - `portLayout` gains kind profiles as a DATA TABLE (`KIND_LAYOUT:
-  Record<PanelKind, LayoutProfile>`), not an if/else chain. Taxonomy reality
-  (spec-review corrected): `panelKind.ts` collapses router/load-balancer/
-  access-point/wireless-controller into `'switch'`, and `ups` → `'psu'`; there is
-  no `pdu` kind today. W2 therefore has two tiers:
-  (a) IN-KIND fixes, no type changes: `patch` → single row, groups of 6 with group
-      gap (24 → 6|6|6|6); `switch` → keep 2-row odd/even stagger, add a bank
-      separator every 6 columns; `server` profile audit.
-  (b) TAXONOMY EXTENSION (only if (a) proves insufficient for realism): new
-      PanelKind values (e.g. `pdu`) — a type-signature ripple through
-      rackDeviceArt/buildRackSvg/portHit, priced separately and decided at
-      implementation time with the eng review.
+  Record<PanelKind, LayoutProfile>`), not an if/else chain. FULL TAXONOMY
+  COMMITTED (outside-voice tension 3, user-accepted — realism means realism, not
+  one layout tweak): extend `PanelKind` so device families stop collapsing into
+  'switch'/'psu'. New kinds + faceplate intent: `router` (fewer ports in one
+  cluster, mgmt port right, status LEDs), `access-point` (minimal ports, LED bar),
+  `ups` (display window + outlet pairs), `pdu` (outlet strip). Kept: `patch` →
+  single row, groups of 6 with group gap (24 → 6|6|6|6); `switch` → 2-row odd/even
+  stagger + bank separator every 6 columns; `server` profile audit. The
+  type-signature ripple (rackDeviceArt/buildRackSvg/portHit) is priced INTO W2
+  (~2× original estimate) and regression-netted by the cabling e2e suite +
+  buildRackSvg tests.
 - Port NUMBERS stay legible at export scale (existing `patchText` labels).
 - Update rackLayout tests + buildRackSvg snapshot-ish assertions; port hit-testing
   (`devicePortLayout` consumers: cabling drag/click-click) must keep working — the
@@ -232,12 +260,14 @@ the in-page getBBox justify check. Runs in CI with the
 suite — this bug class dies here.
 
 ### W7 — Tooltips, README, tester pass
-- Tooltips (mechanism DECIDED in review: custom layer): a dependency-free CSS
-  tooltip — chrome controls get `data-tip="What it does (⌘K)"` rendered via a
-  single global `[data-tip]::after` rule (≈300ms transition-delay, styled to the
-  chrome theme, `@media (hover: hover)` so touch never shows stuck tips), with
-  `aria-label` kept in sync for screen readers; `title=` removed where `data-tip`
-  lands (no double tooltips). Canvas SVG affordances (ports, connect handles,
+- Tooltips (mechanism REVISED by outside voice — `::after` tooltips are clipped
+  by ancestor overflow containers, i.e. the EXACT bug class that ate the More
+  menu): a dependency-free JS-POSITIONED SINGLETON — one absolutely-positioned
+  element on document.body; pointerenter/focusin on any `[data-tip]` element
+  populates and positions it (flip-at-viewport-edge, ~300ms delay, hidden on
+  `pointer: coarse`); `aria-label` kept in sync for screen readers; `title=`
+  removed where `data-tip` lands (no double tooltips). ~60 lines, immune to every
+  clip context by construction. Canvas SVG affordances (ports, connect handles,
   cables, chevrons) get SVG `<title>` children. Coverage: every button/select/
   input in AppShell, both designers' toolbars, zoom clusters, selection toolbars,
   panels, dialogs — audited against a checklist in the tooltip commit, with a
@@ -264,9 +294,11 @@ suite — this bug class dies here.
   marks re-applied manually; empty callout on commit → deleted (no ghost boxes).
 - Anchor target deleted → stored anchor untouched; leader lazily not drawn while
   unresolvable; undo of the deletion restores it with zero extra history entries.
-- measureText cache invalidated on font-load (document.fonts.ready → re-render once);
-  the EXPORT path awaits document.fonts.ready before measuring, so an export
-  triggered pre-font-load cannot bake wrong wrap positions into the file.
+- measureText cache invalidated on font-load (document.fonts.ready → re-render
+  once). Builders STAY SYNCHRONOUS (outside-voice: an async signature would ripple
+  through five consumers + tests): the export ENTRY POINTS (already-async UI
+  handlers) await a one-time app-level fontsReady promise before invoking the sync
+  builders.
 - Export with zero callouts → byte-identical shape to today (no regressions for old
   projects); schema v4 load/save round-trip tested; v3 file load tested.
 - Annotate-all on empty rack → no-op with announce("Nothing to annotate").
