@@ -60,3 +60,42 @@ describe('flat canvas node memoization', () => {
     expect(renders()).toBeGreaterThan(before);
   });
 });
+
+const linkRenders = () =>
+  (globalThis as { __linkLayerRenders?: number }).__linkLayerRenders ?? 0;
+
+describe('flat canvas LinkLayer memoization (W1c)', () => {
+  beforeEach(() => {
+    (globalThis as { __linkLayerRenders?: number }).__linkLayerRenders = 0;
+    s().newProject(NOW);
+    const a = s().addDeviceAt('router', 100, 100);
+    const b = s().addDeviceAt('switch', 400, 200);
+    s().connect(a, b); // a visible link so LinkLayer has work
+  });
+
+  it('wheel-pan frames do NOT re-render the link layer', () => {
+    const { container } = render(<Canvas />);
+    expect(linkRenders()).toBeGreaterThan(0);
+    const surface =
+      container.querySelector('[data-canvas-surface]') ?? container.firstElementChild!;
+    const group = container.querySelector('g[transform]')!;
+    const tfBefore = group.getAttribute('transform');
+    const before = linkRenders();
+
+    for (let i = 0; i < 30; i++) {
+      fireEvent.wheel(surface, { deltaX: 4, deltaY: 6, deltaMode: 0 });
+    }
+    expect(container.querySelector('g[transform]')!.getAttribute('transform')).not.toBe(tfBefore);
+    expect(linkRenders()).toBe(before); // the culled-but-content-stable links array holds the memo
+  });
+
+  it('adding a link DOES re-render the layer (memo not stuck)', () => {
+    render(<Canvas />);
+    const before = linkRenders();
+    act(() => {
+      const c = s().addDeviceAt('server', 250, 450);
+      s().connect(s().devicesAll()[0]!.id, c);
+    });
+    expect(linkRenders()).toBeGreaterThan(before);
+  });
+});

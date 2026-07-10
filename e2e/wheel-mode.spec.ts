@@ -65,11 +65,10 @@ test('ctrl+wheel zooms at the cursor in pan mode', async ({ page }) => {
 test('the Settings toggle flips plain wheel to zoom, and back', async ({ page }) => {
   await openBranchOffice(page);
 
-  // Flip the pref via Settings (More menu → Settings).
-  // The More menu is a <details>; a second summary-click would toggle it
-  // closed, so only open it when the Settings item isn't already visible.
+  // Flip the pref via Settings (More menu → Settings). The More menu is a
+  // portaled dropdown; open it if the Settings item isn't already showing.
   if (!(await page.getByRole('button', { name: 'Settings' }).isVisible())) {
-    await page.locator('summary', { hasText: 'More' }).click();
+    await page.getByRole('button', { name: 'More actions' }).click();
   }
   await page.getByRole('button', { name: 'Settings' }).click();
   await page.getByLabel('Scroll wheel behavior').selectOption('zoom');
@@ -81,11 +80,9 @@ test('the Settings toggle flips plain wheel to zoom, and back', async ({ page })
   await page.mouse.wheel(0, -120);
   await expect(zoomPct(page)).not.toHaveText(pctBefore!); // zoomed
 
-  // And back to pan.
-  // The More menu is a <details>; a second summary-click would toggle it
-  // closed, so only open it when the Settings item isn't already visible.
+  // And back to pan. Open the More menu again if Settings isn't showing.
   if (!(await page.getByRole('button', { name: 'Settings' }).isVisible())) {
-    await page.locator('summary', { hasText: 'More' }).click();
+    await page.getByRole('button', { name: 'More actions' }).click();
   }
   await page.getByRole('button', { name: 'Settings' }).click();
   await page.getByLabel('Scroll wheel behavior').selectOption('pan');

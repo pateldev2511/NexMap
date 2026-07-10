@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { DeviceType } from '@/model/types';
+import type { Device, DeviceType, Link } from '@/model/types';
 import { NexIcon } from '@/ui/icons/NexIcon';
 import { useProjectStore, type AlignEdge, type ProjectStore } from '@/store/projectStore';
 import { CanvasSearch } from './CanvasSearch';
@@ -39,6 +39,7 @@ import {
   labelAnchor,
   connectorLabelLines,
   deriveLinkStroke,
+  type StrokeHealth,
 } from './connector';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import {
@@ -194,6 +195,12 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   const altHeld = useRef(false);
   // Set after a right-button drag-pan so the trailing contextmenu is suppressed.
   const suppressMenu = useRef(false);
+  // Content-stable visible-links array: `visibleLinks` re-filters (fresh array)
+  // every pan frame, which would defeat the memoized LinkLayer. This caches the
+  // array and only mints a new identity when the visible id-set or model rev
+  // actually changes — so viewport-only frames keep the same reference and the
+  // layer's memo holds (W1c).
+  const linksStableRef = useRef<{ sig: string; arr: Link[] }>({ sig: '', arr: [] });
 
   const setPending = useCallback((id: string | null) => {
     pendingSourceRef.current = id;
@@ -966,6 +973,18 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     [store],
   );
 
+  // Stable inputs for the memoized LinkLayer (identity must not churn per frame).
+  const getDeviceStable = useCallback((id: string) => store().getDevice(id), [store]);
+  const onLinkDown = useCallback(
+    (e: React.PointerEvent, id: string) => {
+      if (e.button !== 0) return; // let right/middle pan
+      if (store().mode === 'connect') return;
+      e.stopPropagation();
+      store().select([id], e.shiftKey);
+    },
+    [store],
+  );
+
   const onResizeHandleDown = useCallback(
     (e: React.PointerEvent, id: string, handle: Handle) => {
       e.stopPropagation();
@@ -1400,6 +1419,13 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     const k = pairKey(l);
     (linkGroups.get(k) ?? linkGroups.set(k, []).get(k)!).push(l.id);
   }
+  // Give LinkLayer an identity-stable array across viewport-only frames: reuse
+  // the cached array unless the visible id-set OR the model rev changed. (W1c)
+  const linksSig = rev + '|' + links.map((l) => l.id).join(',');
+  if (linksStableRef.current.sig !== linksSig) {
+    linksStableRef.current = { sig: linksSig, arr: links };
+  }
+  const stableLinks = linksStableRef.current.arr;
   const guides = store().alignGuides();
   const movableSelCount = [...selection].filter(
     (id) => store().getDevice(id) || store().getObject(id),
@@ -1555,135 +1581,61 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
               labelUpright={projection === 'iso' ? isoUprightTransform : undefined}
             />
           ))}
-          {links.map((l) => {
-            const a = store().getDevice(l.sourceId);
-            const b = store().getDevice(l.targetId);
-            if (!a || !b) return null;
-            const group = linkGroups.get(pairKey(l)) ?? [l.id];
-            const noWp = (l.waypoints?.length ?? 0) === 0;
-            const pts =
-              l.routing === 'orthogonal' && noWp
-                ? orthogonalIconPoints(a, b)
-                : parallelIconPoints(l, a, b, group.indexOf(l.id), group.length);
-            const d = pathD(pts);
-            const sel = selection.has(l.id);
-            const stroke = deriveLinkStroke(l, health, group.length === 1);
-            const labelLines = connectorLabelLines(l);
-            const lblAt = labelLines.length ? labelAnchor(pts) : null;
-            const arrow = l.arrow ?? 'end';
-            const first = pts[0]!;
-            const last = pts[pts.length - 1]!;
-            const srcLbl = l.sourceInterface ? alongFrom(first, pts[1]!, 24) : null;
-            const tgtLbl = l.targetInterface
-              ? alongFrom(last, pts[pts.length - 2]!, 24)
-              : null;
-            return (
-              <g key={l.id}>
-                {projection === 'iso' && (
-                  <path
-                    className={styles.linkShadow}
-                    d={d}
-                    style={{ strokeWidth: stroke.width + 3 }}
-                  />
-                )}
-                <path
-                  className={styles.linkHit}
-                  d={d}
-                  onPointerDown={(e) => {
-                    if (e.button !== 0) return; // let right/middle pan
-                    if (store().mode === 'connect') return;
-                    e.stopPropagation();
-                    store().select([l.id], e.shiftKey);
-                  }}
-                />
-                <path
-                  className={`${styles.link} ${sel ? styles.selected : ''}`}
-                  d={d}
-                  style={{
-                    // inline beats the CSS class `stroke`; selection still wins visually.
-                    // null color → omit so the theme-aware CSS class default applies.
-                    stroke: sel ? 'var(--accent)' : (stroke.color ?? undefined),
-                    strokeWidth: sel ? Math.max(stroke.width, 2.5) : stroke.width,
-                  }}
-                  strokeDasharray={stroke.dashed ? '6 4' : undefined}
-                  markerEnd={
-                    arrow === 'end' || arrow === 'both' ? 'url(#nexmap-arrow)' : undefined
-                  }
-                  markerStart={arrow === 'both' ? 'url(#nexmap-arrow)' : undefined}
-                />
-                {sel &&
-                  !readOnly &&
-                  ([
-                    ['source', first, pts[1] ?? last] as const,
-                    ['target', last, pts[pts.length - 2] ?? first] as const,
-                  ]).map(([end, anchor, toward]) => {
-                    const p = alongFrom(anchor, toward, 14 / viewport.scale);
-                    const s = 5 / viewport.scale;
-                    return (
-                      <rect
-                        key={end}
-                        className={styles.relinkHandle}
-                        x={p.x - s}
-                        y={p.y - s}
-                        width={s * 2}
-                        height={s * 2}
-                        transform={`rotate(45 ${p.x} ${p.y})`}
-                        onPointerDown={(e) => {
-                          if (e.button !== 0) return;
-                          startRelink(e, l.id, end);
-                        }}
-                      />
-                    );
-                  })}
-                {lblAt && (
-                  <text
-                    className={styles.linkLabel}
-                    x={lblAt.x}
-                    y={lblAt.y - 4 - (labelLines.length - 1) * 11}
-                    transform={
-                      projection === 'iso'
-                        ? isoUprightTransform(lblAt.x, lblAt.y)
-                        : undefined
-                    }
-                  >
-                    {labelLines.map((line, i) => (
-                      <tspan key={i} x={lblAt.x} dy={i === 0 ? 0 : 11}>
-                        {line}
-                      </tspan>
-                    ))}
-                  </text>
-                )}
-                {srcLbl && (
-                  <text
-                    className={styles.ifaceLabel}
-                    x={srcLbl.x}
-                    y={srcLbl.y}
-                    transform={
-                      projection === 'iso'
-                        ? isoUprightTransform(srcLbl.x, srcLbl.y)
-                        : undefined
-                    }
-                  >
-                    {l.sourceInterface}
-                  </text>
-                )}
-                {tgtLbl && (
-                  <text
-                    className={styles.ifaceLabel}
-                    x={tgtLbl.x}
-                    y={tgtLbl.y}
-                    transform={
-                      projection === 'iso'
-                        ? isoUprightTransform(tgtLbl.x, tgtLbl.y)
-                        : undefined
-                    }
-                  >
-                    {l.targetInterface}
-                  </text>
-                )}
-              </g>
-            );
-          })}
+          <LinkLayer
+            links={stableLinks}
+            getDevice={getDeviceStable}
+            selection={selection}
+            health={health}
+            projection={projection}
+            onLinkDown={onLinkDown}
+          />
+
+          {/* Relink handles for the selected connector(s) — scale-dependent, so
+              they live here (a live overlay) rather than inside the memoized
+              LinkLayer, which must stay viewport-invariant. */}
+          {!readOnly &&
+            links
+              .filter((l) => selection.has(l.id))
+              .map((l) => {
+                const a = store().getDevice(l.sourceId);
+                const b = store().getDevice(l.targetId);
+                if (!a || !b) return null;
+                const group = linkGroups.get(pairKey(l)) ?? [l.id];
+                const pts =
+                  l.routing === 'orthogonal' && (l.waypoints?.length ?? 0) === 0
+                    ? orthogonalIconPoints(a, b)
+                    : parallelIconPoints(l, a, b, group.indexOf(l.id), group.length);
+                const first = pts[0]!;
+                const last = pts[pts.length - 1]!;
+                return (
+                  <g key={`relink-${l.id}`}>
+                    {(
+                      [
+                        ['source', first, pts[1] ?? last] as const,
+                        ['target', last, pts[pts.length - 2] ?? first] as const,
+                      ]
+                    ).map(([end, anchor, toward]) => {
+                      const pp = alongFrom(anchor, toward, 14 / viewport.scale);
+                      const s = 5 / viewport.scale;
+                      return (
+                        <rect
+                          key={end}
+                          className={styles.relinkHandle}
+                          x={pp.x - s}
+                          y={pp.y - s}
+                          width={s * 2}
+                          height={s * 2}
+                          transform={`rotate(45 ${pp.x} ${pp.y})`}
+                          onPointerDown={(e) => {
+                            if (e.button !== 0) return;
+                            startRelink(e, l.id, end);
+                          }}
+                        />
+                      );
+                    })}
+                  </g>
+                );
+              })}
 
           {/* Reroute handles for the single selected connector. */}
           {(() => {
@@ -2264,6 +2216,121 @@ function FlatSelectionToolbar({
     </SelectionToolbar>
   );
 }
+
+/**
+ * The connector layer: shadow (iso), hit path, styled link path, and the three
+ * label kinds, for every visible link. Memoized (W1c) — all props hold identity
+ * across viewport frames (links via linksStableRef, getDevice/onLinkDown are
+ * stable callbacks, selection/health are store selector refs), so pan/zoom no
+ * longer re-reconciles N link subtrees. It renders ONLY the viewport-invariant
+ * geometry; the SELECTED links' relink handles are scale-dependent
+ * (14/scale, 5/scale) and render in a live overlay in Canvas, not here.
+ * flatScene.perf.test.tsx pins the skip.
+ */
+const LinkLayer = memo(function LinkLayer({
+  links,
+  getDevice,
+  selection,
+  health,
+  projection,
+  onLinkDown,
+}: {
+  links: Link[];
+  getDevice: (id: string) => Device | undefined;
+  selection: ReadonlySet<string>;
+  health: StrokeHealth | null;
+  projection: 'flat' | 'iso';
+  onLinkDown: (e: React.PointerEvent, id: string) => void;
+}) {
+  if (import.meta.env.MODE === 'test') {
+    (globalThis as { __linkLayerRenders?: number }).__linkLayerRenders =
+      ((globalThis as { __linkLayerRenders?: number }).__linkLayerRenders ?? 0) + 1;
+  }
+  // Group parallel links (same device pair) so they fan out instead of overlap.
+  const linkGroups = new Map<string, string[]>();
+  for (const l of links) {
+    const k = pairKey(l);
+    (linkGroups.get(k) ?? linkGroups.set(k, []).get(k)!).push(l.id);
+  }
+  return (
+    <>
+      {links.map((l) => {
+        const a = getDevice(l.sourceId);
+        const b = getDevice(l.targetId);
+        if (!a || !b) return null;
+        const group = linkGroups.get(pairKey(l)) ?? [l.id];
+        const noWp = (l.waypoints?.length ?? 0) === 0;
+        const pts =
+          l.routing === 'orthogonal' && noWp
+            ? orthogonalIconPoints(a, b)
+            : parallelIconPoints(l, a, b, group.indexOf(l.id), group.length);
+        const d = pathD(pts);
+        const sel = selection.has(l.id);
+        const stroke = deriveLinkStroke(l, health, group.length === 1);
+        const labelLines = connectorLabelLines(l);
+        const lblAt = labelLines.length ? labelAnchor(pts) : null;
+        const arrow = l.arrow ?? 'end';
+        const first = pts[0]!;
+        const last = pts[pts.length - 1]!;
+        const srcLbl = l.sourceInterface ? alongFrom(first, pts[1]!, 24) : null;
+        const tgtLbl = l.targetInterface ? alongFrom(last, pts[pts.length - 2]!, 24) : null;
+        return (
+          <g key={l.id}>
+            {projection === 'iso' && (
+              <path className={styles.linkShadow} d={d} style={{ strokeWidth: stroke.width + 3 }} />
+            )}
+            <path className={styles.linkHit} d={d} onPointerDown={(e) => onLinkDown(e, l.id)} />
+            <path
+              className={`${styles.link} ${sel ? styles.selected : ''}`}
+              d={d}
+              style={{
+                stroke: sel ? 'var(--accent)' : (stroke.color ?? undefined),
+                strokeWidth: sel ? Math.max(stroke.width, 2.5) : stroke.width,
+              }}
+              strokeDasharray={stroke.dashed ? '6 4' : undefined}
+              markerEnd={arrow === 'end' || arrow === 'both' ? 'url(#nexmap-arrow)' : undefined}
+              markerStart={arrow === 'both' ? 'url(#nexmap-arrow)' : undefined}
+            />
+            {lblAt && (
+              <text
+                className={styles.linkLabel}
+                x={lblAt.x}
+                y={lblAt.y - 4 - (labelLines.length - 1) * 11}
+                transform={projection === 'iso' ? isoUprightTransform(lblAt.x, lblAt.y) : undefined}
+              >
+                {labelLines.map((line, i) => (
+                  <tspan key={i} x={lblAt.x} dy={i === 0 ? 0 : 11}>
+                    {line}
+                  </tspan>
+                ))}
+              </text>
+            )}
+            {srcLbl && (
+              <text
+                className={styles.ifaceLabel}
+                x={srcLbl.x}
+                y={srcLbl.y}
+                transform={projection === 'iso' ? isoUprightTransform(srcLbl.x, srcLbl.y) : undefined}
+              >
+                {l.sourceInterface}
+              </text>
+            )}
+            {tgtLbl && (
+              <text
+                className={styles.ifaceLabel}
+                x={tgtLbl.x}
+                y={tgtLbl.y}
+                transform={projection === 'iso' ? isoUprightTransform(tgtLbl.x, tgtLbl.y) : undefined}
+              >
+                {l.targetInterface}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </>
+  );
+});
 
 /** Isometric lattice: flat grid lines drawn inside the projected group so the
  *  iso matrix shears them into the classic diamond floor. (Phase 9.2) */
