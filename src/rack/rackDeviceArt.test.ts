@@ -1,8 +1,49 @@
 import { describe, it, expect } from 'vitest';
-import { deviceFaceParts, deviceGhostParts, deviceOppositeFaceParts, RACK_ART_DEFS } from './rackDeviceArt';
+import {
+  deviceFaceParts,
+  deviceGhostParts,
+  deviceOppositeFaceParts,
+  devicePortLayout,
+  RACK_ART_DEFS,
+} from './rackDeviceArt';
 import type { Device, DeviceType } from '@/model/types';
 
 const panel = { x: 100, y: 50, w: 560, h: 30 };
+
+const withPorts = (type: DeviceType, count: number): Device => ({
+  id: 'd', kind: 'device', type, name: 'x', x: 0, y: 0, width: 56, height: 40, layerId: 'L',
+  interfaces: Array.from({ length: count }, (_, i) => ({ id: `p${i}`, name: `${i}` })),
+});
+
+/** Distinct Y bands the ports occupy = the number of visual rows. */
+const rowCount = (rects: { y: number }[]) => new Set(rects.map((r) => Math.round(r.y))).size;
+
+describe('devicePortLayout — faceplate realism (W2)', () => {
+  it('a 24-port PATCH panel lays out in ONE row, not 2x12', () => {
+    const rects = devicePortLayout(withPorts('patch-panel', 24), panel);
+    expect(rects).toHaveLength(24);
+    expect(rowCount(rects)).toBe(1);
+  });
+
+  it('a 48-port patch panel is still one row (dense keystone strip)', () => {
+    const rects = devicePortLayout(withPorts('patch-panel', 48), panel);
+    expect(rowCount(rects)).toBe(1);
+  });
+
+  it('patch keystones are banked in 6s (a wider gap every 6th port)', () => {
+    const rects = devicePortLayout(withPorts('patch-panel', 24), panel);
+    const dxs = rects.slice(1).map((r, i) => r.x - rects[i]!.x);
+    const normal = Math.min(...dxs);
+    // The gaps after ports 6/12/18 are wider than the within-bank pitch.
+    const wide = dxs.filter((d) => d > normal + 3);
+    expect(wide.length).toBe(3);
+  });
+
+  it('a 48-port SWITCH keeps two staggered rows (odd top / even bottom)', () => {
+    const rects = devicePortLayout(withPorts('switch', 48), panel);
+    expect(rowCount(rects)).toBe(2);
+  });
+});
 
 function dev(type: DeviceType, over: Partial<Device> = {}): Device {
   return {

@@ -169,6 +169,24 @@ export function devicePortLayout(device: Device, panel: Rect): PortRect[] {
     });
   }
   if (kind === 'psu' || kind === 'cable-mgr' || kind === 'blank') return [];
+  if (kind === 'patch') {
+    // Real 1U patch panels run ALL keystones in ONE row, grouped in banks of 6
+    // (or 12 on high-density blocks). A 24-port panel is 1×24, never 2×12.
+    return portLayout(panel, ports, {
+      rows: 1,
+      nameZone: 28, // patch panels have a minimal left label, not a brand strip
+      rightInset: 12,
+      gap: 2,
+      groupEvery: 6,
+      groupGap: 7,
+      maxJack: 16,
+    });
+  }
+  if (kind === 'switch') {
+    // Switches DO stack 24/48 ports in two staggered rows (odd top / even
+    // bottom via the column-major fill), separated into banks of 6.
+    return portLayout(panel, ports, { groupEvery: 6, groupGap: 6 });
+  }
   return portLayout(panel, ports);
 }
 

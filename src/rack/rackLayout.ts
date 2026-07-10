@@ -110,13 +110,26 @@ export interface PortRect extends Rect {
 /**
  * Lay out a device's ports as a jack grid that FILLS the panel space to the right of
  * the name (using the otherwise-empty middle), sizing jacks as large as they fit and
- * centering the grid in that area. ≤8 ports → one prominent row; more → two rows.
+ * centering the grid in that area. Default row count: ≤8 ports → one prominent row;
+ * more → two rows. Callers force realism with `rows` (e.g. a 24-port PATCH panel is
+ * one row, not 2×12) and `groupEvery`/`groupGap` (keystone banks of 6, switch port
+ * banks) — real gear separates its ports into groups, not one undifferentiated strip.
  * Returns one rect per interface (panel-local coords) for BOTH drawing and hit-testing.
  */
 export function portLayout(
   panel: Rect,
   ports: { id: string; name: string }[],
-  opts: { gap?: number; rightInset?: number; nameZone?: number; maxJack?: number } = {},
+  opts: {
+    gap?: number;
+    rightInset?: number;
+    nameZone?: number;
+    maxJack?: number;
+    /** Force the row count (e.g. patch panel = 1). Default: ≤8 → 1, else 2. */
+    rows?: number;
+    /** Insert `groupGap` extra px after every `groupEvery` COLUMNS (banks of ports). */
+    groupEvery?: number;
+    groupGap?: number;
+  } = {},
 ): PortRect[] {
   const n = ports.length;
   if (n === 0) return [];
@@ -124,29 +137,39 @@ export function portLayout(
   const nameZone = opts.nameZone ?? 98; // left strip reserved for the brand label
   const rightInset = opts.rightInset ?? 10;
   const maxJack = opts.maxJack ?? 20;
+  const groupEvery = opts.groupEvery ?? 0;
+  const groupGap = opts.groupGap ?? 0;
 
   const areaX = panel.x + nameZone;
   const areaW = Math.max(20, panel.w - nameZone - rightInset);
   const areaY = panel.y + 4;
   const areaH = Math.max(8, panel.h - 8);
 
-  const rows = n <= 8 ? 1 : 2;
+  const rows = Math.max(1, opts.rows ?? (n <= 8 ? 1 : 2));
   const cols = Math.ceil(n / rows);
+  // Bank separators sit between column groups; reserve their width before sizing jacks.
+  const numGroupGaps = groupEvery > 0 ? Math.floor((cols - 1) / groupEvery) : 0;
+  const totalGroupGap = numGroupGaps * groupGap;
   // Size jacks to fill the available width (capped), then constrain by row height.
-  const jackW = Math.max(7, Math.min(maxJack, (areaW - (cols - 1) * gap) / cols));
+  const jackW = Math.max(
+    7,
+    Math.min(maxJack, (areaW - (cols - 1) * gap - totalGroupGap) / cols),
+  );
   const jackH = Math.max(6, Math.min(jackW, (areaH - (rows - 1) * gap) / rows));
-  const gridW = cols * jackW + (cols - 1) * gap;
+  const gridW = cols * jackW + (cols - 1) * gap + totalGroupGap;
   const gridH = rows * jackH + (rows - 1) * gap;
   // Center the grid in the port area so the previously-empty middle gets used.
   const startX = areaX + Math.max(0, (areaW - gridW) / 2);
   const startY = areaY + Math.max(0, (areaH - gridH) / 2);
 
+  // Column-major fill so a switch's 2 rows read odd-on-top / even-on-bottom.
   const out: PortRect[] = [];
   for (let i = 0; i < n; i++) {
     const col = Math.floor(i / rows);
     const row = i % rows;
+    const groupsBefore = groupEvery > 0 ? Math.floor(col / groupEvery) : 0;
     out.push({
-      x: startX + col * (jackW + gap),
+      x: startX + col * (jackW + gap) + groupsBefore * groupGap,
       y: startY + row * (jackH + gap),
       w: jackW,
       h: jackH,
