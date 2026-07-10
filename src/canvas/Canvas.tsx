@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { DeviceType } from '@/model/types';
 import { NexIcon } from '@/ui/icons/NexIcon';
 import { useProjectStore, type AlignEdge, type ProjectStore } from '@/store/projectStore';
@@ -1532,7 +1532,9 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         >
           {projection === 'iso' && size.w > 0 && (
             <IsoGrid
-              flat={flatBoxFromScreenRect({ x: 0, y: 0, w: size.w, h: size.h }, toFlat)}
+              {...isoGridBounds(
+                flatBoxFromScreenRect({ x: 0, y: 0, w: size.w, h: size.h }, toFlat),
+              )}
             />
           )}
           {showPages && <PageBoundaries content={store().contentBounds()} />}
@@ -2265,42 +2267,58 @@ function FlatSelectionToolbar({
 
 /** Isometric lattice: flat grid lines drawn inside the projected group so the
  *  iso matrix shears them into the classic diamond floor. (Phase 9.2) */
-function IsoGrid({ flat }: { flat: Box }) {
+/**
+ * Quantize the viewport's flat box to grid-cell edges (with a one-cell overdraw
+ * margin so a partial pan never reveals an ungridded edge). Returns primitive
+ * bounds so IsoGrid — which is memoized — only re-renders when the pointer
+ * crosses a CELL boundary, not on every pan frame. Cheap scalar math; the
+ * expensive line generation lives behind the memo. Caps total lines so an
+ * extreme zoom-out can't mint tens of thousands of <line>s.
+ */
+const ISO_GRID_MAX_LINES = 320;
+function isoGridBounds(flat: Box): {
+  x0: number; x1: number; y0: number; y1: number; step: number;
+} {
   let step = GRID_SIZE * 2; // 32px flat cells
   while (flat.width / step > 140 || flat.height / step > 140) step *= 2;
-  const x0 = Math.floor(flat.x / step) * step;
-  const x1 = Math.ceil((flat.x + flat.width) / step) * step;
-  const y0 = Math.floor(flat.y / step) * step;
-  const y1 = Math.ceil((flat.y + flat.height) / step) * step;
+  // Overdraw one cell on every side so panning within a cell shows no gap.
+  let x0 = Math.floor(flat.x / step) * step - step;
+  let x1 = Math.ceil((flat.x + flat.width) / step) * step + step;
+  let y0 = Math.floor(flat.y / step) * step - step;
+  let y1 = Math.ceil((flat.y + flat.height) / step) * step + step;
+  // Hard cap (degenerate/extreme-zoom guard): grow step until the line count fits.
+  while ((x1 - x0) / step + (y1 - y0) / step > ISO_GRID_MAX_LINES) {
+    step *= 2;
+    x0 = Math.floor(x0 / step) * step;
+    x1 = Math.ceil(x1 / step) * step;
+    y0 = Math.floor(y0 / step) * step;
+    y1 = Math.ceil(y1 / step) * step;
+  }
+  return { x0, x1, y0, y1, step };
+}
+
+const IsoGrid = memo(function IsoGrid({
+  x0, x1, y0, y1, step,
+}: {
+  x0: number; x1: number; y0: number; y1: number; step: number;
+}) {
+  if (import.meta.env.MODE === 'test') {
+    (globalThis as { __isoGridRenders?: number }).__isoGridRenders =
+      ((globalThis as { __isoGridRenders?: number }).__isoGridRenders ?? 0) + 1;
+  }
   const lines: React.ReactNode[] = [];
   for (let x = x0; x <= x1; x += step) {
     lines.push(
-      <line
-        key={`v${x}`}
-        className={styles.isoGridLine}
-        x1={x}
-        y1={y0}
-        x2={x}
-        y2={y1}
-        vectorEffect="non-scaling-stroke"
-      />,
+      <line key={`v${x}`} className={styles.isoGridLine} x1={x} y1={y0} x2={x} y2={y1} vectorEffect="non-scaling-stroke" />,
     );
   }
   for (let y = y0; y <= y1; y += step) {
     lines.push(
-      <line
-        key={`h${y}`}
-        className={styles.isoGridLine}
-        x1={x0}
-        y1={y}
-        x2={x1}
-        y2={y}
-        vectorEffect="non-scaling-stroke"
-      />,
+      <line key={`h${y}`} className={styles.isoGridLine} x1={x0} y1={y} x2={x1} y2={y} vectorEffect="non-scaling-stroke" />,
     );
   }
   return <g pointerEvents="none">{lines}</g>;
-}
+});
 
 type Handle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 const HANDLES: Handle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
