@@ -99,6 +99,30 @@ describe('devicePortLayout — faceplate realism (W2)', () => {
     const svg = join(deviceFaceParts(apc, { x: 100, y: 50, w: 560, h: 88 }));
     expect(svg).toContain('#7f1d1d'); // the APC skin's red UPS badge — skin took precedence
   });
+
+  it('a rail-mounted PDU renders a vertical outlet strip (not a horizontal panel)', () => {
+    const pdu: Device = {
+      id: 'p', kind: 'device', type: 'ups', name: 'PDU 1', mount: 'rail',
+      x: 0, y: 0, width: 16, height: 240, layerId: 'L',
+      interfaces: Array.from({ length: 8 }, (_, i) => ({ id: `o${i}`, name: `C13-${i}` })),
+    };
+    // A rail strip: narrow and tall.
+    const stripPanel = { x: 500, y: 40, w: 16, h: 240 };
+    const parts = deviceFaceParts(pdu, stripPanel);
+    const svg = join(parts);
+    // Outlet rects (fill C.cage #161c24) — stacked in a column: many distinct
+    // Y, essentially one X.
+    const outlets = [...svg.matchAll(/<rect\b[^>]*>/g)]
+      .map((m) => m[0])
+      .filter((r) => r.includes('fill="#161c24"') && /width="1[01]/.test(r))
+      .map((r) => ({
+        x: Math.round(parseFloat(/\bx="([\d.]+)"/.exec(r)![1]!)),
+        y: Math.round(parseFloat(/\by="([\d.]+)"/.exec(r)![1]!)),
+      }));
+    expect(outlets.length).toBeGreaterThanOrEqual(6); // most of 8 outlets fit
+    expect(new Set(outlets.map((o) => o.y)).size).toBeGreaterThanOrEqual(6); // stacked vertically
+    expect(new Set(outlets.map((o) => o.x)).size).toBe(1); // single column
+  });
 });
 
 function dev(type: DeviceType, over: Partial<Device> = {}): Device {

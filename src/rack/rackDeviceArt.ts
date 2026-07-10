@@ -17,7 +17,7 @@ import type { Device } from '@/model/types';
 import { escapeXml } from '@/io/export/buildSvg';
 import { portLayout, PATCH_PORT_OPTS, type Rect, type PortRect } from './rackLayout';
 import { panelKindFor } from './panelKind';
-import { isFullDepth } from './rackModel';
+import { isFullDepth, slotOf } from './rackModel';
 import { rackPhotoSkinParts } from './rackPhotoSkins';
 
 /** Shared gradient defs. Include ONCE per SVG document (root). */
@@ -226,6 +226,36 @@ function rj45(x: number, y: number, w: number, h: number): string {
   );
 }
 
+/**
+ * A vertical 0U PDU: a narrow tall strip with a breaker/switch at the top and a
+ * column of C13 outlets down its length (one per port, capped to what fits).
+ */
+function pduStripParts(device: Device, p: Rect): string[] {
+  const out: string[] = [];
+  out.push(
+    `<rect x="${n(p.x)}" y="${n(p.y)}" width="${n(p.w)}" height="${n(p.h)}" rx="2.5" fill="url(#rkMetal)" stroke="${C.chassisBd}" stroke-width="0.9"/>`,
+  );
+  // Breaker rocker + power LED at the top.
+  out.push(`<rect x="${n(p.x + p.w / 2 - 3)}" y="${n(p.y + 4)}" width="6" height="8" rx="1.2" fill="${C.cage}" stroke="${C.jackBd}" stroke-width="0.6"/>`);
+  out.push(`<circle cx="${n(p.x + p.w / 2)}" cy="${n(p.y + 16)}" r="1.6" fill="url(#rkLedG)"/>`);
+  // Outlet column: one C13 per interface, evenly spaced, sized to the strip width.
+  const count = Math.max(1, (device.interfaces ?? []).length || 8);
+  const top = p.y + 22;
+  const colH = Math.max(6, p.h - 28);
+  const ow = Math.min(p.w - 5, 11);
+  const oh = Math.min(9, colH / count - 1.5);
+  const ox = p.x + (p.w - ow) / 2;
+  const pitch = colH / count;
+  const drawn = Math.min(count, Math.floor(colH / (oh + 1.5)));
+  for (let i = 0; i < drawn; i++) {
+    const oy = top + i * pitch;
+    out.push(`<rect x="${n(ox)}" y="${n(oy)}" width="${n(ow)}" height="${n(oh)}" rx="1.4" fill="${C.cage}" stroke="${C.jackBd}" stroke-width="0.7"/>`);
+    // C13 ground-pin glyph.
+    out.push(`<path d="M ${n(ox + ow / 2 - 2)} ${n(oy + oh / 2 - 1)} h 4 M ${n(ox + ow / 2)} ${n(oy + oh / 2 + 0.6)} v 2" stroke="${C.notch}" stroke-width="1" stroke-linecap="round"/>`);
+  }
+  return out;
+}
+
 /** Chassis + glossy sheen + brand label + status LED, shared by all kinds. */
 function chassis(device: Device, p: Rect, opts: { faceplate?: string; led?: string } = {}): string {
   const fill = opts.faceplate ?? 'url(#rkMetal)';
@@ -292,6 +322,13 @@ export function deviceOppositeFaceParts(device: Device, panel: Rect, viewingFace
 export function deviceFaceParts(device: Device, panel: Rect, face: 'front' | 'rear' = 'front'): string[] {
   const photoSkin = rackPhotoSkinParts(device, panel, face);
   if (photoSkin.length > 0) return [...photoSkin, ...statusOverlay(device, panel)];
+
+  // Rail-mounted power (a vertical 0U PDU) is a narrow tall strip — a column of
+  // outlets down its length, not any horizontal faceplate. Keyed on MOUNT, not
+  // type (a PDU is stored as type 'ups', same as a rack UPS).
+  if (slotOf(device).mount === 'rail') {
+    return [...pduStripParts(device, panel), ...statusOverlay(device, panel)];
+  }
 
   // The rear of a full-depth chassis is power + cooling, not a mirror of the front jacks.
   if (face === 'rear' && isFullDepth(device.type)) {
