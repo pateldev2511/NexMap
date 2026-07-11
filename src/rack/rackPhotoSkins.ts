@@ -106,7 +106,19 @@ export function hasRackPhotoSkin(device: Device, face: RackFace = 'front'): bool
   return Boolean(dataUriForFace(device, face) || familyFor(device));
 }
 
-export function rackPhotoSkinParts(device: Device, panel: Rect, face: RackFace = 'front'): string[] {
+export function rackPhotoSkinParts(
+  device: Device,
+  panel: Rect,
+  face: RackFace = 'front',
+  hideLabel = false,
+): string[] {
+  const parts = rackPhotoSkinPartsRaw(device, panel, face);
+  // The device NAME label carries data-facelabel; brand badges / port numbers do
+  // not, so hiding the name keeps the realistic faceplate intact.
+  return hideLabel ? parts.filter((s) => !s.includes('data-facelabel')) : parts;
+}
+
+function rackPhotoSkinPartsRaw(device: Device, panel: Rect, face: RackFace = 'front'): string[] {
   const dataUri = dataUriForFace(device, face);
   if (dataUri) return customPhotoParts(device, panel, dataUri);
   const family = familyFor(device);
@@ -153,7 +165,7 @@ function base(device: Device, p: Rect, opts: { fill?: string; stroke?: string; l
     `<rect x="${n(p.x)}" y="${n(p.y + 1.2)}" width="${n(p.w)}" height="${n(p.h)}" rx="3" fill="#020617" fill-opacity="0.34" filter="url(#rkDeviceShadow)"/>`,
     `<rect x="${n(p.x)}" y="${n(p.y)}" width="${n(p.w)}" height="${n(p.h)}" rx="3" fill="${opts.fill ?? 'url(#rkBrushed)'}" stroke="${opts.stroke ?? COLOR.stroke}" stroke-width="1"/>`,
     `<rect x="${n(p.x + 1.3)}" y="${n(p.y + 1.2)}" width="${n(p.w - 2.6)}" height="${n(Math.min(p.h * 0.33, 13))}" rx="2.4" fill="url(#rkSheen)"/>`,
-    `<text x="${n(p.x + 8)}" y="${n(p.y + Math.min(p.h / 2 + 4, 18))}" font-family="ui-monospace,Menlo,monospace" font-size="${n(fontSize)}" font-weight="800" fill="${textFill}">${safeText(fitText(label, maxChars))}</text>`,
+    `<text data-facelabel="1" x="${n(p.x + 8)}" y="${n(p.y + Math.min(p.h / 2 + 4, 18))}" font-family="ui-monospace,Menlo,monospace" font-size="${n(fontSize)}" font-weight="800" fill="${textFill}">${safeText(fitText(label, maxChars))}</text>`,
     `<circle cx="${n(p.x + p.w - 7)}" cy="${n(p.y + 6)}" r="2.4" fill="url(#rkLedG)"/>`,
   ];
 }

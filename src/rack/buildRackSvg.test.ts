@@ -27,6 +27,22 @@ const cable: RackCable = {
   id: 'c1', aEnd: { deviceId: 'sw', ifaceId: 'p1' }, bEnd: { deviceId: 'srv', ifaceId: 'nic0' }, color: '#22d3ee', label: 'uplink',
 };
 
+describe('buildRackSvg — hide faceplate names', () => {
+  it('drops device name labels from the elevation export when the rack opts in', () => {
+    const shown = buildRackSvg(rack, [sw, srv], [], { background: '#fff' });
+    expect(shown).toContain('data-facelabel');
+    const hidden = buildRackSvg(
+      { ...rack, hideFaceplateText: true },
+      [sw, srv],
+      [],
+      { background: '#fff' },
+    );
+    expect(hidden).not.toContain('data-facelabel');
+    expect(hidden).not.toContain('esxi-01'); // the server name is gone
+    expect(hidden).toContain('url(#rkLedG)'); // faceplate art still renders
+  });
+});
+
 describe('buildRackSvg — export-safe markup', () => {
   const svg = buildRackSvg(rack, [sw, srv], [cable], { background: '#ffffff' });
 

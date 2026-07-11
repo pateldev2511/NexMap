@@ -785,6 +785,20 @@ export function RackDesigner() {
                   Rear{faceCounts.rear > 0 && <span className={styles.badge}>{faceCounts.rear}</span>}
                 </button>
               </div>
+              <button
+                className={`${styles.btn} ${rack.hideFaceplateText ? styles.primary : ''}`}
+                title="Hide device name labels on the faceplates so names read from the callout column"
+                aria-pressed={!!rack.hideFaceplateText}
+                onClick={() =>
+                  s().updateRack(
+                    rack.id,
+                    { hideFaceplateText: rack.hideFaceplateText },
+                    { hideFaceplateText: !rack.hideFaceplateText },
+                  )
+                }
+              >
+                {rack.hideFaceplateText ? 'Show names' : 'Hide names'}
+              </button>
               {armed && (armed.mount ?? 'rack') === 'rack' && (
                 <div className={styles.seg} title="Half-width bay: two devices share one U">
                   <button className={bay === 'full' ? styles.on : ''} onClick={() => setBay('full')}>Full</button>

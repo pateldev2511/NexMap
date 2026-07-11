@@ -182,7 +182,11 @@ const RackFocusScene = memo(function RackFocusScene({
             aria-label={`${d.name}, U${d.ru}${(d.ruSpan ?? 1) > 1 ? `–U${(d.ru ?? 0) + (d.ruSpan ?? 1) - 1}` : ''}`}
           >
             {/* realistic device art (shared, hex SVG strings) */}
-            <g dangerouslySetInnerHTML={{ __html: deviceFaceParts(d, panel, side).join('') }} />
+            <g
+              dangerouslySetInnerHTML={{
+                __html: deviceFaceParts(d, panel, side, rack.hideFaceplateText).join(''),
+              }}
+            />
             {/* transparent hit area so the whole panel drags/selects */}
             <rect x={panel.x} y={panel.y} width={panel.w} height={panel.h} fill="transparent" />
             {/* per-jack markers: hit-testing uses portAt(); these exist so e2e

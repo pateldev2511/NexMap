@@ -294,6 +294,11 @@ export interface TextObject extends BaseCanvasObject {
   anchor?: CalloutAnchor;
   /** Leader styling; defaults applied at render time when a leader is drawn. */
   leader?: LeaderStyle;
+  /**
+   * When set to a rack id, this callout belongs to that rack's elevation (rendered
+   * on the rack focus canvas + elevation export) instead of the free diagram canvas.
+   */
+  rackScope?: string;
 }
 
 export interface ShapeObject extends BaseCanvasObject {
@@ -366,6 +371,11 @@ export interface Rack {
   maxWeightKg?: number;
   /** Left-to-right order in the multi-rack row view; absent → insertion order. */
   order?: number;
+  /**
+   * Suppress the device NAME labels on faceplates (canvas + elevation export) so
+   * names read from the callout column instead. Brand badges / port numbers stay.
+   */
+  hideFaceplateText?: boolean;
   extra?: ExtraFields;
 }
 

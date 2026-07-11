@@ -285,3 +285,30 @@ describe('deviceOppositeFaceParts — realistic opposite aisle', () => {
     expect(svg).not.toContain('url(#rkLedG)');
   });
 });
+
+// hideFaceplateText must suppress the device NAME on BOTH render paths (the photo
+// skin AND the parametric chassis fallback) — the two-renderer trap that bit patch
+// panels. Every faceplate name carries data-facelabel; brand badges / ports do not.
+describe('deviceFaceParts — hide faceplate name labels', () => {
+  it('SKIN path (Cisco switch): name label present by default, gone when hidden', () => {
+    const cisco = dev('switch', { vendor: 'Cisco', model: 'C9300', name: 'core-sw' });
+    expect(join(deviceFaceParts(cisco, panel, 'front', false))).toContain('data-facelabel');
+    expect(join(deviceFaceParts(cisco, panel, 'front', true))).not.toContain('data-facelabel');
+  });
+
+  it('CHASSIS fallback (unbranded switch): name present by default, gone when hidden', () => {
+    const plain = dev('switch', { vendor: undefined, model: undefined, name: 'edge-sw-01' });
+    const shown = join(deviceFaceParts(plain, panel, 'front', false));
+    expect(shown).toContain('data-facelabel');
+    expect(shown).toContain('edge-sw-01');
+    const hidden = join(deviceFaceParts(plain, panel, 'front', true));
+    expect(hidden).not.toContain('data-facelabel');
+    expect(hidden).not.toContain('edge-sw-01');
+  });
+
+  it('keeps the realistic faceplate — LED/ports survive when the name is hidden', () => {
+    const cisco = dev('switch', { vendor: 'Cisco', name: 'core-sw' });
+    // hiding the name does not blank the whole faceplate (LED glow still there)
+    expect(join(deviceFaceParts(cisco, panel, 'front', true))).toContain('url(#rkLedG)');
+  });
+});

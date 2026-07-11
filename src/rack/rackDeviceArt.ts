@@ -193,7 +193,7 @@ function labelParts(device: Device, p: Rect): string[] {
   const secondary = vendorModel ? device.name : '';
   const max = Math.max(10, Math.min(12, p.h * 0.23));
   const out = [
-    `<text x="${n(p.x + 8)}" y="${n(p.y + Math.min(p.h / 2 + 4, 18))}" font-family="ui-monospace,Menlo,monospace" font-size="${n(max)}" font-weight="800" fill="${C.text}">${escapeXml(primary)}</text>`,
+    `<text data-facelabel="1" x="${n(p.x + 8)}" y="${n(p.y + Math.min(p.h / 2 + 4, 18))}" font-family="ui-monospace,Menlo,monospace" font-size="${n(max)}" font-weight="800" fill="${C.text}">${escapeXml(primary)}</text>`,
   ];
   if (secondary && p.h >= 44) {
     out.push(`<text x="${n(p.x + 8)}" y="${n(p.y + Math.min(p.h - 9, 34))}" font-family="ui-monospace,Menlo,monospace" font-size="8.5" fill="${C.textMut}">${escapeXml(secondary)}</text>`);
@@ -262,7 +262,11 @@ function pduStripParts(device: Device, p: Rect): string[] {
 }
 
 /** Chassis + glossy sheen + brand label + status LED, shared by all kinds. */
-function chassis(device: Device, p: Rect, opts: { faceplate?: string; led?: string } = {}): string {
+function chassis(
+  device: Device,
+  p: Rect,
+  opts: { faceplate?: string; led?: string; hideLabel?: boolean } = {},
+): string {
   const fill = opts.faceplate ?? 'url(#rkMetal)';
   const led = opts.led ?? 'url(#rkLedG)';
   return (
@@ -270,7 +274,7 @@ function chassis(device: Device, p: Rect, opts: { faceplate?: string; led?: stri
     `<rect x="${n(p.x)}" y="${n(p.y)}" width="${n(p.w)}" height="${n(p.h)}" rx="3" fill="${fill}" stroke="${C.chassisBd}" stroke-width="1" filter="url(#rkDeviceShadow)"/>` +
     `<rect x="${n(p.x + 1.3)}" y="${n(p.y + 1.2)}" width="${n(p.w - 2.6)}" height="${n(Math.min(p.h * 0.34, 13))}" rx="2.5" fill="url(#rkSheen)"/>` +
     `<rect x="${n(p.x + 0.8)}" y="${n(p.y + p.h - 2.2)}" width="${n(p.w - 1.6)}" height="1.2" fill="#64748b" fill-opacity="0.28"/>` +
-    labelParts(device, p).join('') +
+    (opts.hideLabel ? '' : labelParts(device, p).join('')) +
     `<circle cx="${n(p.x + p.w - 6)}" cy="${n(p.y + 6)}" r="2.5" fill="${led}"/>`
   );
 }
@@ -324,26 +328,34 @@ export function deviceOppositeFaceParts(device: Device, panel: Rect, viewingFace
  * Front-panel art for one device in ABSOLUTE coords (panel rect already positioned).
  * Returns SVG element strings; the consumer joins + wraps them.
  */
-export function deviceFaceParts(device: Device, panel: Rect, face: 'front' | 'rear' = 'front'): string[] {
-  const photoSkin = rackPhotoSkinParts(device, panel, face);
+export function deviceFaceParts(
+  device: Device,
+  panel: Rect,
+  face: 'front' | 'rear' = 'front',
+  hideLabel = false,
+): string[] {
+  const photoSkin = rackPhotoSkinParts(device, panel, face, hideLabel);
   if (photoSkin.length > 0) return [...photoSkin, ...statusOverlay(device, panel)];
 
   // Rail-mounted power (a vertical 0U PDU) is a narrow tall strip — a column of
   // outlets down its length, not any horizontal faceplate. Keyed on MOUNT, not
-  // type (a PDU is stored as type 'ups', same as a rack UPS).
+  // type (a PDU is stored as type 'ups', same as a rack UPS). No name label.
   if (slotOf(device).mount === 'rail') {
     return [...pduStripParts(device, panel), ...statusOverlay(device, panel)];
   }
 
   // The rear of a full-depth chassis is power + cooling, not a mirror of the front jacks.
   if (face === 'rear' && isFullDepth(device.type)) {
-    return [...rearFaceParts(device, panel), ...statusOverlay(device, panel)];
+    return [...rearFaceParts(device, panel, hideLabel), ...statusOverlay(device, panel)];
   }
   const kind = panelKindFor(device.type);
+  // Faceplate drawer that folds in the hide-name flag for every kind branch.
+  const plate = (opts: { faceplate?: string; led?: string } = {}) =>
+    chassis(device, panel, { ...opts, hideLabel });
   const out: string[] = [];
 
   if (kind === 'switch' || kind === 'firewall') {
-    out.push(chassis(device, panel));
+    out.push(plate());
     out.push(...ventSlats(panel.x + 62, panel.y + Math.max(4, panel.h * 0.22), 24, Math.max(8, panel.h * 0.5), 6));
     for (const j of devicePortLayout(device, panel)) out.push(rj45(j.x, j.y, j.w, j.h));
     // SFP+ uplink cages on the right edge
@@ -368,7 +380,7 @@ export function deviceFaceParts(device: Device, panel: Rect, face: 'front' | 're
       device.type === 'router' ? '#2563eb'
       : device.type === 'load-balancer' ? '#ef4444'
       : '#14b8a6'; // wireless-controller / access-point
-    out.push(chassis(device, panel, { led: accent }));
+    out.push(plate({ led: accent }));
     const cy = panel.y + panel.h / 2;
     // Console + mgmt ports (left).
     out.push(`<rect x="${n(panel.x + 62)}" y="${n(cy - 5)}" width="10" height="10" rx="1.5" fill="${C.cage}" stroke="#38bdf8" stroke-width="0.9"/>`);
@@ -381,7 +393,7 @@ export function deviceFaceParts(device: Device, panel: Rect, face: 'front' | 're
     }
     out.push(`<rect x="${n(panel.x + 8)}" y="${n(panel.y + panel.h - 7)}" width="40" height="3" rx="1" fill="${accent}"/>`);
   } else if (kind === 'patch') {
-    out.push(chassis(device, panel, { faceplate: 'url(#rkPatch)', led: '#3a4654' }));
+    out.push(plate({ faceplate: 'url(#rkPatch)', led: '#3a4654' }));
     const jacks = devicePortLayout(device, panel);
     jacks.forEach((j, i) => {
       out.push(`<rect x="${n(j.x)}" y="${n(j.y)}" width="${n(j.w)}" height="${n(j.h)}" rx="1" fill="#1b222b" stroke="#5b6573" stroke-width="0.7"/>`);
@@ -390,7 +402,7 @@ export function deviceFaceParts(device: Device, panel: Rect, face: 'front' | 're
       if (j.w >= 12) out.push(`<text x="${n(j.x + j.w / 2)}" y="${n(j.y - 1)}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="5" fill="${C.patchText}">${i + 1}</text>`);
     });
   } else if (kind === 'server') {
-    out.push(chassis(device, panel));
+    out.push(plate());
     const tall = panel.h >= 52;
     const driveCols = tall ? 8 : 6;
     const driveRows = tall ? 2 : 1;
@@ -420,7 +432,7 @@ export function deviceFaceParts(device: Device, panel: Rect, face: 'front' | 're
   } else if (kind === 'ups') {
     // A rack UPS: a big battery module (left), a status LCD with a charge/load
     // bar, and a row of C13 outlets (right). Distinct from a PSU's fan grilles.
-    out.push(chassis(device, panel));
+    out.push(plate());
     const cy = panel.y + panel.h / 2;
     // Battery module block (left of the name), with cell divider lines.
     const battX = panel.x + 72;
@@ -451,7 +463,7 @@ export function deviceFaceParts(device: Device, panel: Rect, face: 'front' | 're
       out.push(`<path d="M ${n(cx - 2.4)} ${n(cy - 2.4)} h 4.8 M ${n(cx)} ${n(cy + 0.4)} v 3" stroke="${C.notch}" stroke-width="1.1" stroke-linecap="round"/>`);
     }
   } else if (kind === 'psu') {
-    out.push(chassis(device, panel));
+    out.push(plate());
     // fan grilles + vents (a raw PSU shelf, not a UPS)
     const cy = panel.y + panel.h / 2;
     for (let i = 0; i < 3; i++) {
@@ -461,7 +473,7 @@ export function deviceFaceParts(device: Device, panel: Rect, face: 'front' | 're
     }
     for (let i = 0; i < 6; i++) out.push(`<rect x="${n(panel.x + 70 + i * 5)}" y="${n(cy - 7)}" width="2" height="14" rx="1" fill="${C.vent}"/>`);
   } else if (kind === 'cable-mgr') {
-    out.push(chassis(device, panel, { faceplate: '#20262e', led: '#20262e' }));
+    out.push(plate({ faceplate: '#20262e', led: '#20262e' }));
     // finger ducts
     for (let i = 0; i < 10; i++) {
       const fx = panel.x + 14 + i * ((panel.w - 28) / 10);
@@ -469,7 +481,7 @@ export function deviceFaceParts(device: Device, panel: Rect, face: 'front' | 're
     }
   } else {
     // blank / blade / unknown — flat faceplate + two cage screws
-    out.push(chassis(device, panel, { led: '#3a4654' }));
+    out.push(plate({ led: '#3a4654' }));
     for (const sx of [panel.x + 10, panel.x + panel.w - 10]) {
       out.push(`<circle cx="${n(sx)}" cy="${n(panel.y + panel.h / 2)}" r="2.6" fill="#3a4654" stroke="${C.chassisBd}" stroke-width="0.6"/>`);
       out.push(`<path d="M ${n(sx - 1.6)} ${n(panel.y + panel.h / 2)} h 3.2" stroke="${C.notch}" stroke-width="0.7"/>`);
@@ -512,8 +524,8 @@ function statusOverlay(device: Device, p: Rect): string[] {
  * C14 inlets on the right, fan grilles in the middle, and the escaped name — what you'd
  * actually see from the back of the rack. Hex-only, shared by editor/canvas/export.
  */
-function rearFaceParts(device: Device, p: Rect): string[] {
-  const out = [chassis(device, p, { led: 'url(#rkLedG)' })];
+function rearFaceParts(device: Device, p: Rect, hideLabel = false): string[] {
+  const out = [chassis(device, p, { led: 'url(#rkLedG)', hideLabel })];
 
   // redundant hot-swap PSU modules on the right, each with a power inlet + status LED
   const psuW = Math.min(52, p.w * 0.12);
