@@ -91,3 +91,37 @@ test('an anchored callout paints a dotted leader to its target device', async ({
   await expect(leader).toHaveAttribute('stroke', '#ef4444');
   await expect(leader).toHaveAttribute('stroke-dasharray', /\d/);
 });
+
+test('the floating toolbar bolds a selected callout (W3c)', async ({ page }) => {
+  await openBlankNetwork(page);
+
+  const id = await page.evaluate(() => {
+    const st = (window as unknown as { __nexmap: { getState: () => Record<string, any> } })
+      .__nexmap.getState();
+    const newId = st.addText(200, 160);
+    st.updateObject(
+      newId,
+      { blocks: st.getObject(newId).blocks },
+      { blocks: [{ kind: 'paragraph', spans: [{ text: 'note' }] }] },
+    );
+    if (st.endEdit) st.endEdit();
+    st.select([newId]); // ensure the selection toolbar shows
+    return newId as string;
+  });
+
+  // The formatting toolbar appears for the selected callout.
+  const bold = page.getByRole('button', { name: 'Bold' });
+  await expect(bold).toBeVisible();
+  await expect(bold).toHaveAttribute('aria-pressed', 'false');
+
+  await bold.click();
+
+  // Model + paint both reflect the bold mark.
+  await expect(bold).toHaveAttribute('aria-pressed', 'true');
+  const group = page.locator(`g[data-id="${id}"]`);
+  await expect(group.locator('tspan', { hasText: 'note' })).toHaveAttribute('font-weight', '700');
+
+  // Convert body to a bulleted list; the row gains a bullet marker.
+  await page.getByRole('button', { name: 'Bulleted list' }).click();
+  await expect(group.locator('text').first()).toContainText('•');
+});

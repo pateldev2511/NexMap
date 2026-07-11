@@ -8,6 +8,7 @@
 import type {
   BlockAlign,
   CalloutBlock,
+  RichMark,
   RichSpan,
   TextObject,
 } from './types';
@@ -248,4 +249,130 @@ export function cloneBlocks(blocks: CalloutBlock[]): CalloutBlock[] {
         return { ...b, spans: b.spans.map((s) => ({ ...s })) };
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// Toolbar formatting (block-granular, schema v4). These act on the whole callout
+// — a robust v1 that reaches every format the user asked for (bold/italic/code/
+// lists/alignment) without a full rich-text engine. Per-selection granularity is
+// a future refinement; the span model already supports it.
+// ---------------------------------------------------------------------------
+
+/** Blocks whose spans carry inline marks (everything except code). */
+function markableSpanRuns(block: CalloutBlock): RichSpan[][] {
+  switch (block.kind) {
+    case 'code':
+      return [];
+    case 'bullets':
+    case 'numbers':
+      return block.items;
+    default:
+      return [block.spans];
+  }
+}
+
+/** True when every non-empty markable span already carries `mark`. */
+export function hasMark(blocks: CalloutBlock[], mark: RichMark): boolean {
+  let sawOne = false;
+  for (const b of blocks) {
+    for (const run of markableSpanRuns(b)) {
+      for (const s of run) {
+        if (!s.text) continue;
+        sawOne = true;
+        if (!s.marks?.includes(mark)) return false;
+      }
+    }
+  }
+  return sawOne;
+}
+
+function setSpanMark(s: RichSpan, mark: RichMark, on: boolean): RichSpan {
+  const has = s.marks?.includes(mark) ?? false;
+  if (on === has) return { ...s };
+  const marks = on
+    ? [...(s.marks ?? []), mark]
+    : (s.marks ?? []).filter((m) => m !== mark);
+  const next: RichSpan = { text: s.text };
+  if (marks.length) next.marks = marks;
+  return next;
+}
+
+/** Toggle a mark across all markable spans (add if not all-marked, else remove). */
+export function toggleMark(blocks: CalloutBlock[], mark: RichMark): CalloutBlock[] {
+  const on = !hasMark(blocks, mark);
+  const apply = (run: RichSpan[]) => run.map((s) => (s.text ? setSpanMark(s, mark, on) : s));
+  return blocks.map((b) => {
+    switch (b.kind) {
+      case 'code':
+        return { ...b };
+      case 'bullets':
+      case 'numbers':
+        return { ...b, items: b.items.map(apply) };
+      default:
+        return { ...b, spans: apply(b.spans) };
+    }
+  });
+}
+
+/** Set horizontal alignment on every block that supports it (all but code). */
+export function setCalloutAlign(blocks: CalloutBlock[], align: BlockAlign): CalloutBlock[] {
+  return blocks.map((b) => (b.kind === 'code' ? { ...b } : { ...b, align }));
+}
+
+/** The align shared by the callout, or undefined if blocks disagree / have none. */
+export function calloutAlign(blocks: CalloutBlock[]): BlockAlign | undefined {
+  let seen: BlockAlign | undefined;
+  for (const b of blocks) {
+    if (b.kind === 'code') continue;
+    const a = b.align ?? 'left';
+    if (seen === undefined) seen = a;
+    else if (seen !== a) return undefined;
+  }
+  return seen;
+}
+
+/** The body as one span-run per visual line (heading/subheading excluded). */
+function bodyLines(blocks: CalloutBlock[]): RichSpan[][] {
+  const lines: RichSpan[][] = [];
+  for (const b of blocks) {
+    if (b.kind === 'heading' || b.kind === 'subheading') continue;
+    if (b.kind === 'code') {
+      for (const line of b.text.split('\n')) lines.push(line ? [{ text: line }] : []);
+    } else if (b.kind === 'bullets' || b.kind === 'numbers') {
+      lines.push(...b.items);
+    } else {
+      lines.push(b.spans);
+    }
+  }
+  return lines;
+}
+
+export type BodyKind = 'paragraph' | 'bullets' | 'numbers' | 'code';
+
+/** The body's current kind, for toolbar active state (heading/sub ignored). */
+export function bodyKind(blocks: CalloutBlock[]): BodyKind {
+  const body = blocks.filter((b) => b.kind !== 'heading' && b.kind !== 'subheading');
+  const first = body[0];
+  if (!first) return 'paragraph';
+  if (first.kind === 'bullets' || first.kind === 'numbers' || first.kind === 'code')
+    return first.kind;
+  return 'paragraph';
+}
+
+/** Convert the body (heading/sub preserved) to the given block kind. */
+export function setBodyKind(blocks: CalloutBlock[], kind: BodyKind): CalloutBlock[] {
+  const head = blocks.filter((b) => b.kind === 'heading' || b.kind === 'subheading');
+  const lines = bodyLines(blocks);
+  const align = calloutAlign(blocks);
+  const body: CalloutBlock[] = [];
+  if (kind === 'code') {
+    body.push({ kind: 'code', text: lines.map(spanText).join('\n') });
+  } else if (kind === 'bullets' || kind === 'numbers') {
+    body.push({ kind, items: lines.length ? lines : [[]], ...(align ? { align } : {}) });
+  } else {
+    for (const line of lines.length ? lines : [[]]) {
+      body.push({ kind: 'paragraph', spans: line, ...(align ? { align } : {}) });
+    }
+  }
+  return [...head, ...body];
 }

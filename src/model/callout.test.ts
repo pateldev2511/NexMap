@@ -1,17 +1,23 @@
 import { describe, it, expect } from 'vitest';
 import {
+  bodyKind,
   bodyText,
+  calloutAlign,
   calloutRows,
   calloutRowsOrPlaceholder,
   cloneBlocks,
+  hasMark,
   headingText,
   legacyToBlocks,
   paragraphBlocks,
   rowAnchor,
   setBody,
+  setBodyKind,
+  setCalloutAlign,
   setHeading,
   setSubheading,
   subheadingText,
+  toggleMark,
 } from './callout';
 import type { CalloutBlock } from './types';
 
@@ -123,6 +129,59 @@ describe('rowAnchor', () => {
   });
   it('right anchors at the box end minus pad', () => {
     expect(rowAnchor('right', 100, 160, 4)).toEqual({ x: 256, anchor: 'end' });
+  });
+});
+
+describe('toolbar formatting helpers', () => {
+  it('toggleMark adds bold to all body spans, then removes it', () => {
+    let b = legacyToBlocks('H', undefined, 'a\nb');
+    expect(hasMark(b, 'bold')).toBe(false);
+    b = toggleMark(b, 'bold');
+    expect(hasMark(b, 'bold')).toBe(true);
+    // heading span also gets the mark (heading is markable)
+    expect((b[0] as { spans: { marks?: string[] }[] }).spans[0]!.marks).toContain('bold');
+    b = toggleMark(b, 'bold');
+    expect(hasMark(b, 'bold')).toBe(false);
+  });
+
+  it('toggleMark never marks empty spans', () => {
+    const b = toggleMark([{ kind: 'paragraph', spans: [] }], 'italic');
+    expect(hasMark(b, 'italic')).toBe(false);
+  });
+
+  it('setCalloutAlign sets align on every non-code block; calloutAlign reads it back', () => {
+    const b = setCalloutAlign(legacyToBlocks('H', 'S', 'body'), 'center');
+    expect(calloutAlign(b)).toBe('center');
+  });
+
+  it('calloutAlign returns undefined when blocks disagree', () => {
+    const b = legacyToBlocks(undefined, undefined, 'a\nb');
+    (b[0] as { align?: string }).align = 'left';
+    (b[1] as { align?: string }).align = 'right';
+    expect(calloutAlign(b)).toBeUndefined();
+  });
+
+  it('setBodyKind converts body paragraphs to a bullet list, keeping the heading', () => {
+    const b = setBodyKind(legacyToBlocks('Title', undefined, 'one\ntwo'), 'bullets');
+    expect(b[0]!.kind).toBe('heading');
+    expect(b[1]!.kind).toBe('bullets');
+    expect((b[1] as { items: unknown[] }).items).toHaveLength(2);
+    expect(bodyKind(b)).toBe('bullets');
+  });
+
+  it('setBodyKind to code joins the lines and drops marks', () => {
+    let b = legacyToBlocks(undefined, undefined, 'x\ny');
+    b = toggleMark(b, 'bold');
+    b = setBodyKind(b, 'code');
+    expect(b).toEqual([{ kind: 'code', text: 'x\ny' }]);
+    expect(bodyKind(b)).toBe('code');
+  });
+
+  it('setBodyKind round-trips list → paragraph', () => {
+    let b = setBodyKind(legacyToBlocks(undefined, undefined, 'a\nb'), 'numbers');
+    b = setBodyKind(b, 'paragraph');
+    expect(b.every((x) => x.kind === 'paragraph')).toBe(true);
+    expect(bodyText(b)).toBe('a\nb');
   });
 });
 

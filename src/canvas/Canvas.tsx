@@ -27,6 +27,7 @@ import { DEFAULT_LABEL_HEIGHT } from './nodeCard';
 import { IsoTextNode } from './IsoTextNode';
 import { ObjectNode } from './ObjectNode';
 import { CalloutLeaderLayer } from './CalloutLeaderLayer';
+import { CalloutFormatControls } from './CalloutFormatControls';
 import { CanvasToolbar } from './CanvasToolbar';
 import {
   connectorIconPoints,
@@ -1916,6 +1917,8 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           const tl = canvasToScreen(viewport, fb.x, fb.y);
           const br = canvasToScreen(viewport, fb.x + fb.width, fb.y + fb.height);
           const first = [...selection][0]!;
+          const onlyObj = selection.size === 1 ? store().getObject(first) : undefined;
+          const calloutId = onlyObj && onlyObj.kind === 'text' ? first : null;
           return (
             <FlatSelectionToolbar
               bbox={{ x: tl.x, y: tl.y, width: br.x - tl.x, height: br.y - tl.y }}
@@ -1925,6 +1928,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
               selCount={selection.size}
               movableCount={movableSelCount}
               canUngroup={[...selection].some((id) => store().groupMembers(id).length > 1)}
+              calloutId={calloutId}
             />
           );
         })()}
@@ -2166,6 +2170,7 @@ function FlatSelectionToolbar({
   selCount,
   movableCount,
   canUngroup,
+  calloutId,
 }: {
   bbox: { x: number; y: number; width: number; height: number };
   vw: number;
@@ -2174,6 +2179,7 @@ function FlatSelectionToolbar({
   selCount: number;
   movableCount: number;
   canUngroup: boolean;
+  calloutId: string | null;
 }) {
   const store = useProjectStore.getState;
   const [size, setSize] = useState({ width: 340, height: 36 });
@@ -2207,17 +2213,23 @@ function FlatSelectionToolbar({
         }
       }}
     >
-      {icon('Align left', 'align-left', () => align('left'), !canAlign)}
-      {icon('Align horizontal centers', 'align-hcenter', () => align('hcenter'), !canAlign)}
-      {icon('Align right', 'align-right', () => align('right'), !canAlign)}
-      {icon('Align top', 'align-top', () => align('top'), !canAlign)}
-      {icon('Align vertical centers', 'align-vcenter', () => align('vcenter'), !canAlign)}
-      {icon('Align bottom', 'align-bottom', () => align('bottom'), !canAlign)}
-      {icon('Distribute horizontally', 'distribute-h', () => dist('h'), !canDist)}
-      {icon('Distribute vertically', 'distribute-v', () => dist('v'), !canDist)}
-      <ToolbarSep />
-      {icon('Group', 'group', () => store().groupSelection(), selCount < 2)}
-      {icon('Ungroup', 'ungroup', () => store().ungroupSelection(), !canUngroup)}
+      {calloutId ? (
+        <CalloutFormatControls id={calloutId} />
+      ) : (
+        <>
+          {icon('Align left', 'align-left', () => align('left'), !canAlign)}
+          {icon('Align horizontal centers', 'align-hcenter', () => align('hcenter'), !canAlign)}
+          {icon('Align right', 'align-right', () => align('right'), !canAlign)}
+          {icon('Align top', 'align-top', () => align('top'), !canAlign)}
+          {icon('Align vertical centers', 'align-vcenter', () => align('vcenter'), !canAlign)}
+          {icon('Align bottom', 'align-bottom', () => align('bottom'), !canAlign)}
+          {icon('Distribute horizontally', 'distribute-h', () => dist('h'), !canDist)}
+          {icon('Distribute vertically', 'distribute-v', () => dist('v'), !canDist)}
+          <ToolbarSep />
+          {icon('Group', 'group', () => store().groupSelection(), selCount < 2)}
+          {icon('Ungroup', 'ungroup', () => store().ungroupSelection(), !canUngroup)}
+        </>
+      )}
       <ToolbarSep />
       {icon('Bring forward', 'bring-forward', () => store().bringForward())}
       {icon('Send backward', 'send-backward', () => store().sendBackward())}
