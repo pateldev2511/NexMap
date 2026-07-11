@@ -26,6 +26,7 @@ import { IsoDeviceNode } from './IsoDeviceNode';
 import { DEFAULT_LABEL_HEIGHT } from './nodeCard';
 import { IsoTextNode } from './IsoTextNode';
 import { ObjectNode } from './ObjectNode';
+import { CalloutLeaderLayer } from './CalloutLeaderLayer';
 import { CanvasToolbar } from './CanvasToolbar';
 import {
   connectorIconPoints,
@@ -1411,6 +1412,14 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   const images = allObjects.filter((o) => o.kind === 'image').sort(byZ); // back-most underlays
   const shapes = allObjects.filter((o) => o.kind === 'shape').sort(byZ); // render under links
   const texts = allObjects.filter((o) => o.kind === 'text').sort(byZ); // render on top
+  // Resolve a callout anchor id → its scene bbox (device or canvas object). Lazy:
+  // a dangling id returns null and the leader is simply not drawn.
+  const leaderLookup = (id: string): { x: number; y: number; width: number; height: number } | null => {
+    const d = store().getDevice(id);
+    if (d) return { x: d.x, y: d.y, width: d.width, height: d.height };
+    const o = store().getObject(id);
+    return o ? { x: o.x, y: o.y, width: o.width, height: o.height } : null;
+  };
   const links = (size.w > 0 ? store().visibleLinks(box) : []).filter((l) =>
     vis(l.layerId),
   );
@@ -1741,6 +1750,9 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
               />
             ))}
 
+          {projection !== 'iso' && (
+            <CalloutLeaderLayer texts={texts} lookup={leaderLookup} scale={viewport.scale} />
+          )}
           {projection !== 'iso' &&
             texts.map((o) => (
               <ObjectNode

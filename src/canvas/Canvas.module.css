@@ -163,6 +163,13 @@
   opacity: 0.82;
 }
 
+/* Callout leader line — scene-space, non-interactive; the box handles clicks. */
+.calloutLeader {
+  fill: none;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
 /* Isometric 3D device model (deviceIso engine). */
 .deviceIso {
   pointer-events: none;

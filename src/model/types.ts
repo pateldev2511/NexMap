@@ -262,6 +262,23 @@ export interface CalloutCodeBlock {
 export type CalloutBlock = CalloutParaBlock | CalloutListBlock | CalloutCodeBlock;
 
 /**
+ * What a callout points at. Presence of a (resolvable) anchor turns a plain note
+ * into a "callout" with a leader line. Resolution is LAZY at render time — a
+ * dangling `device` id simply draws no leader (the box stays visible).
+ */
+export type CalloutAnchor =
+  | { type: 'device'; id: string } // a device or canvas object, by id
+  | { type: 'point'; x: number; y: number } // a fixed scene point
+  | null; // free note, no leader
+
+/** Visual style of the leader line. */
+export interface LeaderStyle {
+  color: string;
+  dash: 'dotted' | 'dashed' | 'solid';
+  width: number;
+}
+
+/**
  * A freeform annotation / callout (schema v4). Content is an ordered list of rich
  * blocks — the former flat `text`/`heading`/`subheading` fields were folded into
  * `blocks` by the v3→v4 migration (see model/migrate.ts). All rendering goes
@@ -273,6 +290,10 @@ export interface TextObject extends BaseCanvasObject {
   blocks: CalloutBlock[];
   fontSize?: number;
   color?: string;
+  /** When set, this note is a callout pointing at `anchor` via a leader line. */
+  anchor?: CalloutAnchor;
+  /** Leader styling; defaults applied at render time when a leader is drawn. */
+  leader?: LeaderStyle;
 }
 
 export interface ShapeObject extends BaseCanvasObject {

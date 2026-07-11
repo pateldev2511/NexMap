@@ -96,6 +96,35 @@ describe('buildSvg — connectors + annotation cards', () => {
     expect(svg).toContain('rack 1');
     expect(svg).toContain('font-weight="700"'); // heading styled bold
   });
+
+  it('draws a dotted leader from an anchored callout to its target device', () => {
+    const dev = createDevice('switch', 400, 100, L, { name: 'SW1' });
+    const callout = createTextObject(0, 100, L, {
+      width: 160,
+      height: 40,
+      blocks: [{ kind: 'paragraph', spans: [{ text: 'core' }] }],
+      anchor: { type: 'device', id: dev.id },
+      leader: { color: '#ef4444', dash: 'dotted', width: 2 },
+    }) as CanvasObject;
+    const svg = buildSvg([dev], [], { background: '#fff', includeLabels: true, objects: [callout] });
+    expect(svg).toContain(`data-leader-for="${callout.id}"`);
+    expect(svg).toContain('stroke="#ef4444"');
+    expect(svg).toContain('stroke-dasharray='); // dotted
+    // Endpoint sanity: leader leaves the callout's right edge (x≈160) toward the device.
+    const line = svg.match(/<line data-leader-for="[^"]+"[^/]*\/>/)![0];
+    const x1 = Number(line.match(/x1="([\d.]+)"/)![1]);
+    expect(x1).toBeCloseTo(160, 1);
+  });
+
+  it('omits the leader when the anchor target is missing (lazy resolution)', () => {
+    const callout = createTextObject(0, 0, L, {
+      blocks: [{ kind: 'paragraph', spans: [{ text: 'orphan' }] }],
+      anchor: { type: 'device', id: 'gone' },
+    }) as CanvasObject;
+    const svg = buildSvg([], [], { background: '#fff', includeLabels: true, objects: [callout] });
+    expect(svg).not.toContain('data-leader-for'); // box still renders, leader does not
+    expect(svg).toContain('orphan');
+  });
 });
 
 describe('buildSvg — projection icons', () => {

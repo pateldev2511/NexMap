@@ -61,3 +61,33 @@ test('a rich callout paints stacked rows with a bold tspan on the real canvas', 
   // last row is the second bullet
   await expect(texts.nth(4)).toContainText('uplink 2');
 });
+
+test('an anchored callout paints a dotted leader to its target device', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Network Designer/ }).click();
+  await page.getByRole('button', { name: /Branch office/ }).click();
+  await expect(page.locator('g[data-id]').first()).toBeVisible();
+
+  const calloutId = await page.evaluate(() => {
+    const st = (window as unknown as { __nexmap: { getState: () => Record<string, any> } })
+      .__nexmap.getState();
+    // Anchor a new callout to the first real device on the canvas.
+    const targetId = st.devicesAll()[0]?.id;
+    const id = st.addText(60, 60);
+    st.updateObject(
+      id,
+      { anchor: st.getObject(id).anchor },
+      {
+        anchor: { type: 'device', id: targetId },
+        leader: { color: '#ef4444', dash: 'dotted', width: 2 },
+      },
+    );
+    if (st.endEdit) st.endEdit();
+    return id as string;
+  });
+
+  const leader = page.locator(`line[data-leader-for="${calloutId}"]`);
+  await expect(leader).toBeVisible();
+  await expect(leader).toHaveAttribute('stroke', '#ef4444');
+  await expect(leader).toHaveAttribute('stroke-dasharray', /\d/);
+});

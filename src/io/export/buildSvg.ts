@@ -21,6 +21,13 @@ import { deviceIconFlatGroup } from '@/canvas/deviceVisuals';
 import { clampIconScale } from '@/canvas/nodeCard';
 import { isoProjectPx, DEFAULT_TILE } from '@/canvas/iso';
 import { calloutRowsOrPlaceholder, rowAnchor } from '@/model/callout';
+import {
+  DEFAULT_LEADER,
+  leaderDashArray,
+  leaderGeometry,
+  resolveLeaderTarget,
+  type LeaderRect,
+} from '@/model/leader';
 import type { CanvasObject, Device, Link, TextObject } from '@/model/types';
 
 export interface ExportSvgOptions {
@@ -237,6 +244,30 @@ export function buildSvg(
       );
     }
     parts.push(`</g>`);
+  }
+
+  // Callout leader lines (under the boxes). Same leaderGeometry() as the canvas,
+  // so an exported leader lands exactly where the on-screen one does.
+  const objById = new Map(objects.map((o) => [o.id, o]));
+  const leaderLookup = (id: string): LeaderRect | null => {
+    const d = byId.get(id);
+    if (d) return { x: d.x, y: d.y, width: d.width, height: d.height };
+    const o = objById.get(id);
+    return o ? { x: o.x, y: o.y, width: o.width, height: o.height } : null;
+  };
+  for (const o of objects) {
+    if (o.kind !== 'text' || !o.anchor) continue;
+    const target = resolveLeaderTarget(o.anchor, leaderLookup);
+    if (!target) continue;
+    const g = leaderGeometry({ x: o.x, y: o.y, width: o.width, height: o.height }, target);
+    if (!g) continue;
+    const style = o.leader ?? DEFAULT_LEADER;
+    const dash = leaderDashArray(style);
+    parts.push(
+      `<line data-leader-for="${escapeXml(o.id)}" x1="${g.x1}" y1="${g.y1}" x2="${g.x2}" y2="${g.y2}" ` +
+        `stroke="${escapeXml(style.color)}" stroke-width="${style.width}" fill="none" stroke-linecap="round"` +
+        `${dash ? ` stroke-dasharray="${dash}"` : ''}/>`,
+    );
   }
 
   // Text notes render on top.
