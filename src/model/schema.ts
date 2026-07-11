@@ -3,6 +3,7 @@
  * model objects so every object gets a stable ID and sane defaults in one place.
  */
 import { nanoid } from 'nanoid';
+import { paragraphBlocks } from './callout';
 import type {
   CanvasObject,
   Device,
@@ -23,7 +24,7 @@ import type {
 } from './types';
 
 /** Bump when the on-disk shape changes; add a migration in migrate.ts. */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 export const APP_VERSION = '0.1.0';
 
 export const DEFAULT_DEVICE_SIZE = { width: 56, height: 40 } as const;
@@ -124,7 +125,7 @@ export function createTextObject(
     width: 160,
     height: 28,
     layerId,
-    text: 'Text',
+    blocks: paragraphBlocks('Text'),
     fontSize: 14,
     ...partial,
   };

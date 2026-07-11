@@ -155,12 +155,102 @@ describe('migration v1 → v2 (first-class interfaces)', () => {
     if (result.ok) expect(result.migratedFrom).toBeUndefined();
   });
 
-  it('loads a v3 document (now the current schema version)', () => {
+  it('a fresh document carries the current schema version + rackCables', () => {
     const doc = createEmptyDocument(NOW);
-    expect(doc.schemaVersion).toBe(3);
+    expect(doc.schemaVersion).toBe(SCHEMA_VERSION);
     const result = loadDocument(JSON.stringify(doc));
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.doc.rackCables).toEqual([]);
+  });
+});
+
+// CRITICAL: v3→v4 folds the flat text/heading/subheading fields of a text object
+// into an ordered `blocks` array and DELETES the old fields. One-way door on user
+// annotations — these guard the conversion end-to-end.
+describe('migration v3 → v4 (rich callouts)', () => {
+  // A v2-era doc so the whole chain v2→v3→v4 runs over the same text objects.
+  const v2DocWithNotes = () => ({
+    schemaVersion: 2,
+    appVersion: '0.1.0',
+    project: { id: 'p', name: 'Notes', createdAt: NOW, updatedAt: NOW, description: '', units: 'px' },
+    layers: [{ id: 'L', name: 'Default', visible: true, locked: false, order: 0 }],
+    devices: [],
+    links: [],
+    objects: [
+      // full annotation card
+      { id: 't1', kind: 'text', x: 0, y: 0, width: 160, height: 28, layerId: 'L',
+        heading: 'Core', subheading: 'site A', text: 'rack 1', fontSize: 14, color: '#111' },
+      // body only (no heading/subheading)
+      { id: 't2', kind: 'text', x: 0, y: 0, width: 160, height: 28, layerId: 'L', text: 'just body' },
+      // multi-line body → multiple paragraph blocks
+      { id: 't3', kind: 'text', x: 0, y: 0, width: 160, height: 28, layerId: 'L', text: 'line1\nline2' },
+      // a shape must pass through untouched
+      { id: 's1', kind: 'shape', shape: 'rect', x: 0, y: 0, width: 40, height: 40, layerId: 'L', label: 'zone' },
+    ],
+    vlans: [], subnets: [], racks: [], views: [], interfaces: [], assets: [], customFields: [],
+  });
+
+  const loadNotes = () => {
+    const result = loadDocument(JSON.stringify(v2DocWithNotes()));
+    if (!result.ok) throw new Error('expected ok load');
+    return result.doc;
+  };
+
+  it('migrates all the way to the current version', () => {
+    expect(loadNotes().schemaVersion).toBe(SCHEMA_VERSION);
+  });
+
+  it('folds heading/subheading/body into ordered blocks', () => {
+    const t1 = loadNotes().objects.find((o) => o.id === 't1')!;
+    expect(t1.kind).toBe('text');
+    if (t1.kind === 'text') {
+      expect(t1.blocks).toEqual([
+        { kind: 'heading', spans: [{ text: 'Core' }] },
+        { kind: 'subheading', spans: [{ text: 'site A' }] },
+        { kind: 'paragraph', spans: [{ text: 'rack 1' }] },
+      ]);
+      // fontSize/color survive; old flat fields are gone.
+      expect(t1.fontSize).toBe(14);
+      expect(t1.color).toBe('#111');
+      expect((t1 as unknown as Record<string, unknown>).heading).toBeUndefined();
+      expect((t1 as unknown as Record<string, unknown>).text).toBeUndefined();
+    }
+  });
+
+  it('body-only note becomes a single paragraph', () => {
+    const t2 = loadNotes().objects.find((o) => o.id === 't2')!;
+    if (t2.kind === 'text') {
+      expect(t2.blocks).toEqual([{ kind: 'paragraph', spans: [{ text: 'just body' }] }]);
+    }
+  });
+
+  it('splits a multi-line body into one paragraph per line', () => {
+    const t3 = loadNotes().objects.find((o) => o.id === 't3')!;
+    if (t3.kind === 'text') {
+      expect(t3.blocks).toEqual([
+        { kind: 'paragraph', spans: [{ text: 'line1' }] },
+        { kind: 'paragraph', spans: [{ text: 'line2' }] },
+      ]);
+    }
+  });
+
+  it('leaves non-text objects untouched', () => {
+    const s1 = loadNotes().objects.find((o) => o.id === 's1')!;
+    expect(s1.kind).toBe('shape');
+    if (s1.kind === 'shape') expect(s1.label).toBe('zone');
+  });
+
+  it('is idempotent — re-loading an already-migrated doc keeps one blocks field', () => {
+    const once = loadNotes();
+    const twice = loadDocument(JSON.stringify(once));
+    expect(twice.ok).toBe(true);
+    if (twice.ok) {
+      const t1 = twice.doc.objects.find((o) => o.id === 't1')!;
+      if (t1.kind === 'text') {
+        expect(t1.blocks).toHaveLength(3);
+        expect((t1 as unknown as Record<string, unknown>).heading).toBeUndefined();
+      }
+    }
   });
 });
 

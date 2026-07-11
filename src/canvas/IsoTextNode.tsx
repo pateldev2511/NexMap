@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import { calloutRowsOrPlaceholder, rowAnchor } from '@/model/callout';
 import type { TextObject } from '@/model/types';
 import { isoProjectPx, type IsoTile } from './iso';
 import styles from './Canvas.module.css';
@@ -34,15 +35,38 @@ function IsoTextNodeImpl({
       data-id={object.id}
     >
       <rect x={p.x} y={p.y} width={width} height={height} fill="transparent" />
-      <text
-        className={styles.textObj}
-        x={p.x + 4}
-        y={p.y + fs}
-        fontSize={fs}
-        fill={object.color ?? 'var(--chrome-fg)'}
-      >
-        {object.text || 'Text'}
-      </text>
+      {(() => {
+        const rows = calloutRowsOrPlaceholder(object.blocks, fs);
+        let y = p.y;
+        return rows.map((r, i) => {
+          y += r.size * 1.25;
+          const a = rowAnchor(r.align, p.x, width, 4);
+          return (
+            <text
+              key={i}
+              className={styles.textObj}
+              x={a.x}
+              y={y}
+              textAnchor={a.anchor}
+              fontSize={r.size}
+              fontWeight={r.weight}
+              fontFamily={r.mono ? 'monospace' : undefined}
+              fill={r.muted ? 'var(--chrome-fg-muted)' : (object.color ?? 'var(--chrome-fg)')}
+            >
+              {r.runs.map((run, j) => (
+                <tspan
+                  key={j}
+                  fontWeight={run.bold ? 700 : undefined}
+                  fontStyle={run.italic ? 'italic' : undefined}
+                  fontFamily={run.mono ? 'monospace' : undefined}
+                >
+                  {run.text}
+                </tspan>
+              ))}
+            </text>
+          );
+        });
+      })()}
       {selected && (
         <rect
           className={styles.shapeBody}

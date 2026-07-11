@@ -226,13 +226,51 @@ interface BaseCanvasObject {
   extra?: ExtraFields;
 }
 
+/** Inline formatting marks on a run of text (schema v4). */
+export type RichMark = 'bold' | 'italic' | 'code';
+
+/** A contiguous run of text with optional inline marks. */
+export interface RichSpan {
+  text: string;
+  marks?: RichMark[];
+}
+
+/** Per-block horizontal alignment. Absent = left. */
+export type BlockAlign = 'left' | 'center' | 'right';
+
+/** Heading / subheading / body paragraph — a single line of rich spans. */
+export interface CalloutParaBlock {
+  kind: 'heading' | 'subheading' | 'paragraph';
+  spans: RichSpan[];
+  align?: BlockAlign;
+}
+
+/** Bulleted or numbered list — each item is its own line of rich spans. */
+export interface CalloutListBlock {
+  kind: 'bullets' | 'numbers';
+  items: RichSpan[][];
+  align?: BlockAlign;
+}
+
+/** Preformatted monospace block; newlines preserved verbatim. */
+export interface CalloutCodeBlock {
+  kind: 'code';
+  text: string;
+}
+
+/** One block of callout content. Ordered top-to-bottom in TextObject.blocks. */
+export type CalloutBlock = CalloutParaBlock | CalloutListBlock | CalloutCodeBlock;
+
+/**
+ * A freeform annotation / callout (schema v4). Content is an ordered list of rich
+ * blocks — the former flat `text`/`heading`/`subheading` fields were folded into
+ * `blocks` by the v3→v4 migration (see model/migrate.ts). All rendering goes
+ * through `calloutRows()` in model/callout.ts so the live canvas, the iso view,
+ * and SVG export stay pixel-identical.
+ */
 export interface TextObject extends BaseCanvasObject {
   kind: 'text';
-  /** Body / description text. */
-  text: string;
-  /** Optional annotation-card title + subtitle (schema v2 additive). */
-  heading?: string;
-  subheading?: string;
+  blocks: CalloutBlock[];
   fontSize?: number;
   color?: string;
 }

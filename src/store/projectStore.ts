@@ -50,6 +50,7 @@ import {
   createView,
   createVlan,
 } from '@/model/schema';
+import { cloneBlocks } from '@/model/callout';
 import { validate, resetIssueIds } from '@/model/validate';
 import { SpatialIndex, type Box } from '@/lib/spatial-index';
 import { computeAlignSnap, computeSpacingSnap, type AlignGuide } from '@/canvas/align';
@@ -167,7 +168,7 @@ function cloneMovable(
     return createTextObject(x, y, layerId, {
       width: item.width,
       height: item.height,
-      text: item.text,
+      blocks: cloneBlocks(item.blocks),
       fontSize: item.fontSize,
       color: item.color,
       z: item.z,

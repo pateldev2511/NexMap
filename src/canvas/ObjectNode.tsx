@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import { calloutRowsOrPlaceholder, rowAnchor } from '@/model/callout';
 import type { CanvasObject } from '@/model/types';
 import { NexIcon } from '@/ui/icons/NexIcon';
 import styles from './Canvas.module.css';
@@ -119,28 +120,35 @@ function ObjectNodeImpl({
         fill="transparent"
       />
       {(() => {
-        // Annotation card: stacked heading / subheading / body. Absent fields collapse.
+        // Stacked callout rows — layout shared with iso + export via calloutRows.
         const fs = object.fontSize ?? 14;
-        const rows: { t: string; size: number; weight: number; muted?: boolean }[] = [];
-        if (object.heading) rows.push({ t: object.heading, size: Math.round(fs * 1.3), weight: 700 });
-        if (object.subheading)
-          rows.push({ t: object.subheading, size: Math.round(fs * 0.95), weight: 500, muted: true });
-        const body = object.text || (rows.length === 0 ? 'Text' : '');
-        if (body) rows.push({ t: body, size: fs, weight: 400 });
+        const rows = calloutRowsOrPlaceholder(object.blocks, fs);
         let y = object.y;
         return rows.map((r, i) => {
           y += r.size * 1.25;
+          const a = rowAnchor(r.align, object.x, object.width, 4);
           return (
             <text
               key={i}
               className={styles.textObj}
-              x={object.x + 4}
+              x={a.x}
               y={y}
+              textAnchor={a.anchor}
               fontSize={r.size}
               fontWeight={r.weight}
+              fontFamily={r.mono ? 'monospace' : undefined}
               fill={r.muted ? 'var(--chrome-fg-muted)' : (object.color ?? 'var(--chrome-fg)')}
             >
-              {r.t}
+              {r.runs.map((run, j) => (
+                <tspan
+                  key={j}
+                  fontWeight={run.bold ? 700 : undefined}
+                  fontStyle={run.italic ? 'italic' : undefined}
+                  fontFamily={run.mono ? 'monospace' : undefined}
+                >
+                  {run.text}
+                </tspan>
+              ))}
             </text>
           );
         });

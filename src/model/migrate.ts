@@ -8,6 +8,7 @@
  *  - Strip prototype-pollution keys (__proto__/constructor/prototype) from any
  *    parsed JSON before it touches the model (DA-S3).
  */
+import { legacyToBlocks } from './callout';
 import { SCHEMA_VERSION } from './schema';
 import type { NexMapDocument } from './types';
 
@@ -47,6 +48,31 @@ export const MIGRATIONS: Record<number, Migration> = {
       // Only racked devices get slot qualifiers; free-canvas devices are untouched.
       if (dev.rackId == null) return dev;
       return { mount: 'rack', side: 'front', bay: 'full', ...dev };
+    }),
+  }),
+  // v3 → v4: rich callouts. DESTRUCTIVE for text objects — the flat
+  // `text`/`heading`/`subheading` fields are folded into an ordered `blocks`
+  // array and removed. Non-text objects are untouched. Older builds refuse a v4
+  // file (too-new guard) rather than re-save and drop `blocks`.
+  3: (doc) => ({
+    ...doc,
+    schemaVersion: 4,
+    objects: (Array.isArray(doc.objects) ? doc.objects : []).map((o) => {
+      if (typeof o !== 'object' || o === null) return o;
+      const obj = o as Record<string, unknown>;
+      if (obj.kind !== 'text') return obj;
+      // Already migrated (defensive against double-apply / hand-authored v4 shapes).
+      if (Array.isArray(obj.blocks)) {
+        const { text: _t, heading: _h, subheading: _s, ...rest } = obj;
+        return rest;
+      }
+      const str = (v: unknown): string | undefined =>
+        typeof v === 'string' && v.length > 0 ? v : undefined;
+      const { text: _t, heading: _h, subheading: _s, ...rest } = obj;
+      return {
+        ...rest,
+        blocks: legacyToBlocks(str(obj.heading), str(obj.subheading), str(obj.text)),
+      };
     }),
   }),
 };

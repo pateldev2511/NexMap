@@ -4,6 +4,14 @@ import { NexIcon } from '@/ui/icons/NexIcon';
 import { isValidIp, isValidCidr } from '@/lib/ipcidr';
 import { nextFreeHost } from '@/lib/ipam';
 import { defaultDeviceName } from '@/model/schema';
+import {
+  bodyText,
+  headingText,
+  setBody,
+  setHeading,
+  setSubheading,
+  subheadingText,
+} from '@/model/callout';
 import { VENDORS, MODELS, ROLES } from '@/lib/deviceCatalog';
 import { MIN_LINK_WIDTH, MAX_LINK_WIDTH, DEFAULT_LINK_WIDTH } from '@/canvas/connector';
 import { parseVlanId, VLAN_MIN, VLAN_MAX } from '@/rack/vlan';
@@ -761,24 +769,24 @@ function ObjectInspector({ object }: { object: CanvasObject }) {
         <>
           <Field label="Heading">
             <input
-              value={object.heading ?? ''}
+              value={headingText(object.blocks)}
               placeholder="(optional title)"
-              onChange={(e) => set({ heading: e.target.value || undefined })}
+              onChange={(e) => set({ blocks: setHeading(object.blocks, e.target.value) })}
               onBlur={endEdit}
             />
           </Field>
           <Field label="Subheading">
             <input
-              value={object.subheading ?? ''}
+              value={subheadingText(object.blocks)}
               placeholder="(optional subtitle)"
-              onChange={(e) => set({ subheading: e.target.value || undefined })}
+              onChange={(e) => set({ blocks: setSubheading(object.blocks, e.target.value) })}
               onBlur={endEdit}
             />
           </Field>
           <Field label="Body">
             <textarea
-              value={object.text}
-              onChange={(e) => set({ text: e.target.value })}
+              value={bodyText(object.blocks)}
+              onChange={(e) => set({ blocks: setBody(object.blocks, e.target.value) })}
               onBlur={endEdit}
             />
           </Field>

@@ -83,9 +83,11 @@ describe('buildSvg — connectors + annotation cards', () => {
 
   it('renders a stacked annotation card and escapes heading/subheading', () => {
     const card = createTextObject(10, 10, L, {
-      heading: '<b>Core</b>',
-      subheading: 'site A',
-      text: 'rack 1',
+      blocks: [
+        { kind: 'heading', spans: [{ text: '<b>Core</b>' }] },
+        { kind: 'subheading', spans: [{ text: 'site A' }] },
+        { kind: 'paragraph', spans: [{ text: 'rack 1' }] },
+      ],
     }) as CanvasObject;
     const svg = buildSvg([], [], { background: '#fff', includeLabels: true, objects: [card] });
     expect(svg).toContain('&lt;b&gt;Core&lt;/b&gt;'); // escaped, not raw markup

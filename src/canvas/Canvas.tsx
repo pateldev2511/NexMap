@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Device, DeviceType, Link } from '@/model/types';
+import { bodyText, setBody } from '@/model/callout';
 import { NexIcon } from '@/ui/icons/NexIcon';
 import { useProjectStore, type AlignEdge, type ProjectStore } from '@/store/projectStore';
 import { CanvasSearch } from './CanvasSearch';
@@ -1275,8 +1276,8 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   const commitText = useCallback(
     (id: string, text: string) => {
       const o = store().getObject(id);
-      if (o && o.kind === 'text' && text !== o.text) {
-        store().updateObject(id, { text: o.text }, { text });
+      if (o && o.kind === 'text' && text !== bodyText(o.blocks)) {
+        store().updateObject(id, { blocks: o.blocks }, { blocks: setBody(o.blocks, text) });
         store().endEdit();
       }
       setEditingTextId(null);
@@ -2042,7 +2043,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
             <textarea
               autoFocus
               className={styles.textEditor}
-              defaultValue={o.text}
+              defaultValue={bodyText(o.blocks)}
               style={{
                 left: p.x,
                 top: p.y,

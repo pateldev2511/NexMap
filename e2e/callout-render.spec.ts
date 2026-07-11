@@ -1,0 +1,63 @@
+import { test, expect, type Page } from '@playwright/test';
+
+/**
+ * W3a: rich callouts paint through the REAL canvas (ObjectNode), in a real
+ * browser with real viewport dimensions. Guards the block model → calloutRows →
+ * SVG path end-to-end, and that inline marks reach styled <tspan>s on screen.
+ */
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    try {
+      indexedDB.deleteDatabase('nexmap');
+      localStorage.clear();
+    } catch {
+      /* ignore */
+    }
+  });
+});
+
+async function openBlankNetwork(page: Page) {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Network Designer/ }).click();
+  await page.getByRole('button', { name: /Blank project/ }).click();
+}
+
+test('a rich callout paints stacked rows with a bold tspan on the real canvas', async ({
+  page,
+}) => {
+  await openBlankNetwork(page);
+
+  // Add a note through the real store, then give it rich content the same way
+  // the editor does (updateObject with a blocks patch).
+  const id = await page.evaluate(() => {
+    const st = (window as unknown as { __nexmap: { getState: () => Record<string, any> } })
+      .__nexmap.getState();
+    const newId = st.addText(200, 160);
+    const blocks = [
+      { kind: 'heading', spans: [{ text: 'Core Switch' }] },
+      { kind: 'subheading', spans: [{ text: 'rack A / U40' }] },
+      { kind: 'paragraph', spans: [{ text: 'up ' }, { text: 'bold', marks: ['bold'] }] },
+      { kind: 'bullets', items: [[{ text: 'uplink 1' }], [{ text: 'uplink 2' }]] },
+    ];
+    st.updateObject(newId, { blocks: st.getObject(newId).blocks }, { blocks });
+    if (st.endEdit) st.endEdit();
+    return newId as string;
+  });
+
+  const group = page.locator(`g[data-id="${id}"]`);
+  await expect(group).toBeVisible();
+
+  // heading + subheading + paragraph + 2 bullets = 5 painted rows
+  const texts = group.locator('text');
+  await expect(texts).toHaveCount(5);
+  await expect(texts.first()).toHaveText('Core Switch');
+  await expect(texts.first()).toHaveAttribute('font-weight', '700');
+
+  // the inline-bold span paints as a weighted tspan
+  const bold = group.locator('tspan', { hasText: 'bold' });
+  await expect(bold).toHaveAttribute('font-weight', '700');
+
+  // last row is the second bullet
+  await expect(texts.nth(4)).toContainText('uplink 2');
+});

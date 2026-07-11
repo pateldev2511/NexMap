@@ -28,11 +28,11 @@ function v2Doc() {
 }
 
 describe('v2 → v3 migration (rack designer)', () => {
-  it('stamps v3 and adds an empty rackCables collection', () => {
+  it('adds an empty rackCables collection while migrating to the current version', () => {
     const r = loadDocument(JSON.stringify(v2Doc()));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.doc.schemaVersion).toBe(3);
+    // The v2→v3 step runs mid-chain; the load continues to the current version.
     expect(r.doc.schemaVersion).toBe(SCHEMA_VERSION);
     expect(r.doc.rackCables).toEqual([]);
     expect(r.migratedFrom).toBe(2);
@@ -62,7 +62,7 @@ describe('v2 → v3 migration (rack designer)', () => {
     const second = loadDocument(saved);
     expect(second.ok).toBe(true);
     if (!second.ok) return;
-    // Second load is already v3 → no further migration, byte-identical doc.
+    // Second load is already current → no further migration, byte-identical doc.
     expect(JSON.stringify(second.doc)).toBe(saved);
     expect(second.migratedFrom).toBeUndefined();
   });
@@ -75,8 +75,8 @@ describe('v2 → v3 migration (rack designer)', () => {
   });
 });
 
-describe('too-new guard protects v3 cabling from old builds', () => {
-  it('refuses a future (v4) document rather than load-and-drop', () => {
+describe('too-new guard protects newer schemas from old builds', () => {
+  it('refuses a future (SCHEMA_VERSION + 1) document rather than load-and-drop', () => {
     const future = { ...v2Doc(), schemaVersion: SCHEMA_VERSION + 1 };
     const r = loadDocument(JSON.stringify(future));
     expect(r.ok).toBe(false);

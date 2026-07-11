@@ -20,6 +20,7 @@ import { deviceIsoGroup } from '@/canvas/deviceIso';
 import { deviceIconFlatGroup } from '@/canvas/deviceVisuals';
 import { clampIconScale } from '@/canvas/nodeCard';
 import { isoProjectPx, DEFAULT_TILE } from '@/canvas/iso';
+import { calloutRowsOrPlaceholder, rowAnchor } from '@/model/callout';
 import type { CanvasObject, Device, Link, TextObject } from '@/model/types';
 
 export interface ExportSvgOptions {
@@ -116,22 +117,32 @@ function linkArrowAttrs(l: Link): string {
 }
 
 /**
- * Annotation card → stacked, escaped SVG text (heading / subheading / body). Absent
- * fields collapse. Used by both flat and iso export so they match the canvas.
+ * Callout → stacked, escaped SVG text. Layout comes from the shared calloutRows()
+ * so flat/iso export match the live canvas exactly. `boxX`/`boxY` are the box's
+ * top-left; per-row padding + alignment are applied here.
  */
-function textObjectSvg(o: TextObject, baseX: number, baseY: number): string {
+function textObjectSvg(o: TextObject, boxX: number, boxY: number): string {
   const fs = o.fontSize ?? 14;
   const fill = escapeXml(o.color ?? '#1c2733');
-  const rows: { t: string; size: number; weight: number; fill: string }[] = [];
-  if (o.heading) rows.push({ t: o.heading, size: Math.round(fs * 1.3), weight: 700, fill });
-  if (o.subheading)
-    rows.push({ t: o.subheading, size: Math.round(fs * 0.95), weight: 500, fill: '#64748b' });
-  if (o.text) rows.push({ t: o.text, size: fs, weight: 400, fill });
-  let y = baseY;
+  const rows = calloutRowsOrPlaceholder(o.blocks, fs);
+  let y = boxY;
   return rows
     .map((r) => {
       y += r.size * 1.25;
-      return `<text x="${baseX}" y="${y}" font-size="${r.size}" font-weight="${r.weight}" fill="${r.fill}">${escapeXml(r.t)}</text>`;
+      const a = rowAnchor(r.align, boxX, o.width, 4);
+      const rowFill = r.muted ? '#64748b' : fill;
+      const fam = r.mono ? ' font-family="monospace"' : '';
+      const inner = r.runs
+        .map((run) => {
+          const w = run.bold ? ' font-weight="700"' : '';
+          const st = run.italic ? ' font-style="italic"' : '';
+          const rf = run.mono ? ' font-family="monospace"' : '';
+          return w || st || rf
+            ? `<tspan${w}${st}${rf}>${escapeXml(run.text)}</tspan>`
+            : escapeXml(run.text);
+        })
+        .join('');
+      return `<text x="${a.x}" y="${y}" text-anchor="${a.anchor}" font-size="${r.size}" font-weight="${r.weight}" fill="${rowFill}"${fam}>${inner}</text>`;
     })
     .join('');
 }
@@ -231,7 +242,7 @@ export function buildSvg(
   // Text notes render on top.
   for (const o of objects) {
     if (o.kind !== 'text') continue;
-    parts.push(`<g data-id="${escapeXml(o.id)}">${textObjectSvg(o, o.x + 4, o.y)}</g>`);
+    parts.push(`<g data-id="${escapeXml(o.id)}">${textObjectSvg(o, o.x, o.y)}</g>`);
   }
 
   parts.push(`</svg>`);
