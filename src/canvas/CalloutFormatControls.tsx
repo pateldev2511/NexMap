@@ -19,12 +19,23 @@ import type { BlockAlign, CalloutBlock, LeaderStyle, RichMark, TextObject } from
  * apply to the whole callout; leader color + dash set the pointer style. Each
  * click is one undo entry (updateObject + endEdit).
  */
-export function CalloutFormatControls({ id }: { id: string }) {
+export function CalloutFormatControls({
+  id,
+  anchoring,
+  onBeginAttach,
+  onDetach,
+}: {
+  id: string;
+  anchoring: boolean;
+  onBeginAttach: () => void;
+  onDetach: () => void;
+}) {
   const store = useProjectStore.getState;
   const o = store().getObject(id);
   if (!o || o.kind !== 'text') return null;
   const callout = o as TextObject;
   const blocks = callout.blocks;
+  const anchored = !!callout.anchor;
 
   const applyBlocks = (fn: (b: CalloutBlock[]) => CalloutBlock[]) => {
     store().updateObject(id, { blocks: callout.blocks }, { blocks: fn(callout.blocks) });
@@ -104,6 +115,19 @@ export function CalloutFormatControls({ id }: { id: string }) {
         <option value="dashed">Dashed</option>
         <option value="solid">Solid</option>
       </select>
+      <button
+        title={anchoring ? 'Click a device to attach…' : 'Attach leader to a device'}
+        aria-label="Attach leader"
+        aria-pressed={anchoring}
+        onClick={onBeginAttach}
+      >
+        ⇢
+      </button>
+      {anchored && (
+        <button title="Detach leader" aria-label="Detach leader" onClick={onDetach}>
+          ⇠
+        </button>
+      )}
     </>
   );
 }

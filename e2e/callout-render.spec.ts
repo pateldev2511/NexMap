@@ -125,3 +125,81 @@ test('the floating toolbar bolds a selected callout (W3c)', async ({ page }) => 
   await page.getByRole('button', { name: 'Bulleted list' }).click();
   await expect(group.locator('text').first()).toContainText('•');
 });
+
+async function openBranchOffice(page: Page) {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Network Designer/ }).click();
+  await page.getByRole('button', { name: /Branch office/ }).click();
+  await expect(page.locator('g[data-id]').first()).toBeVisible();
+}
+
+const anchorOf = (page: Page, id: string) =>
+  page.evaluate((cid) => {
+    const o = (window as unknown as { __nexmap: { getState: () => Record<string, any> } })
+      .__nexmap.getState()
+      .getObject(cid);
+    return o?.anchor ?? null;
+  }, id);
+
+test('toolbar Attach → click a device wires the leader; Detach clears it (W3d)', async ({
+  page,
+}) => {
+  await openBranchOffice(page);
+  const id = await page.evaluate(() => {
+    const st = (window as unknown as { __nexmap: { getState: () => Record<string, any> } })
+      .__nexmap.getState();
+    const newId = st.addText(40, 40); // top-left, away from the last device
+    st.select([newId]);
+    return newId as string;
+  });
+
+  await page.getByRole('button', { name: 'Attach leader' }).click();
+  await expect(page.getByRole('button', { name: 'Attach leader' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  // Press a device to complete the pick. Dispatch straight on the device element so
+  // the selected callout's transparent hit-rect can't intercept the press (the drag
+  // test covers realistic pointer resolution).
+  const device = page.locator('g[data-id][role="button"]').last();
+  await device.locator('rect').first().dispatchEvent('pointerdown', { button: 0, pointerId: 1 });
+
+  // The anchor is set and a leader is drawn.
+  expect(await anchorOf(page, id)).toMatchObject({ type: 'device' });
+  await expect(page.locator(`line[data-leader-for="${id}"]`)).toBeVisible();
+
+  // Re-select the callout and detach.
+  await page.evaluate((cid) => {
+    (window as unknown as { __nexmap: { getState: () => Record<string, any> } })
+      .__nexmap.getState()
+      .select([cid]);
+  }, id);
+  await page.getByRole('button', { name: 'Detach leader' }).click();
+  expect(await anchorOf(page, id)).toBeNull();
+  await expect(page.locator(`line[data-leader-for="${id}"]`)).toHaveCount(0);
+});
+
+test('dragging the anchor handle onto a device attaches the leader (W3d)', async ({ page }) => {
+  await openBranchOffice(page);
+  const id = await page.evaluate(() => {
+    const st = (window as unknown as { __nexmap: { getState: () => Record<string, any> } })
+      .__nexmap.getState();
+    const newId = st.addText(40, 40);
+    st.select([newId]);
+    return newId as string;
+  });
+
+  const handle = page.locator('circle[class*="anchorHandle"]');
+  await expect(handle).toBeVisible();
+  const hb = (await handle.boundingBox())!;
+  const device = page.locator('g[data-id][role="button"]').last();
+  const db = (await device.locator('rect').first().boundingBox())!;
+
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(db.x + db.width / 2, db.y + db.height / 2, { steps: 10 });
+  await page.mouse.up();
+
+  expect(await anchorOf(page, id)).toMatchObject({ type: 'device' });
+  await expect(page.locator(`line[data-leader-for="${id}"]`)).toBeVisible();
+});

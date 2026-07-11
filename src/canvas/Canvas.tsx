@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { Device, DeviceType, Link } from '@/model/types';
+import type { Device, DeviceType, Link, TextObject } from '@/model/types';
 import { bodyText, setBody } from '@/model/callout';
+import { DEFAULT_LEADER } from '@/model/leader';
 import { NexIcon } from '@/ui/icons/NexIcon';
 import { useProjectStore, type AlignEdge, type ProjectStore } from '@/store/projectStore';
 import { CanvasSearch } from './CanvasSearch';
@@ -210,6 +211,19 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     setPendingSource(id);
   }, []);
 
+  // Leader-attach: the callout awaiting a target while the user picks one
+  // (toolbar "Attach" → next device click) or drags its anchor handle.
+  const [anchorPickId, setAnchorPickId] = useState<string | null>(null);
+  const anchorPickRef = useRef<string | null>(null);
+  const setAnchorPick = useCallback((id: string | null) => {
+    anchorPickRef.current = id;
+    setAnchorPickId(id);
+  }, []);
+  const [anchorDrag, setAnchorDrag] = useState<{ id: string; x: number; y: number } | null>(
+    null,
+  );
+  const anchorDragRef = useRef<string | null>(null);
+
   const rev = useProjectStore((s) => s.rev);
   const selection = useProjectStore((s) => s.selection);
   const mode = useProjectStore((s) => s.mode);
@@ -221,6 +235,22 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   const cameraTick = useProjectStore((s) => s.cameraTick);
   const health = useProjectStore((s) => s.health);
   const store = useProjectStore.getState;
+
+  // Point a callout's leader at `targetId` (or clear it when null). One undo entry.
+  const attachCalloutTo = useCallback(
+    (calloutId: string, targetId: string | null) => {
+      const o = store().getObject(calloutId);
+      if (!o || o.kind !== 'text' || calloutId === targetId) return;
+      const before: Partial<TextObject> = { anchor: o.anchor, leader: o.leader };
+      const after: Partial<TextObject> = {
+        anchor: targetId ? { type: 'device', id: targetId } : null,
+        leader: targetId ? (o.leader ?? DEFAULT_LEADER) : o.leader,
+      };
+      store().updateObject(calloutId, before, after);
+      store().endEdit();
+    },
+    [store],
+  );
 
   // Report the camera so views can capture it; restore it when a view is applied.
   useEffect(() => {
@@ -406,6 +436,10 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         // press: armed visuals / pending click-connect → tool mode →
         // selection. Never all at once.
         momentum.current.block(performance.now()); // eat the trackpad tail
+        if (anchorPickRef.current) {
+          setAnchorPick(null);
+          return true;
+        }
         if (marquee || lassoPts || pendingSourceRef.current) {
           setMarquee(null);
           setLassoPts(null);
@@ -1028,6 +1062,17 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       // root so they pan (draw.io: right-drag pans anywhere) or open the menu.
       if (e.button !== 0) return;
       if (readOnly || spaceHeld || store().mode === 'pan') return; // let the root handler pan
+      // Leader-attach pick: the next device/object press becomes the target.
+      if (anchorPickRef.current) {
+        const cid = anchorPickRef.current;
+        if (id !== cid && (store().getDevice(id) || store().getObject(id))) {
+          e.stopPropagation();
+          attachCalloutTo(cid, id);
+          setAnchorPick(null);
+          store().select([cid]);
+          return;
+        }
+      }
       // In connect mode, pressing a DEVICE starts a link drag (not objects).
       if (store().mode === 'connect') {
         if (!store().getDevice(id)) return;
@@ -1075,7 +1120,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         y: sy,
       });
     },
-    [spaceHeld, store, localPoint, startLinkFrom, setPending, readOnly],
+    [spaceHeld, store, localPoint, startLinkFrom, setPending, readOnly, attachCalloutTo, setAnchorPick],
   );
 
   const onLabelDoubleClick = useCallback(
@@ -1720,6 +1765,68 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
             );
           })()}
 
+          {/* Leader anchor handle for a single selected callout (flat only): drag
+              onto a device to attach a leader. The toolbar Attach/Detach buttons
+              are the discoverable equivalent. */}
+          {!readOnly &&
+            projection !== 'iso' &&
+            (() => {
+              if (selection.size !== 1) return null;
+              const id = [...selection][0]!;
+              const o = store().getObject(id);
+              if (!o || o.kind !== 'text' || o.locked) return null;
+              const hx = o.x + o.width + 10 / viewport.scale;
+              const hy = o.y + o.height / 2;
+              const r = 5 / viewport.scale;
+              const dragging = anchorDrag?.id === id;
+              return (
+                <g>
+                  {dragging && (
+                    <line
+                      className={styles.calloutLeader}
+                      x1={o.x + o.width}
+                      y1={hy}
+                      x2={anchorDrag!.x}
+                      y2={anchorDrag!.y}
+                      stroke="var(--accent)"
+                      strokeWidth={1.5 / viewport.scale}
+                      strokeDasharray={`${3 / viewport.scale} ${3 / viewport.scale}`}
+                    />
+                  )}
+                  <circle
+                    className={styles.anchorHandle}
+                    cx={hx}
+                    cy={hy}
+                    r={r}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      (e.target as Element).setPointerCapture(e.pointerId);
+                      anchorDragRef.current = id;
+                      setAnchorDrag({ id, x: hx, y: hy });
+                    }}
+                    onPointerMove={(e) => {
+                      if (anchorDragRef.current !== id) return;
+                      const { sx, sy } = localPoint(e);
+                      const f = toFlat(sx, sy);
+                      setAnchorDrag({ id, x: f.x, y: f.y });
+                    }}
+                    onPointerUp={(e) => {
+                      if (anchorDragRef.current !== id) return;
+                      (e.target as Element).releasePointerCapture(e.pointerId);
+                      anchorDragRef.current = null;
+                      const { sx, sy } = localPoint(e);
+                      const f = toFlat(sx, sy);
+                      const hit = store()
+                        .hitTest(f.x, f.y)
+                        .find((h) => h !== id && (store().getDevice(h) || store().getObject(h)));
+                      if (hit) attachCalloutTo(id, hit);
+                      setAnchorDrag(null);
+                    }}
+                  />
+                </g>
+              );
+            })()}
+
           {/* Rubber-band while connecting. */}
           {linkSource &&
             linkCursor &&
@@ -1929,6 +2036,9 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
               movableCount={movableSelCount}
               canUngroup={[...selection].some((id) => store().groupMembers(id).length > 1)}
               calloutId={calloutId}
+              anchoring={!!calloutId && anchorPickId === calloutId}
+              onBeginAttach={() => calloutId && setAnchorPick(calloutId)}
+              onDetach={() => calloutId && attachCalloutTo(calloutId, null)}
             />
           );
         })()}
@@ -2171,6 +2281,9 @@ function FlatSelectionToolbar({
   movableCount,
   canUngroup,
   calloutId,
+  anchoring,
+  onBeginAttach,
+  onDetach,
 }: {
   bbox: { x: number; y: number; width: number; height: number };
   vw: number;
@@ -2180,6 +2293,9 @@ function FlatSelectionToolbar({
   movableCount: number;
   canUngroup: boolean;
   calloutId: string | null;
+  anchoring: boolean;
+  onBeginAttach: () => void;
+  onDetach: () => void;
 }) {
   const store = useProjectStore.getState;
   const [size, setSize] = useState({ width: 340, height: 36 });
@@ -2214,7 +2330,12 @@ function FlatSelectionToolbar({
       }}
     >
       {calloutId ? (
-        <CalloutFormatControls id={calloutId} />
+        <CalloutFormatControls
+          id={calloutId}
+          anchoring={anchoring}
+          onBeginAttach={onBeginAttach}
+          onDetach={onDetach}
+        />
       ) : (
         <>
           {icon('Align left', 'align-left', () => align('left'), !canAlign)}

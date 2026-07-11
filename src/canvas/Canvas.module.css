@@ -41,6 +41,14 @@
   cursor: crosshair;
 }
 
+/* Leader anchor handle on a selected callout — drag it onto a device. */
+.anchorHandle {
+  fill: #fff;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  cursor: crosshair;
+}
+
 .node {
   cursor: move;
 }
