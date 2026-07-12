@@ -42,6 +42,22 @@ test('Annotate all paints a callout + leader per device; idempotent; one undo', 
   await page.getByRole('button', { name: 'Annotate all' }).click();
   expect(await boxes(page)).toBe(n);
 
+  // Regression (found by /qa): the rack SVG viewBox must GROW to include the
+  // callout column, else overflow:hidden clips the whole column and the callouts
+  // are invisible on the live canvas even though they exist in the DOM.
+  const fits = await page.evaluate(() => {
+    const svg = document.querySelector('[data-testid="rack-canvas"]') as SVGSVGElement;
+    const vbW = Number(svg.getAttribute('viewBox')!.split(' ')[2]);
+    const rightmost = Math.max(
+      ...[...svg.querySelectorAll('[data-callout-id] rect')].map(
+        (r) => Number(r.getAttribute('x')) + Number(r.getAttribute('width')),
+      ),
+    );
+    return { vbW, rightmost, contained: rightmost <= vbW };
+  });
+  expect(fits.contained).toBe(true); // callout column is inside the viewBox, not clipped
+  expect(fits.vbW).toBeGreaterThan(656); // grew beyond the bare cabinet width
+
   // One undo removes the whole batch.
   await page.keyboard.press('ControlOrMeta+z');
   expect(await boxes(page)).toBe(0);

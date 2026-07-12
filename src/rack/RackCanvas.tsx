@@ -322,7 +322,11 @@ export function RackCanvas({
   /** Inline cable editing (renders the mini-controls at the cable midpoint). */
   cableActions?: RackCableActions;
 }) {
-  const { width, height } = cabinetSize(rack);
+  const cabinet = cabinetSize(rack);
+  // Grow the viewBox to include the callout column (else the SVG's overflow:hidden
+  // clips it — the export already unions these bounds; the live canvas must too).
+  const width = callouts.reduce((w, o) => Math.max(w, o.x + o.width + 8), cabinet.width);
+  const height = callouts.reduce((h, o) => Math.max(h, o.y + o.height + 8), cabinet.height);
   const origin = bayOrigin();
   const svgRef = useRef<SVGSVGElement>(null);
   const [hoverU, setHoverU] = useState<number | null>(null);
