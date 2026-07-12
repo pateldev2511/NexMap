@@ -8,6 +8,7 @@
  * external references by construction. Object IDs are preserved for round-trip.
  */
 import {
+  alongFrom,
   connectorIconPoints,
   orthogonalIconPoints,
   pathD,
@@ -115,6 +116,32 @@ const ARROW_MARKER_DEF =
   `markerWidth="7" markerHeight="7" orient="auto-start-reverse">` +
   `<path d="M0 0 L10 5 L0 10 z" fill="${EXPORT_ARROW_FILL}"/></marker></defs>`;
 
+/**
+ * Endpoint interface labels (e.g. "Gbe04") drawn ~22px in from each end of a link,
+ * matching the live canvas (Canvas.tsx .ifaceLabel). `project` maps a flat scene
+ * point to output space (identity for flat export, the iso projection otherwise).
+ */
+function ifaceLabelsSvg(
+  l: Link,
+  pts: { x: number; y: number }[],
+  project: (p: { x: number; y: number }) => { x: number; y: number } = (p) => p,
+): string {
+  if (pts.length < 2) return '';
+  const out: string[] = [];
+  const label = (text: string, at: { x: number; y: number }) => {
+    const p = project(at);
+    out.push(
+      `<text x="${p.x.toFixed(1)}" y="${p.y.toFixed(1)}" text-anchor="middle" ` +
+        `font-family="monospace" font-size="8" fill="#64748b" paint-order="stroke" ` +
+        `stroke="#ffffff" stroke-width="2.5">${escapeXml(text)}</text>`,
+    );
+  };
+  if (l.sourceInterface) label(l.sourceInterface, alongFrom(pts[0]!, pts[1]!, 22));
+  if (l.targetInterface)
+    label(l.targetInterface, alongFrom(pts[pts.length - 1]!, pts[pts.length - 2]!, 22));
+  return out.join('');
+}
+
 /** marker-start/-end attrs for a link, matching the canvas default (arrow: 'end'). */
 function linkArrowAttrs(l: Link): string {
   const arrow = l.arrow ?? 'end';
@@ -216,6 +243,7 @@ export function buildSvg(
   }
 
   // Links (under devices).
+  const flatIfaceLabels: string[] = [];
   for (const l of links) {
     const a = byId.get(l.sourceId);
     const t = byId.get(l.targetId);
@@ -227,6 +255,7 @@ export function buildSvg(
     parts.push(
       `<path data-id="${escapeXml(l.id)}" d="${pathD(pts)}" fill="none" ${linkStrokeAttrs(l, health, (pairCount.get(pairKey(l)) ?? 0) === 1)}${linkArrowAttrs(l)} stroke-linecap="round" stroke-linejoin="round"/>`,
     );
+    flatIfaceLabels.push(ifaceLabelsSvg(l, pts));
   }
 
   // Devices.
@@ -246,6 +275,9 @@ export function buildSvg(
     }
     parts.push(`</g>`);
   }
+
+  // Endpoint interface labels ride on top of links + devices (canvas parity).
+  parts.push(...flatIfaceLabels);
 
   // Callout leader lines (under the boxes). Same leaderGeometry() as the canvas,
   // so an exported leader lands exactly where the on-screen one does.
@@ -358,6 +390,7 @@ function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): 
       );
     }
   }
+  const isoIfaceLabels: string[] = [];
   for (const l of links) {
     const s = byId.get(l.sourceId);
     const t = byId.get(l.targetId);
@@ -369,6 +402,8 @@ function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): 
     parts.push(
       `<path d="${pathD(pts)}" fill="none" ${linkStrokeAttrs(l, health, (pairCount.get(pairKey(l)) ?? 0) === 1)}${linkArrowAttrs(l)} stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`,
     );
+    // Labels project upright (via P), drawn after the matrix group closes.
+    isoIfaceLabels.push(ifaceLabelsSvg(l, pts, (p) => P(p.x, p.y)));
   }
   // Callout leaders — flat-scene lines inside the iso matrix group, so they project
   // with every other scene element (W5). Boxes render upright afterward.
@@ -403,6 +438,9 @@ function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): 
       `<text x="${p.x}" y="${p.y}" fill="#64748b" font-size="11">${escapeXml(o.label)}</text>`,
     );
   }
+
+  // Endpoint interface labels — upright, on top (canvas parity).
+  parts.push(...isoIfaceLabels);
 
   // --- Device tiles (upright, painter's order by x+y). ---
   const sorted = [...devices].sort((d1, d2) => d1.x + d1.y - (d2.x + d2.y));

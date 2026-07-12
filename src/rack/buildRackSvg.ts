@@ -58,6 +58,8 @@ export interface BuildRackSvgOptions {
   showFullDepthBacks?: boolean;
   /** Rack-scoped callouts (objects with rackScope) to draw beside their rack. */
   callouts?: TextObject[];
+  /** Suppress the per-cable labels on the elevation (they live in the cable schedule). */
+  hideCableLabels?: boolean;
 }
 
 /**
@@ -217,7 +219,7 @@ export function buildRackRowSvg(
       parts.push(`<path d="${d}" fill="none" stroke="#f8fafc" stroke-width="5.2" stroke-linecap="round" opacity="0.82"/>`);
       parts.push(`<path d="${d}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round"/>`);
       parts.push(`<path d="${d}" fill="none" stroke="#ffffff" stroke-width="0.8" stroke-linecap="round" opacity="0.45"/>`);
-      if (c.label) {
+      if (c.label && !opts.hideCableLabels) {
         parts.push(`<rect x="${(control.x - 28).toFixed(1)}" y="${(control.y - 13).toFixed(1)}" width="56" height="18" rx="5" fill="#ffffff" stroke="#bfdbfe" stroke-width="1"/>`);
         parts.push(`<text x="${control.x.toFixed(1)}" y="${(control.y - 1).toFixed(1)}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="8.5" font-weight="700" fill="#2563eb">${escapeXml(c.label)}</text>`);
       }

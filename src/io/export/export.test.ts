@@ -97,6 +97,19 @@ describe('buildSvg — connectors + annotation cards', () => {
     expect(svg).toContain('font-weight="700"'); // heading styled bold
   });
 
+  it('renders link endpoint interface labels (canvas/export parity)', () => {
+    const a = createDevice('switch', 0, 0, L, { name: 'SW1' });
+    const b = createDevice('server', 300, 0, L, { name: 'SRV1' });
+    const link = createLink(a.id, b.id, L, { sourceInterface: 'Gbe04', targetInterface: 'Gbe02' });
+    const flat = buildSvg([a, b], [link], { background: '#fff', includeLabels: true });
+    expect(flat).toContain('>Gbe04<');
+    expect(flat).toContain('>Gbe02<');
+    // present in iso export too
+    const iso = buildSvg([a, b], [link], { projection: 'iso', background: '#fff', includeLabels: true });
+    expect(iso).toContain('>Gbe04<');
+    expect(iso).toContain('>Gbe02<');
+  });
+
   it('draws a dotted leader from an anchored callout to its target device', () => {
     const dev = createDevice('switch', 400, 100, L, { name: 'SW1' });
     const callout = createTextObject(0, 100, L, {

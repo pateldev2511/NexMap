@@ -69,6 +69,15 @@ describe('buildRackSvg — rack-scoped callouts', () => {
   });
 });
 
+describe('buildRackSvg — hideCableLabels', () => {
+  it('omits per-cable labels on the elevation when asked (they live in the schedule)', () => {
+    const shown = buildRackSvg(rack, [sw, srv], [cable], { background: '#fff' });
+    expect(shown).toContain('uplink'); // cable.label rendered on the elevation
+    const hidden = buildRackSvg(rack, [sw, srv], [cable], { background: '#fff', hideCableLabels: true });
+    expect(hidden).not.toContain('uplink'); // suppressed
+  });
+});
+
 describe('buildRackSvg — export-safe markup', () => {
   const svg = buildRackSvg(rack, [sw, srv], [cable], { background: '#ffffff' });
 
