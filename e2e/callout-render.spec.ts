@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import type { NexWindow } from './support';
 
 /**
  * W3a: rich callouts paint through the REAL canvas (ObjectNode), in a real
@@ -31,7 +32,7 @@ test('a rich callout paints stacked rows with a bold tspan on the real canvas', 
   // Add a note through the real store, then give it rich content the same way
   // the editor does (updateObject with a blocks patch).
   const id = await page.evaluate(() => {
-    const st = (window as unknown as { __nexmap: { getState: () => Record<string, any> } })
+    const st = (window as unknown as NexWindow)
       .__nexmap.getState();
     const newId = st.addText(200, 160);
     const blocks = [
@@ -69,7 +70,7 @@ test('an anchored callout paints a dotted leader to its target device', async ({
   await expect(page.locator('g[data-id]').first()).toBeVisible();
 
   const calloutId = await page.evaluate(() => {
-    const st = (window as unknown as { __nexmap: { getState: () => Record<string, any> } })
+    const st = (window as unknown as NexWindow)
       .__nexmap.getState();
     // Anchor a new callout to the first real device on the canvas.
     const targetId = st.devicesAll()[0]?.id;
@@ -95,7 +96,7 @@ test('an anchored callout paints a dotted leader to its target device', async ({
   // ISO_MATRIX group — no longer gated to flat). Clear the selection first so the
   // floating toolbar doesn't overlay the iso toggle.
   await page.evaluate(() => {
-    (window as unknown as { __nexmap: { getState: () => Record<string, any> } })
+    (window as unknown as NexWindow)
       .__nexmap.getState()
       .select([]);
   });
@@ -107,7 +108,7 @@ test('the floating toolbar bolds a selected callout (W3c)', async ({ page }) => 
   await openBlankNetwork(page);
 
   const id = await page.evaluate(() => {
-    const st = (window as unknown as { __nexmap: { getState: () => Record<string, any> } })
+    const st = (window as unknown as NexWindow)
       .__nexmap.getState();
     const newId = st.addText(200, 160);
     st.updateObject(
@@ -146,7 +147,7 @@ async function openBranchOffice(page: Page) {
 
 const anchorOf = (page: Page, id: string) =>
   page.evaluate((cid) => {
-    const o = (window as unknown as { __nexmap: { getState: () => Record<string, any> } })
+    const o = (window as unknown as NexWindow)
       .__nexmap.getState()
       .getObject(cid);
     return o?.anchor ?? null;
@@ -157,7 +158,7 @@ test('toolbar Attach → click a device wires the leader; Detach clears it (W3d)
 }) => {
   await openBranchOffice(page);
   const id = await page.evaluate(() => {
-    const st = (window as unknown as { __nexmap: { getState: () => Record<string, any> } })
+    const st = (window as unknown as NexWindow)
       .__nexmap.getState();
     const newId = st.addText(40, 40); // top-left, away from the last device
     st.select([newId]);
@@ -181,7 +182,7 @@ test('toolbar Attach → click a device wires the leader; Detach clears it (W3d)
 
   // Re-select the callout and detach.
   await page.evaluate((cid) => {
-    (window as unknown as { __nexmap: { getState: () => Record<string, any> } })
+    (window as unknown as NexWindow)
       .__nexmap.getState()
       .select([cid]);
   }, id);
@@ -193,7 +194,7 @@ test('toolbar Attach → click a device wires the leader; Detach clears it (W3d)
 test('dragging the anchor handle onto a device attaches the leader (W3d)', async ({ page }) => {
   await openBranchOffice(page);
   const id = await page.evaluate(() => {
-    const st = (window as unknown as { __nexmap: { getState: () => Record<string, any> } })
+    const st = (window as unknown as NexWindow)
       .__nexmap.getState();
     const newId = st.addText(40, 40);
     st.select([newId]);
