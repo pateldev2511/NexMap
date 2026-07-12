@@ -23,6 +23,7 @@ import { keyboardRouter } from './input/router';
 import { useQuietChrome } from './ui/useQuietChrome';
 import { ValidationAnnouncer } from './ui/ValidationAnnouncer';
 import { applyReduceMotion, getReduceMotion } from './lib/prefs';
+import { installTooltips } from './ui/tooltip';
 import { ReadOnlyBanner, ErrorToast, NoticeToast } from './ui/dialogs/ReadOnlyBanner';
 import { NexIcon } from './ui/icons/NexIcon';
 import { Canvas } from './canvas/Canvas';
@@ -117,6 +118,10 @@ export function App() {
   useEffect(() => {
     applyReduceMotion(getReduceMotion());
   }, []);
+
+  // Hover/focus tooltips: one body-level singleton that auto-covers every control
+  // carrying a title (migrated to data-tip on first hover). Immune to overflow clip.
+  useEffect(() => installTooltips(), []);
 
   // Live validation: re-run debounced on any model change (the wedge — DA-DES-2.5).
   useEffect(() => {
