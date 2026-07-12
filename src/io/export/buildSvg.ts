@@ -41,6 +41,72 @@ export interface ExportSvgOptions {
   projection?: 'flat' | 'iso';
   /** Topology-health context to tint risky links (SPOF/conflict). Null = no tint. */
   health?: StrokeHealth | null;
+  /**
+   * Opt-in "modern" export styling: soft dot-grid background, rounded zone cards
+   * with drop shadows + accent headers, device chips + label pills, callout cards.
+   * Off by default so plain exports + canvas parity are untouched.
+   */
+  modern?: boolean;
+}
+
+/** Font stack for the modern theme (space-free names — safe inside SVG attrs). */
+const MODERN_FONT =
+  'ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,Roboto,Helvetica,Arial,sans-serif';
+
+/** Shared defs for the modern theme: a soft card shadow + a faint dot grid. */
+const MODERN_DEFS =
+  `<defs>` +
+  `<filter id="nexmap-shadow" x="-30%" y="-30%" width="160%" height="170%">` +
+  `<feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.10"/></filter>` +
+  `<filter id="nexmap-zone-shadow" x="-10%" y="-10%" width="120%" height="125%">` +
+  `<feDropShadow dx="0" dy="6" stdDeviation="14" flood-color="#1e293b" flood-opacity="0.10"/></filter>` +
+  `<pattern id="nexmap-dots" width="26" height="26" patternUnits="userSpaceOnUse">` +
+  `<circle cx="1.4" cy="1.4" r="1.4" fill="#dfe5ee"/></pattern>` +
+  `</defs>`;
+
+/** Lighten/darken helpers not needed — modern zones tint via fill-opacity. */
+function modernZoneParts(o: {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  shape?: string;
+  fill?: string;
+  stroke?: string;
+  label?: string;
+}): string {
+  const accent = escapeXml(o.stroke ?? '#2563eb');
+  const fill = escapeXml(o.fill ?? '#eef2ff');
+  const parts: string[] = [];
+  if (o.shape === 'ellipse') {
+    parts.push(
+      `<ellipse data-id="${escapeXml(o.id)}" cx="${o.x + o.width / 2}" cy="${o.y + o.height / 2}" rx="${o.width / 2}" ry="${o.height / 2}" fill="${fill}" fill-opacity="0.6" stroke="${accent}" stroke-opacity="0.5" stroke-width="1.5" filter="url(#nexmap-zone-shadow)"/>`,
+    );
+  } else {
+    parts.push(
+      `<rect data-id="${escapeXml(o.id)}" x="${o.x}" y="${o.y}" width="${o.width}" height="${o.height}" rx="18" fill="${fill}" fill-opacity="0.6" stroke="${accent}" stroke-opacity="0.45" stroke-width="1.5" filter="url(#nexmap-zone-shadow)"/>`,
+    );
+  }
+  if (o.label) {
+    // Accent header: a soft pill + bold label in the zone's color.
+    const tw = o.label.length * 8.4 + 24;
+    parts.push(
+      `<rect x="${o.x + 16}" y="${o.y + 14}" width="${tw.toFixed(0)}" height="26" rx="13" fill="#ffffff" fill-opacity="0.75"/>` +
+        `<circle cx="${o.x + 30}" cy="${o.y + 27}" r="4" fill="${accent}"/>` +
+        `<text x="${o.x + 42}" y="${o.y + 32}" fill="${accent}" font-size="13" font-weight="700" font-family="${MODERN_FONT}">${escapeXml(o.label)}</text>`,
+    );
+  }
+  return parts.join('');
+}
+
+/** A modern device node: soft rounded chip behind the icon + a label pill. */
+function modernDeviceLabel(name: string, cx: number, y: number): string {
+  const w = name.length * 6.4 + 14;
+  return (
+    `<rect x="${(cx - w / 2).toFixed(1)}" y="${(y - 11).toFixed(1)}" width="${w.toFixed(1)}" height="17" rx="8" fill="#ffffff" fill-opacity="0.88" filter="url(#nexmap-shadow)"/>` +
+    `<text x="${cx}" y="${(y + 1).toFixed(1)}" fill="#0f172a" font-size="11" font-weight="600" text-anchor="middle" font-family="${MODERN_FONT}">${escapeXml(name)}</text>`
+  );
 }
 
 interface Bounds {
@@ -202,16 +268,22 @@ export function buildSvg(
   const health = opts.health ?? null;
   const pairCount = countPairs(links);
 
+  const modern = opts.modern ?? false;
   const parts: string[] = [];
   parts.push(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" ` +
-      `viewBox="${b.minX} ${b.minY} ${w} ${h}" font-family="sans-serif">`,
+      `viewBox="${b.minX} ${b.minY} ${w} ${h}" font-family="${modern ? MODERN_FONT : 'sans-serif'}">`,
   );
   parts.push(ARROW_MARKER_DEF);
+  if (modern) parts.push(MODERN_DEFS);
   if (opts.background) {
     parts.push(
-      `<rect x="${b.minX}" y="${b.minY}" width="${w}" height="${h}" fill="${escapeXml(opts.background)}"/>`,
+      `<rect x="${b.minX}" y="${b.minY}" width="${w}" height="${h}" fill="${escapeXml(modern ? '#f8fafc' : opts.background)}"/>`,
     );
+    if (modern)
+      parts.push(
+        `<rect x="${b.minX}" y="${b.minY}" width="${w}" height="${h}" fill="url(#nexmap-dots)"/>`,
+      );
   }
 
   // Image underlays render at the very back.
@@ -225,6 +297,10 @@ export function buildSvg(
   // Shapes/zones render under links/devices.
   for (const o of objects) {
     if (o.kind !== 'shape') continue;
+    if (modern) {
+      parts.push(modernZoneParts(o));
+      continue;
+    }
     const fill = escapeXml(o.fill ?? '#e8effb');
     const stroke = escapeXml(o.stroke ?? '#2563eb');
     if (o.shape === 'ellipse') {
@@ -263,6 +339,13 @@ export function buildSvg(
     parts.push(`<g data-id="${escapeXml(d.id)}" transform="translate(${d.x} ${d.y})">`);
     const iconSize =
       Math.max(22, Math.min(d.width * 0.72, d.height * 0.82)) * clampIconScale(d.iconScale);
+    // Modern: a soft rounded chip behind the icon so nodes read as cards.
+    if (modern) {
+      const pad = 7;
+      parts.push(
+        `<rect x="${(d.width / 2 - iconSize / 2 - pad).toFixed(1)}" y="${(d.height / 2 - 1 - iconSize / 2 - pad).toFixed(1)}" width="${(iconSize + pad * 2).toFixed(1)}" height="${(iconSize + pad * 2).toFixed(1)}" rx="12" fill="#ffffff" stroke="#e2e8f0" stroke-width="1" filter="url(#nexmap-shadow)"/>`,
+      );
+    }
     // Flat export uses the flat 2D tile icon, matching the flat canvas. (Iso
     // export — buildSvgIso — keeps the 3D model.)
     parts.push(
@@ -270,7 +353,9 @@ export function buildSvg(
     );
     if (opts.includeLabels) {
       parts.push(
-        `<text x="${d.width / 2}" y="${d.height + 12}" fill="#1c2733" font-size="11" text-anchor="middle">${escapeXml(d.name)}</text>`,
+        modern
+          ? modernDeviceLabel(d.name, d.width / 2, d.height + 14)
+          : `<text x="${d.width / 2}" y="${d.height + 12}" fill="#1c2733" font-size="11" text-anchor="middle">${escapeXml(d.name)}</text>`,
       );
     }
     parts.push(`</g>`);
@@ -306,6 +391,13 @@ export function buildSvg(
   // Text notes render on top.
   for (const o of objects) {
     if (o.kind !== 'text') continue;
+    if (modern) {
+      const fs = o.fontSize ?? 14;
+      const ch = calloutRowsOrPlaceholder(o.blocks, fs).reduce((s, r) => s + r.size * 1.25, 0);
+      parts.push(
+        `<rect x="${(o.x - 12).toFixed(1)}" y="${(o.y - 6).toFixed(1)}" width="${(o.width + 20).toFixed(1)}" height="${(ch + 18).toFixed(1)}" rx="12" fill="#ffffff" stroke="#e2e8f0" stroke-width="1" filter="url(#nexmap-zone-shadow)"/>`,
+      );
+    }
     parts.push(`<g data-id="${escapeXml(o.id)}">${textObjectSvg(o, o.x, o.y)}</g>`);
   }
 
@@ -356,16 +448,20 @@ function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): 
   const health = opts.health ?? null;
   const pairCount = countPairs(links);
 
+  const modern = opts.modern ?? false;
   const parts: string[] = [];
   parts.push(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" ` +
-      `viewBox="${minX} ${minY} ${w} ${h}" font-family="sans-serif">`,
+      `viewBox="${minX} ${minY} ${w} ${h}" font-family="${modern ? MODERN_FONT : 'sans-serif'}">`,
   );
   parts.push(ARROW_MARKER_DEF);
+  if (modern) parts.push(MODERN_DEFS);
   if (opts.background) {
     parts.push(
-      `<rect x="${minX}" y="${minY}" width="${w}" height="${h}" fill="${escapeXml(opts.background)}"/>`,
+      `<rect x="${minX}" y="${minY}" width="${w}" height="${h}" fill="${escapeXml(modern ? '#f8fafc' : opts.background)}"/>`,
     );
+    if (modern)
+      parts.push(`<rect x="${minX}" y="${minY}" width="${w}" height="${h}" fill="url(#nexmap-dots)"/>`);
   }
 
   // --- Floor layer (sheared by the iso matrix): images, shapes, links. ---
@@ -453,7 +549,9 @@ function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): 
     if (opts.includeLabels) {
       const labelY = Math.max(br.y + 8, iconCy + iconSize * 0.72);
       parts.push(
-        `<text x="${c.x}" y="${labelY + 8}" fill="#1c2733" font-size="11" text-anchor="middle">${escapeXml(d.name)}</text>`,
+        modern
+          ? modernDeviceLabel(d.name, c.x, labelY + 6)
+          : `<text x="${c.x}" y="${labelY + 8}" fill="#1c2733" font-size="11" text-anchor="middle">${escapeXml(d.name)}</text>`,
       );
     }
   }
@@ -462,6 +560,13 @@ function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): 
   for (const o of objects) {
     if (o.kind !== 'text') continue;
     const p = P(o.x, o.y);
+    if (modern) {
+      const fs = o.fontSize ?? 14;
+      const ch = calloutRowsOrPlaceholder(o.blocks, fs).reduce((s, r) => s + r.size * 1.25, 0);
+      parts.push(
+        `<rect x="${(p.x - 12).toFixed(1)}" y="${(p.y - 6).toFixed(1)}" width="${(o.width + 20).toFixed(1)}" height="${(ch + 18).toFixed(1)}" rx="12" fill="#ffffff" stroke="#e2e8f0" stroke-width="1" filter="url(#nexmap-zone-shadow)"/>`,
+      );
+    }
     parts.push(textObjectSvg(o, p.x, p.y));
   }
 
