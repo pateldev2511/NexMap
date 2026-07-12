@@ -90,6 +90,17 @@ test('an anchored callout paints a dotted leader to its target device', async ({
   await expect(leader).toBeVisible();
   await expect(leader).toHaveAttribute('stroke', '#ef4444');
   await expect(leader).toHaveAttribute('stroke-dasharray', /\d/);
+
+  // W5: the leader survives into the isometric view (scene-space, projected by the
+  // ISO_MATRIX group — no longer gated to flat). Clear the selection first so the
+  // floating toolbar doesn't overlay the iso toggle.
+  await page.evaluate(() => {
+    (window as unknown as { __nexmap: { getState: () => Record<string, any> } })
+      .__nexmap.getState()
+      .select([]);
+  });
+  await page.getByRole('button', { name: 'Toggle isometric view' }).click();
+  await expect(page.locator(`line[data-leader-for="${calloutId}"]`)).toBeVisible();
 });
 
 test('the floating toolbar bolds a selected callout (W3c)', async ({ page }) => {

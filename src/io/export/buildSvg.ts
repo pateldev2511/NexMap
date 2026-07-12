@@ -370,6 +370,29 @@ function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): 
       `<path d="${pathD(pts)}" fill="none" ${linkStrokeAttrs(l, health, (pairCount.get(pairKey(l)) ?? 0) === 1)}${linkArrowAttrs(l)} stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`,
     );
   }
+  // Callout leaders — flat-scene lines inside the iso matrix group, so they project
+  // with every other scene element (W5). Boxes render upright afterward.
+  const isoObjById = new Map(objects.map((o) => [o.id, o]));
+  const isoLeaderLookup = (id: string): LeaderRect | null => {
+    const d = byId.get(id);
+    if (d) return { x: d.x, y: d.y, width: d.width, height: d.height };
+    const o = isoObjById.get(id);
+    return o ? { x: o.x, y: o.y, width: o.width, height: o.height } : null;
+  };
+  for (const o of objects) {
+    if (o.kind !== 'text' || !o.anchor) continue;
+    const target = resolveLeaderTarget(o.anchor, isoLeaderLookup);
+    if (!target) continue;
+    const g = leaderGeometry({ x: o.x, y: o.y, width: o.width, height: o.height }, target);
+    if (!g) continue;
+    const style = o.leader ?? DEFAULT_LEADER;
+    const dash = leaderDashArray(style);
+    parts.push(
+      `<line data-leader-for="${escapeXml(o.id)}" x1="${g.x1}" y1="${g.y1}" x2="${g.x2}" y2="${g.y2}" ` +
+        `stroke="${escapeXml(style.color)}" stroke-width="${style.width}" fill="none" stroke-linecap="round" vector-effect="non-scaling-stroke"` +
+        `${dash ? ` stroke-dasharray="${dash}"` : ''}/>`,
+    );
+  }
   parts.push(`</g>`);
 
   // --- Upright shape labels (at projected anchors). ---

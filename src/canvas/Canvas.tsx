@@ -1859,9 +1859,9 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
               />
             ))}
 
-          {projection !== 'iso' && (
-            <CalloutLeaderLayer texts={texts} lookup={leaderLookup} scale={viewport.scale} />
-          )}
+          {/* Callout leaders render in BOTH projections: they're scene-space lines,
+              so the enclosing ISO_MATRIX group projects them for free in iso (W5). */}
+          <CalloutLeaderLayer texts={texts} lookup={leaderLookup} scale={viewport.scale} />
           {projection !== 'iso' &&
             texts.map((o) => (
               <ObjectNode

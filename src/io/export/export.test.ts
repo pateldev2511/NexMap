@@ -116,6 +116,23 @@ describe('buildSvg — connectors + annotation cards', () => {
     expect(x1).toBeCloseTo(160, 1);
   });
 
+  it('draws the leader in ISO export too (projected by the iso matrix group, W5)', () => {
+    const dev = createDevice('switch', 400, 100, L, { name: 'SW1' });
+    const callout = createTextObject(0, 100, L, {
+      width: 160,
+      height: 40,
+      blocks: [{ kind: 'paragraph', spans: [{ text: 'core' }] }],
+      anchor: { type: 'device', id: dev.id },
+    }) as CanvasObject;
+    const svg = buildSvg([dev], [], {
+      projection: 'iso',
+      background: '#fff',
+      includeLabels: true,
+      objects: [callout],
+    });
+    expect(svg).toContain(`data-leader-for="${callout.id}"`);
+  });
+
   it('omits the leader when the anchor target is missing (lazy resolution)', () => {
     const callout = createTextObject(0, 0, L, {
       blocks: [{ kind: 'paragraph', spans: [{ text: 'orphan' }] }],
