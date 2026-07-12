@@ -340,7 +340,7 @@ function bodyLines(blocks: CalloutBlock[]): RichSpan[][] {
       for (const line of b.text.split('\n')) lines.push(line ? [{ text: line }] : []);
     } else if (b.kind === 'bullets' || b.kind === 'numbers') {
       lines.push(...b.items);
-    } else {
+    } else if (b.kind === 'paragraph') {
       lines.push(b.spans);
     }
   }
