@@ -7,8 +7,10 @@
  * buildPdfBlob(). The live editor shares only the LAYOUT math (rackLayout.ts), never
  * this markup. Every user string is run through escapeXml.
  */
-import type { Device, Rack, RackCable } from '@/model/types';
+import type { Device, Rack, RackCable, TextObject } from '@/model/types';
 import { escapeXml } from '@/io/export/buildSvg';
+import { calloutRowsOrPlaceholder, rowAnchor } from '@/model/callout';
+import { DEFAULT_LEADER, leaderDashArray, leaderGeometry, type LeaderRect } from '@/model/leader';
 import {
   bayOrigin,
   rowLayout,
@@ -54,6 +56,53 @@ export interface BuildRackSvgOptions {
   ghostOpposite?: boolean;
   /** Draw only full-depth backs from the opposite face; used when both front/rear are shown. */
   showFullDepthBacks?: boolean;
+  /** Rack-scoped callouts (objects with rackScope) to draw beside their rack. */
+  callouts?: TextObject[];
+}
+
+/**
+ * One rack-scoped callout → SVG (box + shared calloutRows text + leader). Mirrors
+ * the live RackCalloutLayer so the elevation export matches the editor. `boxX` is
+ * the callout's scene x (already includes the rack's row offset).
+ */
+function calloutSvgParts(o: TextObject, boxX: number, target: LeaderRect | null): string[] {
+  const out: string[] = [];
+  const style = o.leader ?? DEFAULT_LEADER;
+  if (target) {
+    const g = leaderGeometry({ x: boxX, y: o.y, width: o.width, height: o.height }, target);
+    if (g) {
+      const dash = leaderDashArray(style);
+      out.push(
+        `<line data-leader-for="${escapeXml(o.id)}" x1="${g.x1.toFixed(1)}" y1="${g.y1.toFixed(1)}" x2="${g.x2.toFixed(1)}" y2="${g.y2.toFixed(1)}" ` +
+          `stroke="${escapeXml(style.color)}" stroke-width="${style.width}" fill="none" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ''}/>`,
+      );
+    }
+  }
+  out.push(
+    `<rect data-callout-id="${escapeXml(o.id)}" x="${boxX.toFixed(1)}" y="${o.y.toFixed(1)}" width="${o.width}" height="${o.height}" rx="4" fill="#ffffff" fill-opacity="0.94" stroke="#cbd5e1" stroke-width="1"/>`,
+  );
+  const fs = o.fontSize ?? 13;
+  let y = o.y;
+  for (const r of calloutRowsOrPlaceholder(o.blocks, fs)) {
+    y += r.size * 1.25;
+    const a = rowAnchor(r.align, boxX, o.width, 6);
+    const fill = r.muted ? '#64748b' : escapeXml(o.color ?? '#1c2733');
+    const fam = r.mono ? ' font-family="monospace"' : '';
+    const inner = r.runs
+      .map((run) => {
+        const w = run.bold ? ' font-weight="700"' : '';
+        const st = run.italic ? ' font-style="italic"' : '';
+        const rf = run.mono ? ' font-family="monospace"' : '';
+        return w || st || rf
+          ? `<tspan${w}${st}${rf}>${escapeXml(run.text)}</tspan>`
+          : escapeXml(run.text);
+      })
+      .join('');
+    out.push(
+      `<text x="${a.x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${a.anchor}" font-size="${r.size}" font-weight="${r.weight}" fill="${fill}"${fam}>${inner}</text>`,
+    );
+  }
+  return out;
 }
 
 /** Render one cabinet (frame, bay, U labels, on-face devices) at its row offset. */
@@ -181,8 +230,38 @@ export function buildRackRowSvg(
     }
   });
 
+  // Rack-scoped callouts (+ leaders), drawn beside their cabinet. Export bounds
+  // MUST grow to include the callout column or a margin note would be clipped out.
+  let outW = width;
+  let outH = height;
+  const callouts = opts.callouts ?? [];
+  if (callouts.length > 0) {
+    const placeById = new Map(placements.map((p) => [p.rack.id, p]));
+    for (const o of callouts) {
+      const p = o.rackScope ? placeById.get(o.rackScope) : undefined;
+      if (!p) continue;
+      const boxX = o.x + p.offsetX;
+      let target: LeaderRect | null = null;
+      if (o.anchor?.type === 'device') {
+        const d = devOf.get(o.anchor.id);
+        if (d && d.rackId === p.rack.id && slotOf(d).side === face) {
+          const r = deviceRect(p.rack, d);
+          const origin = bayOrigin(p.offsetX);
+          target = { x: origin.x + r.x, y: origin.y + r.y, width: r.w, height: r.h };
+        }
+      } else if (o.anchor?.type === 'point') {
+        target = { x: o.anchor.x + p.offsetX, y: o.anchor.y, width: 0, height: 0 };
+      }
+      parts.push(...calloutSvgParts(o, boxX, target));
+      outW = Math.max(outW, boxX + o.width + 8);
+      outH = Math.max(outH, o.y + o.height + 8);
+    }
+  }
+
+  const w = Math.round(outW);
+  const h = Math.round(outH);
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.round(width)}" height="${Math.round(height)}" viewBox="0 0 ${Math.round(width)} ${Math.round(height)}">` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
     parts.join('') +
     `</svg>`
   );
@@ -413,7 +492,7 @@ export function buildRackRowFacesSvg(
   racks: Rack[],
   devices: Device[],
   cables: RackCable[],
-  opts: { showRear: boolean; background?: string | null },
+  opts: { showRear: boolean; background?: string | null; callouts?: TextObject[] },
 ): string {
   // Rear hidden → hint all rear gear on the front row. Rear shown → draw full-depth backs
   // on both rows so the rear aisle reads like physical hardware, without duplicating shallow gear.
@@ -422,6 +501,7 @@ export function buildRackRowFacesSvg(
     side: 'front',
     ghostOpposite: !opts.showRear,
     showFullDepthBacks: opts.showRear,
+    callouts: opts.callouts, // callouts anchor to front-face devices
   });
   if (!opts.showRear) return front;
   const rear = buildRackRowSvg(racks, devices, cables, { background: opts.background, side: 'rear', showFullDepthBacks: true });

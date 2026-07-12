@@ -341,3 +341,56 @@ describe('setDevicePhoto', () => {
     expect(() => s().setDevicePhoto('ghost', PNG)).not.toThrow();
   });
 });
+
+describe('annotateRack (W3e)', () => {
+  const mountTwo = () => {
+    const r = s().addRack('MDF');
+    const a = s().addDeviceAt('switch', 0, 0);
+    const b = s().addDeviceAt('server', 0, 0);
+    s().placeInRack(a, r, slot({ ru: 40 }));
+    s().placeInRack(b, r, slot({ ru: 20, ruSpan: 2 }));
+    return { r, a, b };
+  };
+
+  it('creates one rack-scoped callout per mounted device, anchored to it', () => {
+    const { r, a, b } = mountTwo();
+    const n = s().annotateRack(r);
+    expect(n).toBe(2);
+    const callouts = s().objectsAll().filter((o) => o.kind === 'text' && o.rackScope === r);
+    expect(callouts).toHaveLength(2);
+    const anchoredIds = callouts
+      .map((o) => (o.kind === 'text' && o.anchor?.type === 'device' ? o.anchor.id : null))
+      .sort();
+    expect(anchoredIds).toEqual([a, b].sort());
+    // heading = device name
+    const names = callouts
+      .map((o) => (o.kind === 'text' ? o.blocks[0] : null))
+      .map((blk) => (blk && blk.kind === 'heading' ? blk.spans[0]!.text : ''));
+    expect(names.sort()).toEqual([s().getDevice(a)!.name, s().getDevice(b)!.name].sort());
+  });
+
+  it('is idempotent — a second run adds nothing', () => {
+    const { r } = mountTwo();
+    expect(s().annotateRack(r)).toBe(2);
+    expect(s().annotateRack(r)).toBe(0);
+    expect(s().objectsAll().filter((o) => o.kind === 'text' && o.rackScope === r)).toHaveLength(2);
+  });
+
+  it('is ONE undo entry', () => {
+    const { r } = mountTwo();
+    s().annotateRack(r);
+    s().undo();
+    expect(s().objectsAll().filter((o) => o.kind === 'text' && o.rackScope === r)).toHaveLength(0);
+  });
+
+  it('deleting the rack cascades its callouts in one undo', () => {
+    const { r } = mountTwo();
+    s().annotateRack(r);
+    expect(s().objectsAll().filter((o) => o.kind === 'text' && o.rackScope === r)).toHaveLength(2);
+    s().deleteRack(r);
+    expect(s().objectsAll().filter((o) => o.kind === 'text' && o.rackScope === r)).toHaveLength(0);
+    s().undo(); // restores rack AND its callouts together
+    expect(s().objectsAll().filter((o) => o.kind === 'text' && o.rackScope === r)).toHaveLength(2);
+    expect(s().racksAll().some((rk) => rk.id === r)).toBe(true);
+  });
+});

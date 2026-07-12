@@ -161,7 +161,8 @@ export function buildSvg(
 ): string {
   if (opts.projection === 'iso') return buildSvgIso(devices, links, opts);
   const padding = opts.padding ?? 40;
-  const objects = opts.objects ?? [];
+  // Rack-scoped callouts render on the rack elevation, not the flat diagram export.
+  const objects = (opts.objects ?? []).filter((o) => !(o.kind === 'text' && o.rackScope));
   const b = bounds([...devices, ...objects], padding) ?? {
     minX: 0,
     minY: 0,
@@ -291,7 +292,7 @@ const ISO_DEPTH = 12;
  */
 function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): string {
   const padding = opts.padding ?? 40;
-  const objects = opts.objects ?? [];
+  const objects = (opts.objects ?? []).filter((o) => !(o.kind === 'text' && o.rackScope));
   const tile = DEFAULT_TILE;
   const P = (x: number, y: number) => isoProjectPx(x, y, ISO_GRID, tile);
   const a = tile.w / (2 * ISO_GRID);

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useMemo, useCallback, memo } from 'react';
-import type { Device, Rack, RackCable } from '@/model/types';
+import type { Device, Rack, RackCable, TextObject } from '@/model/types';
+import { RackCalloutLayer } from './RackCalloutLayer';
 import {
   cabinetSize,
   bayOrigin,
@@ -264,6 +265,7 @@ export function RackCanvas({
   rack,
   devices,
   cables,
+  callouts = [],
   selectedId,
   selectedIds,
   selectedCableId,
@@ -286,6 +288,8 @@ export function RackCanvas({
   rack: Rack;
   devices: Device[];
   cables: RackCable[];
+  /** Rack-scoped callouts (objects with rackScope === rack.id). */
+  callouts?: TextObject[];
   selectedId: string | null;
   /** Full multi-selection (for bulk edit highlight). Falls back to selectedId when absent. */
   selectedIds?: Set<string>;
@@ -874,6 +878,18 @@ export function RackCanvas({
         onDevDown={onDevDownStable}
         onSelectCable={onSelectCableStable}
       />
+
+      {/* Rack-scoped callouts + leaders — outside the memoized scene so editing
+          one never re-renders 42U of faceplate art (W3e). */}
+      {callouts.length > 0 && (
+        <RackCalloutLayer
+          callouts={callouts}
+          deviceRect={(id) => {
+            const dr = layout.deviceRects.find((r) => r.id === id);
+            return dr ? { x: dr.box.x, y: dr.box.y, width: dr.box.w, height: dr.box.h } : null;
+          }}
+        />
+      )}
 
       {/* empty-face hint — so flipping to a bare face never reads as "gear vanished".
           Anchored near the TOP of the bay (not its vertical center) so it stays visible

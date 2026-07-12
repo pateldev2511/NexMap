@@ -11,6 +11,7 @@
 import { create } from 'zustand';
 import { nanoid } from 'nanoid';
 import type {
+  CalloutBlock,
   CanvasObject,
   Device,
   DeviceType,
@@ -22,10 +23,13 @@ import type {
   RackCable,
   RackCableEnd,
   Subnet,
+  TextObject,
   ValidationIssue,
   View,
   Vlan,
 } from '@/model/types';
+import { bayOrigin, BAY_W } from '@/rack/rackLayout';
+import { DEFAULT_LEADER } from '@/model/leader';
 import { canFit, isFullDepth, type FitResult, type Slot } from '@/rack/rackModel';
 import { checkConnect, pruneCablesForInterfaces } from '@/rack/rackCables';
 import { presetByKey } from '@/rack/rackDevicePresets';
@@ -275,6 +279,13 @@ export interface ProjectStore {
   ): void;
   getObject(id: string): CanvasObject | undefined;
   objectsAll(): CanvasObject[];
+  /**
+   * Generate a name/vendor callout for every mounted device on `rackId` that
+   * doesn't already have one (idempotent), laid out in a column at the rack's
+   * right edge and anchored to each device. One undo entry. Returns how many were
+   * created.
+   */
+  annotateRack(rackId: string, side?: 'front' | 'rear'): number;
   /** Begin dragging the current selection — snapshots origin positions. */
   beginDrag(): void;
   /** Move dragged devices by a canvas-space delta (transient, no history). */
@@ -534,6 +545,57 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         dirty: true,
       });
       return obj.id;
+    },
+
+    annotateRack(rackId, side) {
+      const rack = model.racks.get(rackId);
+      if (!rack) return 0;
+      // Only devices on the visible face — a leader can't reach a device the
+      // elevation isn't currently showing.
+      const devices = [...model.devices.values()].filter(
+        (d) =>
+          d.rackId === rackId &&
+          d.ru != null &&
+          (side == null || (d.side ?? 'front') === side),
+      );
+      const existing = [...model.objects.values()].filter(
+        (o): o is TextObject => o.kind === 'text' && o.rackScope === rackId,
+      );
+      const anchored = new Set(
+        existing.map((o) => (o.anchor?.type === 'device' ? o.anchor.id : null)).filter(Boolean),
+      );
+      // Top of the rack (highest U) first; skip already-annotated devices.
+      const todo = devices
+        .filter((d) => !anchored.has(d.id))
+        .sort((a, b) => (b.ru ?? 0) - (a.ru ?? 0));
+      if (todo.length === 0) return 0;
+
+      const colX = bayOrigin().x + BAY_W + 40;
+      const W = 220;
+      const H = 40;
+      const GAP = 12;
+      // Continue below the lowest existing callout in the column (no overlaps).
+      let y = bayOrigin().y;
+      for (const o of existing) y = Math.max(y, o.y + o.height + GAP);
+
+      const cmds = todo.map((d) => {
+        const blocks: CalloutBlock[] = [{ kind: 'heading', spans: [{ text: d.name }] }];
+        const vm = [d.vendor, d.model].filter(Boolean).join(' ');
+        if (vm) blocks.push({ kind: 'subheading', spans: [{ text: vm }] });
+        const obj = createTextObject(colX, y, firstLayerId(), {
+          width: W,
+          height: H,
+          blocks,
+          rackScope: rackId,
+          anchor: { type: 'device', id: d.id },
+          leader: { ...DEFAULT_LEADER },
+        });
+        y += H + GAP;
+        return new AddObjectCommand(obj);
+      });
+      commit(transaction('Annotate devices', cmds));
+      history.commitCoalesceBoundary();
+      return cmds.length;
     },
 
     addShape(x, y, width, height) {
@@ -1880,7 +1942,20 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       commit(new UpdateRackCommand(id, before, after));
     },
     deleteRack(id) {
-      commit(new DeleteRackCommand(id));
+      // Cascade: rack-scoped callouts are deleted with the rack, in ONE undo entry.
+      const calloutIds = [...model.objects.values()]
+        .filter((o) => o.kind === 'text' && o.rackScope === id)
+        .map((o) => o.id);
+      if (calloutIds.length > 0) {
+        commit(
+          transaction('Delete rack', [
+            new DeleteRackCommand(id),
+            new DeleteCommand([], [], calloutIds),
+          ]),
+        );
+      } else {
+        commit(new DeleteRackCommand(id));
+      }
       history.commitCoalesceBoundary();
     },
     cloneRack(rackId) {
@@ -2171,7 +2246,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         maxY = Math.max(maxY, y + height);
       };
       for (const d of model.devices.values()) includeBox(d.x, d.y, d.width, d.height);
-      for (const o of model.objects.values()) includeBox(o.x, o.y, o.width, o.height);
+      for (const o of model.objects.values()) {
+        if (o.kind === 'text' && o.rackScope) continue; // lives on a rack elevation
+        includeBox(o.x, o.y, o.width, o.height);
+      }
       for (const l of model.links.values()) {
         for (const p of l.waypoints ?? []) includeBox(p.x, p.y);
       }

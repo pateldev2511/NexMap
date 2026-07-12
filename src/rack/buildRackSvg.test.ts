@@ -43,6 +43,32 @@ describe('buildRackSvg — hide faceplate names', () => {
   });
 });
 
+describe('buildRackSvg — rack-scoped callouts', () => {
+  const callout = {
+    id: 'c1', kind: 'text' as const, x: 700, y: 20, width: 220, height: 40, layerId: 'L',
+    rackScope: 'r1', blocks: [{ kind: 'heading' as const, spans: [{ text: 'core-sw' }] }],
+    anchor: { type: 'device' as const, id: 'sw' },
+    leader: { color: '#ef4444', dash: 'dotted' as const, width: 2 },
+  };
+
+  it('draws the callout box + a leader to its device, and grows the export width', () => {
+    const base = buildRackSvg(rack, [sw, srv], [], { background: '#fff' });
+    const withCallout = buildRackSvg(rack, [sw, srv], [], { background: '#fff', callouts: [callout] });
+    expect(withCallout).toContain('data-callout-id="c1"');
+    expect(withCallout).toContain('data-leader-for="c1"');
+    expect(withCallout).toContain('core-sw');
+    // The callout column (x≈700 + 220) pushes the export wider than the bare cabinet.
+    const w = (s: string) => Number(s.match(/width="(\d+)"/)![1]);
+    expect(w(withCallout)).toBeGreaterThan(w(base));
+  });
+
+  it('renders no callout for a rackScope that is not this rack', () => {
+    const other = { ...callout, id: 'c2', rackScope: 'other' };
+    const svg = buildRackSvg(rack, [sw, srv], [], { background: '#fff', callouts: [other] });
+    expect(svg).not.toContain('data-callout-id');
+  });
+});
+
 describe('buildRackSvg — export-safe markup', () => {
   const svg = buildRackSvg(rack, [sw, srv], [cable], { background: '#ffffff' });
 

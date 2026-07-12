@@ -42,7 +42,7 @@ import { hasBulkChanges } from './rackBulk';
 import { validatePhoto, isRasterPhotoDataUri, PHOTO_ACCEPT } from './rackPhotoUpload';
 import { deviceFaceParts, RACK_ART_DEFS } from './rackDeviceArt';
 import { estimateCableLengthFt } from './cableLength';
-import type { Device } from '@/model/types';
+import type { Device, TextObject } from '@/model/types';
 import styles from './RackDesigner.module.css';
 
 /** Human-readable reason for a rejected drop. */
@@ -188,6 +188,15 @@ export function RackDesigner() {
   const multi = selection.size >= 2;
   const selected = selectedId ? devices.find((d) => d.id === selectedId) : undefined;
   const inRack = useMemo(() => devices.filter((d) => d.rackId === rack?.id), [devices, rack?.id]);
+  // Rack-scoped callouts for the focused rack (re-derived on any model change via rev).
+  const rackCallouts = useMemo(
+    () =>
+      s()
+        .objectsAll()
+        .filter((o): o is TextObject => o.kind === 'text' && o.rackScope === rack?.id),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rev, rack?.id],
+  );
   const budget = useMemo(() => (rack ? rackBudget(rack, devices) : null), [rack, devices]);
   const usedU = budget?.usedU ?? 0;
   // Cross-rack device search → ids to highlight in the row view. Deep match: name, type,
@@ -658,10 +667,14 @@ export function RackDesigner() {
 
   /** Build the export SVG honoring the row/focus view and the chosen export mode. */
   function exportSvg(background: string, mode: ExportMode = exportMode): string {
+    // Every rack-scoped callout across the project; each renderer keeps only its own.
+    const allCallouts = s()
+      .objectsAll()
+      .filter((o): o is TextObject => o.kind === 'text' && !!o.rackScope);
     const rackSvg =
       view === 'row'
-        ? buildRackRowFacesSvg(racks, devices, cables, { showRear, background })
-        : buildRackSvg(rack!, devices, cables, { background, side });
+        ? buildRackRowFacesSvg(racks, devices, cables, { showRear, background, callouts: allCallouts })
+        : buildRackSvg(rack!, devices, cables, { background, side, callouts: allCallouts });
     if (mode === 'diagram') return rackSvg;
     const tableSvg = buildConnectionsTableSvg(cableScheduleRows(devices, cables), { background, title: 'Connections' });
     return composeExport(rackSvg, tableSvg, mode, background);
@@ -785,6 +798,13 @@ export function RackDesigner() {
                   Rear{faceCounts.rear > 0 && <span className={styles.badge}>{faceCounts.rear}</span>}
                 </button>
               </div>
+              <button
+                className={styles.btn}
+                title="Add a name callout for every device on this face (skips ones already labeled)"
+                onClick={() => s().annotateRack(rack.id, side)}
+              >
+                Annotate all
+              </button>
               <button
                 className={`${styles.btn} ${rack.hideFaceplateText ? styles.primary : ''}`}
                 title="Hide device name labels on the faceplates so names read from the callout column"
@@ -1032,6 +1052,7 @@ export function RackDesigner() {
             </div>
             <div className={styles.focusCanvasWrap}>
               <RackCanvas
+                callouts={rackCallouts}
                 onQuickPlace={(u) => {
                   const p = armed ?? lastPresetRef.current;
                   if (p) placePreset(p, u);

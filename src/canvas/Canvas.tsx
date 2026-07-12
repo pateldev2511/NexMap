@@ -1457,7 +1457,8 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   const byZ = (a: { z?: number }, b: { z?: number }) => (a.z ?? 0) - (b.z ?? 0);
   const images = allObjects.filter((o) => o.kind === 'image').sort(byZ); // back-most underlays
   const shapes = allObjects.filter((o) => o.kind === 'shape').sort(byZ); // render under links
-  const texts = allObjects.filter((o) => o.kind === 'text').sort(byZ); // render on top
+  // Rack-scoped callouts belong to a rack elevation, not the free diagram canvas.
+  const texts = allObjects.filter((o) => o.kind === 'text' && !o.rackScope).sort(byZ);
   // Resolve a callout anchor id → its scene bbox (device or canvas object). Lazy:
   // a dangling id returns null and the leader is simply not drawn.
   const leaderLookup = (id: string): { x: number; y: number; width: number; height: number } | null => {
