@@ -39,6 +39,15 @@ NexMap already has the core of a usable local network designer:
   marquee select, lasso, smart snap/alignment guides, grouping, lock/unlock, z-order,
   copy/cut/paste, keyboard nudge, context menus, resize handles, and undo/redo. Moving a
   group carries its connectors rigidly (bends and all) when both endpoints move.
+- **Pointer-native input:** one unified gesture core drives mouse, trackpad, pen, and
+  touch — wheel-pan or wheel-zoom (configurable), pinch-to-zoom, two-finger pan, and a
+  survivor-keeps-panning multitouch model. Double-click empty canvas to quick-create a
+  device at the point; a "quiet canvas" fades chrome once you're heads-down and a floating
+  selection toolbar puts the common actions right by the selection.
+- **Annotations & callouts:** movable rich-text callout boxes (heading / subheading /
+  body with **bold**, *italic*, `code`, bullet/numbered lists, and alignment) connected to
+  any device by an editable colored dotted leader line — drag the anchor handle onto a
+  target or use the toolbar. Callouts render in flat, isometric, and every export.
 - **Connectors:** semantic links (VLAN/trunk, LACP, circuit IDs, interfaces), drag-to-relink
   endpoints, waypoints, straight/orthogonal routing, manual color, and a thickness slider.
 - **Flat + isometric rendering:** toggle between 2D and isometric view without
@@ -67,9 +76,18 @@ NexMap already has the core of a usable local network designer:
 - **Local persistence:** IndexedDB autosave, recovery dialog, Web Locks
   single-writer protection, File System Access save/open when supported, download
   fallback elsewhere, offline/PWA shell, and settings for theme/connect behavior.
+- **Rack designer:** a dedicated elevation editor with realistic per-vendor faceplate
+  art (Cisco/Arista/Juniper switches, Dell/HPE servers, APC UPS, Panduit patch panels,
+  firewalls, PDUs) plus a parametric fallback for everything else; single-rack and
+  side-by-side row views, front/rear faces, drag-to-mount at any U, port-to-port cabling
+  with color and labels, and PNG/PDF/CSV cable-schedule export. Push device names off the
+  faceplates into a callout column with **Annotate all**, **Hide names**, and generated
+  **title block** / **legend** blocks for document-grade elevations.
+- **Tooltips:** a body-level tooltip singleton that can't be clipped by scroll
+  containers, covering the toolbars, zoom clusters, dialogs, and canvas affordances.
 - **Polish already underway:** auto-layout, canvas search, alignment/distribution,
-  rack elevation view, presentation/read-only mode, responsive shell, keyboard
-  shortcuts, light/dark themes, and an error boundary around the canvas.
+  presentation/read-only mode, responsive shell, keyboard shortcuts, light/dark themes,
+  and an error boundary around the canvas.
 
 ## What Is Not Ready Yet
 
@@ -181,11 +199,10 @@ file when the project matters.
 The detailed roadmap lives in [`TODOS.md`](TODOS.md). Near-term open-source work
 should focus on:
 
-- hardening browser/E2E tests for import/export/canvas workflows;
 - contributor docs, issue templates, and release notes;
 - first-class interfaces/ports;
 - better connector routing and cable tracing;
-- rack rear view and physical cabling workflows;
+- word-level rich-text editing and swatch chips in callout legends;
 - guided discovery import;
 - performance and accessibility passes on large diagrams.
 
