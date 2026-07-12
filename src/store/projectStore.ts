@@ -30,6 +30,8 @@ import type {
 } from '@/model/types';
 import { bayOrigin, BAY_W } from '@/rack/rackLayout';
 import { DEFAULT_LEADER } from '@/model/leader';
+import { calloutRowsOrPlaceholder } from '@/model/callout';
+import { titleBlockBlocks, legendBlocks, legendEntries } from '@/model/docBlocks';
 import { canFit, isFullDepth, type FitResult, type Slot } from '@/rack/rackModel';
 import { checkConnect, pruneCablesForInterfaces } from '@/rack/rackCables';
 import { presetByKey } from '@/rack/rackDevicePresets';
@@ -286,6 +288,12 @@ export interface ProjectStore {
    * created.
    */
   annotateRack(rackId: string, side?: 'front' | 'rear'): number;
+  /** Add a generated title-block callout (rack-scoped when rackId given). Returns its id. */
+  addTitleBlock(rackId?: string): string;
+  /** Add a generated legend callout from the rack's (or all) cable colors. Returns its id. */
+  addLegend(rackId?: string): string;
+  /** Rebuild a title-block/legend callout's content from current data (one undo). */
+  regenerateDocBlock(id: string): void;
   /** Begin dragging the current selection — snapshots origin positions. */
   beginDrag(): void;
   /** Move dragged devices by a canvas-space delta (transient, no history). */
@@ -482,6 +490,64 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     return model.layers.keys().next().value ?? 'default';
   }
 
+  /** Generated content for a title-block / legend, from current project data. */
+  function docBlockContent(role: 'title-block' | 'legend', rackId?: string): CalloutBlock[] {
+    const date = model.project.updatedAt.slice(0, 10); // YYYY-MM-DD, deterministic
+    if (role === 'title-block') {
+      const rack = rackId ? model.racks.get(rackId) : undefined;
+      const deviceCount = rackId
+        ? [...model.devices.values()].filter((d) => d.rackId === rackId).length
+        : model.devices.size;
+      return titleBlockBlocks({
+        projectName: model.project.name,
+        rackName: rack?.name,
+        date,
+        deviceCount,
+      });
+    }
+    const cables = rackId
+      ? [...model.rackCables.values()].filter(
+          (c) => model.devices.get(c.aEnd.deviceId)?.rackId === rackId,
+        )
+      : [...model.rackCables.values()];
+    return legendBlocks(legendEntries(cables));
+  }
+
+  /** Create + place a generated document-block callout (column for a rack, else free). */
+  function addDocBlock(role: 'title-block' | 'legend', rackId?: string): string {
+    const blocks = docBlockContent(role, rackId);
+    const width = role === 'legend' ? 240 : 220;
+    const height =
+      calloutRowsOrPlaceholder(blocks, 14).reduce((s, r) => s + r.size * 1.25, 0) + 12;
+    let x = 60;
+    let y = 60;
+    if (rackId) {
+      x = bayOrigin().x + BAY_W + 40;
+      y = bayOrigin().y;
+      for (const o of model.objects.values()) {
+        if (o.kind === 'text' && o.rackScope === rackId) y = Math.max(y, o.y + o.height + 12);
+      }
+    }
+    const obj = createTextObject(x, y, firstLayerId(), {
+      width,
+      height,
+      blocks,
+      role,
+      ...(rackId ? { rackScope: rackId } : {}),
+    });
+    history.dispatch(new AddObjectCommand(obj), model);
+    if (!rackId) index.insert(obj.id, objBox(obj)); // free callouts join the flat index
+    history.commitCoalesceBoundary();
+    set({
+      rev: get().rev + 1,
+      selection: new Set([obj.id]),
+      canUndo: history.canUndo,
+      canRedo: history.canRedo,
+      dirty: true,
+    });
+    return obj.id;
+  }
+
   function commit(command: Command, opts: { reindex?: boolean } = {}): void {
     history.dispatch(command, model);
     if (opts.reindex) rebuildIndex();
@@ -596,6 +662,20 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       commit(transaction('Annotate devices', cmds));
       history.commitCoalesceBoundary();
       return cmds.length;
+    },
+
+    addTitleBlock(rackId) {
+      return addDocBlock('title-block', rackId);
+    },
+    addLegend(rackId) {
+      return addDocBlock('legend', rackId);
+    },
+    regenerateDocBlock(id) {
+      const o = model.objects.get(id);
+      if (!o || o.kind !== 'text' || !o.role) return;
+      const blocks = docBlockContent(o.role, o.rackScope);
+      commit(new UpdateObjectCommand(id, { blocks: o.blocks }, { blocks }));
+      history.commitCoalesceBoundary();
     },
 
     addShape(x, y, width, height) {

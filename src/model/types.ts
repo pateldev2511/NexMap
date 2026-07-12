@@ -299,6 +299,12 @@ export interface TextObject extends BaseCanvasObject {
    * on the rack focus canvas + elevation export) instead of the free diagram canvas.
    */
   rackScope?: string;
+  /**
+   * Marks a generated document-block callout. Content is snapshot at generation and
+   * then freely editable; a "Regenerate" action replaces it. Otherwise an ordinary
+   * callout.
+   */
+  role?: 'title-block' | 'legend';
 }
 
 export interface ShapeObject extends BaseCanvasObject {

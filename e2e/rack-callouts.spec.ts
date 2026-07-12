@@ -47,6 +47,19 @@ test('Annotate all paints a callout + leader per device; idempotent; one undo', 
   expect(await boxes(page)).toBe(0);
 });
 
+test('Title block + Legend paint as callouts on the elevation (W3f)', async ({ page }) => {
+  const canvas = page.getByTestId('rack-canvas');
+
+  await page.getByRole('button', { name: 'Title block' }).click();
+  await expect(canvas.locator('[data-callout-id]')).toHaveCount(1);
+  // Heading = project name.
+  await expect(canvas.locator('[data-callout-id] text').first()).toContainText('NexMap');
+
+  await page.getByRole('button', { name: 'Legend' }).click();
+  await expect(canvas.locator('[data-callout-id]')).toHaveCount(2);
+  await expect(canvas.getByText('Legend', { exact: false })).toBeVisible();
+});
+
 test('rack callouts do NOT leak onto the flat network canvas', async ({ page }) => {
   await page.getByRole('button', { name: 'Annotate all' }).click();
   expect(await boxes(page)).toBeGreaterThan(0);

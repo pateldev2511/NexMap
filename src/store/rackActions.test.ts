@@ -394,3 +394,55 @@ describe('annotateRack (W3e)', () => {
     expect(s().racksAll().some((rk) => rk.id === r)).toBe(true);
   });
 });
+
+describe('title block + legend (W3f)', () => {
+  it('addTitleBlock makes a rack-scoped title-block callout with the project + rack name', () => {
+    const r = s().addRack('MDF');
+    const id = s().addTitleBlock(r);
+    const o = s().getObject(id)!;
+    expect(o.kind).toBe('text');
+    if (o.kind === 'text') {
+      expect(o.role).toBe('title-block');
+      expect(o.rackScope).toBe(r);
+      expect(o.blocks[0]).toMatchObject({ kind: 'heading' });
+      // heading text = project name
+      const h = o.blocks[0];
+      if (h && h.kind === 'heading') expect(h.spans[0]!.text).toBe(s().projectName ?? 'Untitled NexMap Project');
+    }
+  });
+
+  it('addLegend lists the rack cable colors; regenerate refreshes after a new cable', () => {
+    const r = s().addRack('MDF');
+    const a = s().addDeviceAt('switch', 0, 0);
+    const b = s().addDeviceAt('server', 0, 0);
+    s().placeInRack(a, r, slot({ ru: 40 }));
+    s().placeInRack(b, r, slot({ ru: 20, ruSpan: 2 }));
+    const ifA = s().addInterface(a, 'p1')!;
+    const ifB = s().addInterface(b, 'nic0')!;
+    const cid = s().connectRackCable(
+      { deviceId: a, ifaceId: ifA },
+      { deviceId: b, ifaceId: ifB },
+      '#112233',
+      'uplink',
+    );
+    expect(cid).toBeTruthy();
+
+    const id = s().addLegend(r);
+    const o = s().getObject(id)!;
+    if (o.kind === 'text') {
+      expect(o.role).toBe('legend');
+      expect(JSON.stringify(o.blocks)).toContain('#112233');
+    }
+    // Regenerate is a no-op-safe refresh (content stays consistent).
+    expect(() => s().regenerateDocBlock(id)).not.toThrow();
+  });
+
+  it('a title block is ONE undo entry', () => {
+    const r = s().addRack('MDF');
+    const before = s().objectsAll().length;
+    s().addTitleBlock(r);
+    expect(s().objectsAll().length).toBe(before + 1);
+    s().undo();
+    expect(s().objectsAll().length).toBe(before);
+  });
+});

@@ -806,6 +806,20 @@ export function RackDesigner() {
                 Annotate all
               </button>
               <button
+                className={styles.btn}
+                title="Add a document title block (project, rack, date) to the elevation"
+                onClick={() => s().addTitleBlock(rack.id)}
+              >
+                Title block
+              </button>
+              <button
+                className={styles.btn}
+                title="Add a legend of the rack's cable colors"
+                onClick={() => s().addLegend(rack.id)}
+              >
+                Legend
+              </button>
+              <button
                 className={`${styles.btn} ${rack.hideFaceplateText ? styles.primary : ''}`}
                 title="Hide device name labels on the faceplates so names read from the callout column"
                 aria-pressed={!!rack.hideFaceplateText}
