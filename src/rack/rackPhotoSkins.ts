@@ -66,6 +66,16 @@ function fitText(value: string, maxChars: number): string {
   return `${trimmed.slice(0, Math.max(1, maxChars - 3)).trimEnd()}...`;
 }
 
+/**
+ * Scale a monospace label's font DOWN so the full string fits `availW` px — never
+ * truncate (the model number is the useful part). Floors at a legible size.
+ */
+function fitLabel(text: string, maxFont: number, availW: number): { text: string; fontSize: number } {
+  const t = text.trim();
+  const fontSize = Math.max(6, Math.min(maxFont, availW / Math.max(1, t.length * 0.58)));
+  return { text: t, fontSize };
+}
+
 function dataUriForFace(device: Device, face: RackFace): string | null {
   const extra = device.extra;
   if (!extra) return null;
@@ -156,16 +166,18 @@ function rackPhotoSkinPartsRaw(device: Device, panel: Rect, face: RackFace = 'fr
   }
 }
 
-function base(device: Device, p: Rect, opts: { fill?: string; stroke?: string; labelFill?: string; darkText?: boolean } = {}): string[] {
+function base(device: Device, p: Rect, opts: { fill?: string; stroke?: string; labelFill?: string; darkText?: boolean; labelMaxW?: number } = {}): string[] {
   const label = modelLabel(device);
-  const fontSize = Math.max(8, Math.min(11.5, p.h * 0.22));
-  const maxChars = Math.max(8, Math.floor((p.w - 18) / (fontSize * 0.58)));
+  const baseFont = Math.max(8, Math.min(11.5, p.h * 0.22));
+  // Dense faceplates pass a label zone (port-free strip); roomy ones use full width.
+  const avail = (opts.labelMaxW ?? p.w - 18) - 8;
+  const fit = fitLabel(label, baseFont, avail);
   const textFill = opts.darkText ? '#172033' : (opts.labelFill ?? '#eef5ff');
   return [
     `<rect x="${n(p.x)}" y="${n(p.y + 1.2)}" width="${n(p.w)}" height="${n(p.h)}" rx="3" fill="#020617" fill-opacity="0.34" filter="url(#rkDeviceShadow)"/>`,
     `<rect x="${n(p.x)}" y="${n(p.y)}" width="${n(p.w)}" height="${n(p.h)}" rx="3" fill="${opts.fill ?? 'url(#rkBrushed)'}" stroke="${opts.stroke ?? COLOR.stroke}" stroke-width="1"/>`,
     `<rect x="${n(p.x + 1.3)}" y="${n(p.y + 1.2)}" width="${n(p.w - 2.6)}" height="${n(Math.min(p.h * 0.33, 13))}" rx="2.4" fill="url(#rkSheen)"/>`,
-    `<text data-facelabel="1" x="${n(p.x + 8)}" y="${n(p.y + Math.min(p.h / 2 + 4, 18))}" font-family="ui-monospace,Menlo,monospace" font-size="${n(fontSize)}" font-weight="800" fill="${textFill}">${safeText(fitText(label, maxChars))}</text>`,
+    `<text data-facelabel="1" x="${n(p.x + 8)}" y="${n(p.y + Math.min(p.h / 2 + 4, 18))}" font-family="ui-monospace,Menlo,monospace" font-size="${n(fit.fontSize)}" font-weight="800" fill="${textFill}">${safeText(fit.text)}</text>`,
     `<circle cx="${n(p.x + p.w - 7)}" cy="${n(p.y + 6)}" r="2.4" fill="url(#rkLedG)"/>`,
   ];
 }
@@ -297,13 +309,14 @@ function storageFrontSkin(device: Device, p: Rect): string[] {
 }
 
 function switchFrontSkin(device: Device, p: Rect, opts: { faceplate: string; brandFill: string; accent: string; uplinkColor: string }): string[] {
-  const out = base(device, p, { fill: opts.faceplate, stroke: '#1f2937' });
+  const out = base(device, p, { fill: opts.faceplate, stroke: '#1f2937', labelMaxW: 96 });
   const ports = portLayout(p, devicePorts(device));
-  const ventW = Math.min(36, p.w * 0.08);
-  out.push(...vent(p.x + 68, p.y + Math.max(4, p.h * 0.24), ventW, Math.max(8, p.h * 0.5), 8, '#263241'));
   for (const j of ports) out.push(rj45(j.x, j.y, j.w, j.h));
   const cageW = Math.min(44, p.w * 0.09);
   const cageX = p.x + p.w - cageW - 7;
+  // Vent block sits just left of the uplink cages — off the brand-label strip.
+  const ventW = Math.min(36, p.w * 0.08);
+  out.push(...vent(cageX - ventW - 8, p.y + Math.max(4, p.h * 0.24), ventW, Math.max(8, p.h * 0.5), 8, '#263241'));
   for (let i = 0; i < 2; i++) out.push(sfpCage(cageX, p.y + p.h / 2 - 10 + i * 11, cageW, 9, opts.uplinkColor));
   out.push(`<path d="M ${n(p.x + 7)} ${n(p.y + p.h - 3.2)} h ${n(Math.min(86, p.w * 0.22))}" stroke="${opts.accent}" stroke-width="2.2"/>`);
   out.push(brandBadge(device, p, opts.brandFill, opts.accent));
@@ -311,7 +324,7 @@ function switchFrontSkin(device: Device, p: Rect, opts: { faceplate: string; bra
 }
 
 function applianceFrontSkin(device: Device, p: Rect, opts: { faceplate: string; brandFill: string; accent: string; darkText?: boolean }): string[] {
-  const out = base(device, p, { fill: opts.faceplate, darkText: opts.darkText });
+  const out = base(device, p, { fill: opts.faceplate, darkText: opts.darkText, labelMaxW: 96 });
   const ports = portLayout(p, devicePorts(device));
   const usablePorts = ports.slice(0, Math.max(ports.length, 8));
   for (const j of usablePorts) out.push(rj45(j.x, j.y, j.w, j.h));

@@ -529,10 +529,25 @@ function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): 
   // --- Upright shape labels (at projected anchors). ---
   for (const o of objects) {
     if (o.kind !== 'shape' || !o.label) continue;
-    const p = P(o.x + 8, o.y + 16);
-    parts.push(
-      `<text x="${p.x}" y="${p.y}" fill="#64748b" font-size="11">${escapeXml(o.label)}</text>`,
-    );
+    if (modern) {
+      // Header pill + colored dot + bold accent label, anchored at the plane's
+      // top-left corner (projected) so it reads clearly over the tinted plane.
+      const accent = escapeXml(o.stroke ?? '#2563eb');
+      const p = P(o.x, o.y);
+      const tw = o.label.length * 7.2 + 34;
+      parts.push(
+        `<g transform="translate(${p.x.toFixed(1)},${(p.y + 4).toFixed(1)})">` +
+          `<rect x="6" y="0" width="${tw.toFixed(1)}" height="24" rx="12" fill="#ffffff" fill-opacity="0.82" stroke="${accent}" stroke-opacity="0.35" stroke-width="1" filter="url(#nexmap-shadow)"/>` +
+          `<circle cx="20" cy="12" r="4" fill="${accent}"/>` +
+          `<text x="30" y="16" fill="${accent}" font-size="12" font-weight="700" font-family="${MODERN_FONT}">${escapeXml(o.label)}</text>` +
+          `</g>`,
+      );
+    } else {
+      const p = P(o.x + 8, o.y + 16);
+      parts.push(
+        `<text x="${p.x}" y="${p.y}" fill="#64748b" font-size="11">${escapeXml(o.label)}</text>`,
+      );
+    }
   }
 
   // Endpoint interface labels — upright, on top (canvas parity).
