@@ -35,6 +35,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const [transparent, setTransparent] = useState(true);
   const [bgColor, setBgColor] = useState('#ffffff');
   const [includeLabels, setIncludeLabels] = useState(true);
+  const [modern, setModern] = useState(false);
   const [iso, setIso] = useState(() => store().projection === 'iso');
   const [highlightHealth, setHighlightHealth] = useState(true);
   const [quality, setQuality] = useState(0.92);
@@ -87,8 +88,9 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         objects: scene.objects as CanvasObject[],
         projection: iso ? 'iso' : 'flat',
         health: highlightHealth ? store().health : null,
+        modern,
       }),
-    [scene, transparent, bgColor, includeLabels, supportsTransparent, iso, highlightHealth, store],
+    [scene, transparent, bgColor, includeLabels, supportsTransparent, iso, highlightHealth, modern, store],
   );
   const previewUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(previewSvg);
 
@@ -107,6 +109,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         fileName,
         projection: iso ? 'iso' : 'flat',
         health: highlightHealth ? store().health : null,
+        modern,
       };
       const outcome = await runExport(
         {
@@ -275,6 +278,15 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                     onChange={(e) => setIso(e.target.checked)}
                   />
                   Isometric view
+                </label>
+                <label>Style</label>
+                <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={modern}
+                    onChange={(e) => setModern(e.target.checked)}
+                  />
+                  Modern (cards, shadows, dot grid)
                 </label>
               </>
             )}
