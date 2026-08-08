@@ -329,3 +329,40 @@
   font-size: 12px;
   color: var(--chrome-fg);
 }
+
+/* ── Cabling tab (W5) ───────────────────────────────────────────────────────
+   The physical/logical delta. Grouped by finding rather than one flat table,
+   because "designed but not cabled" and "cabled but not documented" are
+   different jobs for the reader. */
+.cabling {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cablingSummary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--chrome-fg-muted);
+  border-bottom: 1px solid var(--chrome-border);
+}
+
+.cablingSummary strong {
+  color: var(--chrome-fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.cablingMuted {
+  opacity: 0.7;
+}
+
+.cablingHead {
+  padding: 8px 10px 2px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--chrome-fg-muted);
+}

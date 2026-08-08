@@ -7,6 +7,7 @@ import { severityRank } from '@/model/validate';
 import type { Device, Link, Rack, Subnet, ValidationIssue, Vlan } from '@/model/types';
 import { stripPrefix } from '@/lib/ipcidr';
 import { subnetUsage, type SubnetUsage } from '@/lib/ipam';
+import type { Reconciliation } from '@/rack/reconcile';
 import styles from './BottomPanel.module.css';
 
 /**
@@ -14,7 +15,15 @@ import styles from './BottomPanel.module.css';
  * Links, Validation. Every row/issue jumps to its object on the canvas
  * (DA-DES-2.5) via focusObject. Collapsed by default so the canvas leads.
  */
-type Tab = 'inventory' | 'links' | 'ipplan' | 'vlans' | 'racks' | 'validation' | 'health';
+type Tab =
+  | 'inventory'
+  | 'links'
+  | 'ipplan'
+  | 'vlans'
+  | 'racks'
+  | 'cabling'
+  | 'validation'
+  | 'health';
 
 export function BottomPanel() {
   // Open/closed survives reloads (M3c). Collapsed, the tab strip stays as a
@@ -37,6 +46,9 @@ export function BottomPanel() {
   const vlans = store().vlansAll();
   const racks = store().racksAll();
   const health = useProjectStore((s) => s.health);
+  // Derived on demand — nothing about the physical/logical delta is persisted.
+  const cabling = store().reconcileCabling();
+  const cablingFindings = cabling.unbacked.length + cabling.undocumented.length;
   const errorCount = issues.filter(
     (i) => i.severity === 'error' || i.severity === 'critical',
   ).length;
@@ -47,6 +59,7 @@ export function BottomPanel() {
     { key: 'ipplan', label: 'IP Plan', count: subnets.length },
     { key: 'vlans', label: 'VLANs', count: vlans.length },
     { key: 'racks', label: 'Racks', count: racks.length },
+    { key: 'cabling', label: 'Cabling', count: cablingFindings },
     { key: 'validation', label: 'Validation', count: issues.length, err: errorCount > 0 },
     { key: 'health', label: 'Health', count: health.issues.length },
   ];
@@ -89,8 +102,140 @@ export function BottomPanel() {
           {tab === 'ipplan' && <SubnetTable subnets={subnets} vlans={vlans} />}
           {tab === 'vlans' && <VlanTable vlans={vlans} />}
           {tab === 'racks' && <RackTable racks={racks} devices={devices} />}
+          {tab === 'cabling' && <CablingPanel reconciliation={cabling} />}
           {tab === 'validation' && <ValidationList issues={issues} />}
           {tab === 'health' && <HealthPanel devices={devices} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Cabling: the delta between what was DESIGNED (`links[]`) and what is actually
+ * PATCHED (`rackCables[]` + pass-throughs). See rack/reconcile.ts.
+ *
+ * Quiet by default on purpose. Only links whose both endpoints are rack-mounted are
+ * in scope, so a diagram drawn without racks reports nothing rather than flagging
+ * every link as un-cabled.
+ */
+function CablingPanel({ reconciliation }: { reconciliation: Reconciliation }) {
+  const focus = useProjectStore((s) => s.focusObject);
+  const selectPort = useProjectStore((s) => s.selectPort);
+  const store = useProjectStore.getState;
+  const { backed, unbacked, undocumented, outOfScope, danglingCables } = reconciliation;
+
+  const nothingInScope = backed.length + unbacked.length === 0 && undocumented.length === 0;
+  if (nothingInScope) {
+    return (
+      <div className={styles.empty}>
+        {outOfScope > 0
+          ? `Nothing to compare yet — ${outOfScope} link${outOfScope === 1 ? '' : 's'} ${
+              outOfScope === 1 ? 'connects' : 'connect'
+            } gear that is not rack-mounted. Mount devices in the Rack designer and cable their ports to check the diagram against the patching.`
+          : 'Nothing to compare yet. Mount devices in the Rack designer and cable their ports to check the diagram against the patching.'}
+      </div>
+    );
+  }
+
+  const linkName = (id: string) => {
+    const l = store().getLink(id);
+    if (!l) return '(missing link)';
+    const src = store().getDevice(l.sourceId)?.name ?? '(missing)';
+    const tgt = store().getDevice(l.targetId)?.name ?? '(missing)';
+    return l.name ? `${l.name} · ${src} → ${tgt}` : `${src} → ${tgt}`;
+  };
+
+  return (
+    <div className={styles.cabling}>
+      <div className={styles.cablingSummary}>
+        <span>
+          <strong>{backed.length}</strong> documented and patched
+        </span>
+        <span>
+          <strong>{unbacked.length}</strong> designed, not cabled
+        </span>
+        <span>
+          <strong>{undocumented.length}</strong> cabled, not documented
+        </span>
+        {danglingCables > 0 && (
+          <span title="Cables that are not part of any complete end-to-end path">
+            <strong>{danglingCables}</strong> going nowhere
+          </span>
+        )}
+        {outOfScope > 0 && (
+          <span
+            className={styles.cablingMuted}
+            title="Links whose endpoints are not both rack-mounted, so there is no physical layer to compare against"
+          >
+            {outOfScope} out of scope
+          </span>
+        )}
+      </div>
+
+      {unbacked.length > 0 && (
+        <>
+          <div className={styles.cablingHead}>Designed, not cabled</div>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>Link</th>
+                <th>Why</th>
+              </tr>
+            </thead>
+            <tbody>
+              {unbacked.map((u) => (
+                <tr key={u.linkId} className={styles.row} onClick={() => focus(u.linkId)}>
+                  <td>{linkName(u.linkId)}</td>
+                  <td style={{ color: 'var(--chrome-fg-muted)' }}>
+                    {u.reason === 'no-cable'
+                      ? 'No cabling on either end yet'
+                      : 'Cabling exists but does not join these two'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      {undocumented.length > 0 && (
+        <>
+          <div className={styles.cablingHead}>Cabled, not documented</div>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>From</th>
+                <th>To</th>
+                <th>Hops</th>
+              </tr>
+            </thead>
+            <tbody>
+              {undocumented.map((c) => (
+                <tr
+                  key={`${c.a.deviceId}:${c.a.ifaceId}-${c.b.deviceId}:${c.b.ifaceId}`}
+                  className={styles.row}
+                  onClick={() => {
+                    // Jump to the near end AND open its port scope, so the trace is
+                    // one click away rather than something to go hunting for.
+                    focus(c.a.deviceId);
+                    selectPort(c.a.deviceId, c.a.ifaceId);
+                  }}
+                >
+                  <td>{store().portLabel(c.a.deviceId, c.a.ifaceId)}</td>
+                  <td>{store().portLabel(c.b.deviceId, c.b.ifaceId)}</td>
+                  <td>{c.hops}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      {unbacked.length === 0 && undocumented.length === 0 && (
+        <div className={styles.empty}>
+          Every in-scope link is backed by real cabling, and every circuit is
+          documented.
         </div>
       )}
     </div>

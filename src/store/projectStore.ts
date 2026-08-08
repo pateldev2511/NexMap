@@ -46,6 +46,7 @@ import {
   traceFrom,
   type TraceResult,
 } from '@/rack/cableTrace';
+import { reconcile, type Reconciliation } from '@/rack/reconcile';
 import { proposePowerBalance } from '@/rack/rackPower';
 import { pickBulkPatch } from '@/rack/rackBulk';
 import { rackFieldsFromPreset, rackPresetById, DEFAULT_RACK_PRESET } from '@/rack/rackTypes';
@@ -425,6 +426,11 @@ export interface ProjectStore {
   tracePort(deviceId: string, ifaceId: string): TraceResult;
   /** Fully-qualified address of a port, e.g. "HQ/28/RK001/SW01/Gi0/1". */
   portLabel(deviceId: string, ifaceId: string): string;
+  /**
+   * Compare the DESIGNED topology against the PATCHED cabling (schema v5). Pure
+   * read, derived on demand — nothing about the delta is persisted.
+   */
+  reconcileCabling(): Reconciliation;
   /** Duplicate selected devices (offset, new IDs) as one undoable entry. */
   duplicateSelection(): void;
   copySelection(): void;
@@ -1937,6 +1943,14 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         deviceId,
         ifaceId,
       });
+    },
+
+    reconcileCabling() {
+      return reconcile(
+        [...model.devices.values()],
+        [...model.links.values()],
+        [...model.rackCables.values()],
+      );
     },
 
     portLabel(deviceId, ifaceId) {

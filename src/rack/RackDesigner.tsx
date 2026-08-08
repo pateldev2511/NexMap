@@ -113,7 +113,12 @@ type InsightGroup = (typeof INSIGHT_GROUPS)[number];
 
 function insightGroup(insight: RackInsight): InsightGroup {
   if (insight.severity === 'error') return 'Critical';
-  if (insight.action === 'auto-length' || insight.action === 'review-health') return 'Cabling';
+  if (
+    insight.action === 'auto-length' ||
+    insight.action === 'review-health' ||
+    insight.action === 'review-cabling'
+  )
+    return 'Cabling';
   if (insight.action === 'add-asset-tag' || /asset|owner|serial|warranty|inventory/i.test(`${insight.title} ${insight.detail}`)) {
     return 'Inventory';
   }
@@ -184,6 +189,10 @@ export function RackDesigner() {
   const devices = useMemo(() => s().devicesAll(), [rev]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const cables = useMemo(() => s().rackCablesAll(), [rev]);
+  // Logical topology, for the physical/logical reconciliation insights (W5).
+  // Snapshotted on `rev` like devices/cables above, for the same reason.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const links = useMemo(() => s().linksAll(), [rev]);
   const selectedId = [...selection][0] ?? null;
   const multi = selection.size >= 2;
   const selected = selectedId ? devices.find((d) => d.id === selectedId) : undefined;
@@ -209,8 +218,8 @@ export function RackDesigner() {
   // Physical-cabling health (warns, never blocks).
   const cabling = useMemo(() => analyzeCabling(devices, cables), [devices, cables]);
   const insights = useMemo(
-    () => rackInsights({ racks, devices, cables, issues: cabling.issues, activeRackId: rack?.id, selectedDeviceId: selectedId }),
-    [racks, devices, cables, cabling.issues, rack?.id, selectedId],
+    () => rackInsights({ racks, devices, cables, links, issues: cabling.issues, activeRackId: rack?.id, selectedDeviceId: selectedId }),
+    [racks, devices, cables, links, cabling.issues, rack?.id, selectedId],
   );
   // Rack health score for the focused rack's header chip (0-100 + biggest risk).
   const health = useMemo(
@@ -601,6 +610,12 @@ export function RackDesigner() {
       s().placeInRack(insight.deviceId, insight.rackId, { ...sl, ru: insight.targetU });
       setView('focus');
       focusDevice(insight.deviceId);
+      return;
+    }
+    if (insight.action === 'review-cabling') {
+      const deviceId = insight.deviceId ?? insight.objectIds?.find((id) => devices.some((d) => d.id === id));
+      if (deviceId) focusDevice(deviceId);
+      setInspectorTab('cabling');
       return;
     }
     if (insight.action === 'review-health') {

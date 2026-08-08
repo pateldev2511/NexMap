@@ -4,7 +4,8 @@
  * This layer is intentionally pure and schema-free: it derives actionable guidance from
  * existing racks/devices/cables without introducing new persisted fields.
  */
-import type { Device, Rack, RackCable, ValidationIssue } from '@/model/types';
+import type { Device, Link, Rack, RackCable, ValidationIssue } from '@/model/types';
+import { reconcile } from './reconcile';
 import { fleetBudget, rackBudget } from './rackBudget';
 import { powerFeedAnalysis } from './rackPower';
 import { airflowViolations } from './rackAirflow';
@@ -16,6 +17,7 @@ export type RackInsightAction =
   | 'auto-length'
   | 'balance-power'
   | 'go-to-u'
+  | 'review-cabling'
   | 'review-health'
   | 'review-rack';
 
@@ -38,6 +40,12 @@ export interface RackInsightsInput {
   devices: Device[];
   cables: RackCable[];
   issues?: ValidationIssue[];
+  /**
+   * Logical topology, for the physical/logical reconciliation (W5). Optional: when
+   * absent the reconciliation insights are simply not produced, so existing callers
+   * keep working unchanged.
+   */
+  links?: Link[];
   activeRackId?: string;
   selectedDeviceId?: string | null;
 }
@@ -73,6 +81,7 @@ export function rackInsights({
   devices,
   cables,
   issues = [],
+  links,
   activeRackId,
   selectedDeviceId,
 }: RackInsightsInput): RackInsight[] {
@@ -220,6 +229,66 @@ export function rackInsights({
         action: 'review-rack',
         actionLabel: 'Review rack',
         rackId: activeRack.id,
+      });
+    }
+  }
+
+  // ── Physical vs logical (W5) ───────────────────────────────────────────────
+  // Turns the reconciler's delta into something you can act on rather than just
+  // read. Only fires when links were supplied AND something is actually in scope.
+  if (links && links.length > 0) {
+    const delta = reconcile(devices, links, cables);
+
+    if (delta.unbacked.length > 0) {
+      const first = delta.unbacked[0]!;
+      const link = links.find((l) => l.id === first.linkId);
+      const pair = link
+        ? `${deviceName(devices, link.sourceId)} → ${deviceName(devices, link.targetId)}`
+        : 'a link';
+      insights.push({
+        id: 'recon-unbacked',
+        title:
+          delta.unbacked.length === 1
+            ? 'A designed link has no cabling'
+            : `${delta.unbacked.length} designed links have no cabling`,
+        detail: `${pair}${delta.unbacked.length > 1 ? ' and others' : ''} exist in the diagram but no patch path joins the ports. Either cable it or drop the link.`,
+        severity: 'warn',
+        action: 'review-cabling',
+        actionLabel: 'Show cabling',
+        ...(link ? { deviceId: link.sourceId } : {}),
+        objectIds: delta.unbacked.map((u) => u.linkId),
+      });
+    }
+
+    if (delta.undocumented.length > 0) {
+      const first = delta.undocumented[0]!;
+      insights.push({
+        id: 'recon-undocumented',
+        title:
+          delta.undocumented.length === 1
+            ? 'A patched circuit is undocumented'
+            : `${delta.undocumented.length} patched circuits are undocumented`,
+        detail: `Cabling runs from ${deviceName(devices, first.a.deviceId)} to ${deviceName(devices, first.b.deviceId)}${delta.undocumented.length > 1 ? ', plus others,' : ''} with no matching link in the diagram. Add the link so the drawing matches the rack.`,
+        severity: 'info',
+        action: 'review-cabling',
+        actionLabel: 'Show cabling',
+        deviceId: first.a.deviceId,
+        objectIds: delta.undocumented.flatMap((c) => c.cableIds),
+      });
+    }
+
+    if (delta.danglingCables > 0) {
+      insights.push({
+        id: 'recon-dangling',
+        title:
+          delta.danglingCables === 1
+            ? 'A cable goes nowhere'
+            : `${delta.danglingCables} cables go nowhere`,
+        detail:
+          'These runs are not part of any complete end-to-end path — usually a panel port that was never punched through. Pair the panel faces or remove the run.',
+        severity: 'info',
+        action: 'review-cabling',
+        actionLabel: 'Show cabling',
       });
     }
   }
