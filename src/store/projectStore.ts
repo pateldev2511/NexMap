@@ -39,6 +39,7 @@ import { checkConnect, pruneCablesForInterfaces } from '@/rack/rackCables';
 import { presetByKey } from '@/rack/rackDevicePresets';
 import { catalogById } from '@/rack/rackCatalog';
 import { estimateCableLengthFt } from '@/rack/cableLength';
+import { isTransitive, planPassThroughPairs } from '@/rack/cableTrace';
 import { proposePowerBalance } from '@/rack/rackPower';
 import { pickBulkPatch } from '@/rack/rackBulk';
 import { rackFieldsFromPreset, rackPresetById, DEFAULT_RACK_PRESET } from '@/rack/rackTypes';
@@ -379,6 +380,15 @@ export interface ProjectStore {
   updateInterface(deviceId: string, ifaceId: string, partial: Partial<Interface>): void;
   /** Remove an interface and clear any link endpoint that referenced it (one transaction). */
   deleteInterface(deviceId: string, ifaceId: string): void;
+  /**
+   * Wire a patch panel's front ports through to its rear ports (schema v5) in ONE
+   * undoable edit — a lazy user must never hand-pair 24 ports. Mirrors front-only
+   * panels into new rear ports, or couples existing faces positionally.
+   *
+   * Returns null when the device is missing or is not a pass-through type, and
+   * `{created: 0, coupled: 0}` when everything is already paired (idempotent).
+   */
+  pairPassThrough(deviceId: string): { created: number; coupled: number } | null;
   renameProject(before: string, after: string): void;
   setMode(mode: CanvasMode): void;
   /** Switch the active render projection (flat ↔ isometric). */
@@ -1695,6 +1705,62 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       commit(
         new UpdateDeviceCommand(deviceId, { interfaces: existing }, { interfaces: next }),
       );
+    },
+
+    pairPassThrough(deviceId) {
+      const d = model.devices.get(deviceId);
+      if (!d) return null;
+      // Refuse non-panels: the trace engine only passes through patch panels, so
+      // coupling a switch would create wiring that is silently never followed.
+      if (!isTransitive(d.type)) return null;
+
+      const existing = d.interfaces ?? [];
+      const plan = planPassThroughPairs(d);
+      if (plan.createRear.length === 0 && plan.couple.length === 0) {
+        return { created: 0, coupled: 0 };
+      }
+
+      // Copy first: the `before` snapshot must keep pointing at the untouched array.
+      const next = existing.map((i) => ({ ...i }));
+      const byId = new Map(next.map((i) => [i.id, i]));
+
+      for (const { frontIfaceId, rearIfaceId } of plan.couple) {
+        const front = byId.get(frontIfaceId);
+        const rear = byId.get(rearIfaceId);
+        if (!front || !rear) continue;
+        front.side = 'front';
+        front.throughTo = rear.id;
+        rear.side = 'rear';
+        rear.throughTo = front.id;
+      }
+
+      for (const { frontIfaceId, name } of plan.createRear) {
+        const front = byId.get(frontIfaceId);
+        if (!front) continue;
+        // `kind` carries the media (RJ45 / LC), which is physically identical on both
+        // faces of a pass-through. Speed and VLAN are usage properties, not wiring,
+        // so the rear port starts clean.
+        const rear = createInterface(name, {
+          side: 'rear',
+          throughTo: front.id,
+          ...(front.kind ? { kind: front.kind } : {}),
+        });
+        front.side = 'front';
+        front.throughTo = rear.id;
+        next.push(rear);
+      }
+
+      // Boundary BEFORE the commit, not just after. This action emits an
+      // UpdateDeviceCommand keyed on `interfaces` — exactly what `addInterface`
+      // emits — so without a leading boundary it MERGES BACKWARDS into a preceding
+      // run of port additions and one undo wipes the ports too.
+      history.commitCoalesceBoundary();
+      commit(
+        new UpdateDeviceCommand(deviceId, { interfaces: existing }, { interfaces: next }),
+      );
+      history.commitCoalesceBoundary();
+      get().runValidation();
+      return { created: plan.createRear.length, coupled: plan.couple.length };
     },
 
     deleteInterface(deviceId, ifaceId) {

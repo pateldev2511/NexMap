@@ -15,6 +15,7 @@ import {
   parseCidr,
   stripPrefix,
 } from '@/lib/ipcidr';
+import { couplingProblems } from './coupling';
 import { cycleIds, duplicateSiblingTokens, oddNesting, orphanRefs } from './location';
 import type {
   Device,
@@ -44,6 +45,48 @@ export interface ValidationInput {
   subnets?: Subnet[];
   racks?: Rack[];
   locations?: Location[];
+}
+
+/**
+ * Rule (E1–E4): patch-panel pass-throughs must be symmetric. A `throughTo` that
+ * points at itself, at nothing, at another device, or at a port that does not point
+ * back is an ERROR — the pairing is claimed but not real, so a trace stops there
+ * rather than crossing a coupling that only half exists.
+ *
+ * Not auto-repaired: choosing which half of a broken pair to believe would silently
+ * rewire the user's documentation.
+ *
+ * NOTE: physical cable LOOPS are deliberately not checked here — `rackHealth.ts`
+ * already reports `rack-loop` (with the STP explanation) and a second issue for the
+ * same cabling would be duplicate noise. The trace engine still reports
+ * `end: 'loop'` so a walk can never spin.
+ */
+function checkPortCoupling(devices: Device[]): ValidationIssue[] {
+  const byId = new Map(devices.map((d) => [d.id, d]));
+  const nameOf = (deviceId: string, ifaceId: string) => {
+    const d = byId.get(deviceId);
+    const i = d?.interfaces?.find((x) => x.id === ifaceId);
+    return `${d?.name ?? deviceId} ${i?.name ?? ifaceId}`.trim();
+  };
+
+  return couplingProblems(devices).map((p) => {
+    const port = nameOf(p.deviceId, p.ifaceId);
+    const detail =
+      p.kind === 'self'
+        ? `${port} is wired through to itself.`
+        : p.kind === 'missing'
+          ? `${port} is wired through to a port that no longer exists.`
+          : p.kind === 'cross-device'
+            ? `${port} is wired through to a port on another device; a pass-through pair must be on the same panel.`
+            : `${port} claims a pass-through that is not wired back, so the pair is one-sided.`;
+    return {
+      id: issueId(),
+      severity: 'error' as const,
+      code: `port-coupling-${p.kind}`,
+      message: detail,
+      objectIds: [p.deviceId],
+    };
+  });
 }
 
 /**
@@ -552,6 +595,7 @@ export function validate({
     ...checkLocationDuplicateCodes(locations),
     ...checkLocationNesting(locations),
     ...checkLocationRefs(devices, racks, locations),
+    ...checkPortCoupling(devices),
     ...checkDuplicateIps(devices),
     ...checkInvalidIpCidr(devices),
     ...checkMissingEndpoints(devices, links),

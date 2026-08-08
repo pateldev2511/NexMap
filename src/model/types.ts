@@ -81,6 +81,24 @@ export interface Interface {
    * untagged/unset. Drives the rack VLAN-mismatch health check and the cable schedule.
    */
   vlan?: number;
+  /**
+   * Which face of the device this port sits on (schema v5). Absent → 'front'.
+   * A patch panel models BOTH faces: front jacks and rear punchdowns are separate
+   * ports coupled by `throughTo`, because each side is cabled independently.
+   */
+  side?: 'front' | 'rear';
+  /**
+   * Internally coupled partner port ON THE SAME DEVICE (schema v5) — a patch-panel
+   * pass-through, i.e. the front jack and the rear punchdown of one physical
+   * circuit.
+   *
+   * MUST be symmetric: `a.throughTo === b.id && b.throughTo === a.id`. Asymmetry,
+   * self-reference, a dangling id, and a cross-device id are all validation ERRORS
+   * and are IGNORED by the trace engine — a trace that stops early is honest,
+   * whereas guessing which half of a broken pair to believe would invent a path
+   * the cabling does not have.
+   */
+  throughTo?: string;
   notes?: string;
   extra?: ExtraFields;
 }
