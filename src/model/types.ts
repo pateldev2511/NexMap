@@ -5,8 +5,16 @@
  *  - Every object has a stable string ID.
  *  - Links reference device IDs, never names — renaming never breaks a connection.
  *  - Unknown/future fields are preserved through load→save via `extra` (DA-D1).
- *  - Links connect DEVICE IDs with optional free-text endpoint interface labels.
- *    `interfaces[]` is reserved for a future first-class port/interface model.
+ *  - Links connect DEVICE IDs, optionally refining each end to a first-class port
+ *    via `sourceIfaceId`/`targetIfaceId` (schema v2), with the free-text endpoint
+ *    labels kept in sync as the display/export fallback.
+ *
+ * READ THIS BEFORE TRUSTING A VERSION COMMENT: the `(schema vN …)` annotations on
+ * individual fields record the version each field was INTRODUCED in — they are
+ * historical provenance, NOT the current version. The current on-disk version is
+ * `SCHEMA_VERSION` in `schema.ts` and nowhere else. (This bit someone already: v3
+ * annotations are the newest ones on `Rack`/`RackCable`, but v4 shipped after them
+ * for callouts, and v5 for locations.)
  */
 
 export type DeviceType =
@@ -92,7 +100,14 @@ export interface Device {
   vendor?: string;
   model?: string;
   role?: string;
+  /** Legacy free-text location label (pre-v5). Retained; see `locationId`. */
   location?: string;
+  /**
+   * Position in the location tree (schema v5). Absent → unplaced. Lets gear that
+   * is NOT rack-mounted (wall ports, APs, phones) carry a real address, which is
+   * what makes a fully-qualified port path like "HQ/28/LA/APA4/01" possible.
+   */
+  locationId?: string;
   managementIp?: string;
   notes?: string;
   /**
@@ -360,12 +375,52 @@ export interface View {
   projection?: 'flat' | 'iso';
 }
 
+/**
+ * Rungs of the location tree (schema v5). Deliberately permissive: nesting a
+ * 'floor' under a 'room' is legal and only WARNS in validation — real estate is
+ * messy and a hard rule would fight users rather than help them.
+ */
+export type LocationKind = 'site' | 'building' | 'floor' | 'room' | 'row';
+
+/**
+ * A node in the spatial hierarchy (schema v5) — site → building → floor → room →
+ * row. Racks and devices point AT a location via `locationId`; the location never
+ * lists its members, so there is exactly one place to update on a move.
+ *
+ * The fully-qualified path ("HQ/28/SL/RK001_M") is always DERIVED by walking
+ * `parentId`, never stored — storing it would duplicate state and go stale on
+ * rename. Cycles are a validation ERROR and are never silently broken.
+ */
+export interface Location {
+  id: string;
+  name: string;
+  kind: LocationKind;
+  /** Absent → a root node. A `parentId` cycle is a validation ERROR. */
+  parentId?: string;
+  /**
+   * Short token used to build the fully-qualified path, e.g. "HQ", "28". Falls
+   * back to `name` when absent. Duplicate codes among SIBLINGS make the path
+   * ambiguous and warn.
+   */
+  code?: string;
+  notes?: string;
+  extra?: ExtraFields;
+}
+
 export interface Rack {
   id: string;
   name: string;
   /** Total rack units (e.g. 42). */
   ruHeight: number;
+  /**
+   * Legacy free-text site label (pre-v5). RETAINED alongside `locationId`, never
+   * auto-converted: dropping a populated field would violate the data-safety rule
+   * in migrate.ts. An explicit, undoable in-app action converts these to real
+   * `Location` nodes when the user asks.
+   */
   site?: string;
+  /** Position in the location tree (schema v5). Absent → unplaced. */
+  locationId?: string;
   notes?: string;
   /** Rack form factor (schema v3, additive). Absent → four-post 19". */
   postType?: 'two-post' | 'four-post' | 'wall';
@@ -437,6 +492,12 @@ export interface NexMapDocument {
   racks: Rack[];
   /** Physical rack cables (schema v3). Separate from logical `links[]`. */
   rackCables: RackCable[];
+  /**
+   * Spatial hierarchy (schema v5). Flat array; the tree is expressed by each
+   * node's `parentId`, so reparenting is a single-field write and the file stays
+   * diffable. Empty on every document migrated from v4.
+   */
+  locations: Location[];
   views: View[];
   // Forward-declared, unused yet — preserved verbatim on load→save.
   interfaces: unknown[];

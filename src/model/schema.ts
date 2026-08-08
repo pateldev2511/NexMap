@@ -12,6 +12,8 @@ import type {
   Interface,
   Layer,
   Link,
+  Location,
+  LocationKind,
   NexMapDocument,
   ProjectMeta,
   Rack,
@@ -24,7 +26,7 @@ import type {
 } from './types';
 
 /** Bump when the on-disk shape changes; add a migration in migrate.ts. */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 export const APP_VERSION = '0.1.0';
 
 export const DEFAULT_DEVICE_SIZE = { width: 56, height: 40 } as const;
@@ -205,6 +207,20 @@ export function createRackCable(
   return { id: nanoid(), aEnd, bEnd, color, ...partial };
 }
 
+/**
+ * Mint a location-tree node (schema v5). `parentId` is left to the caller —
+ * passing one that would form a cycle is a validation ERROR, not something this
+ * factory silently repairs, because repairing it would move the user's data
+ * somewhere they didn't ask for.
+ */
+export function createLocation(
+  name: string,
+  kind: LocationKind,
+  partial: Partial<Location> = {},
+): Location {
+  return { id: nanoid(), name, kind, ...partial };
+}
+
 export function createView(name: string, partial: Partial<View> = {}): View {
   return { id: nanoid(), name, hiddenLayers: [], ...partial };
 }
@@ -253,6 +269,7 @@ export function createEmptyDocument(now: string): NexMapDocument {
     subnets: [],
     racks: [],
     rackCables: [],
+    locations: [],
     assets: [],
     customFields: [],
   };

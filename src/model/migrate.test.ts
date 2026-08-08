@@ -254,6 +254,131 @@ describe('migration v3 → v4 (rich callouts)', () => {
   });
 });
 
+// CRITICAL (IRON RULE): v4→v5 adds the location hierarchy. Purely ADDITIVE — it must
+// add `locations: []` and change NOTHING else. The legacy free-text `Rack.site` /
+// `Device.location` must survive UNCONVERTED: inventing a hierarchy from free text
+// would silently restructure the user's data.
+describe('migration v4 → v5 (location hierarchy)', () => {
+  const v4Doc = () => ({
+    schemaVersion: 4,
+    appVersion: '0.1.0',
+    project: { id: 'p', name: 'Sites', createdAt: NOW, updatedAt: NOW, description: '', units: 'px' },
+    layers: [{ id: 'L', name: 'Default', visible: true, locked: false, order: 0 }],
+    devices: [
+      // Carries the legacy free-text `location` AND rack placement.
+      { id: 'sw1', kind: 'device', type: 'switch', name: 'SW1', x: 0, y: 0, width: 56, height: 40,
+        layerId: 'L', location: 'HQ floor 2', rackId: 'r1', ru: 10, ruSpan: 1,
+        mount: 'rack', side: 'front', bay: 'full', interfaces: [{ id: 'p1', name: 'Gi0/1' }] },
+    ],
+    links: [],
+    objects: [
+      { id: 't1', kind: 'text', x: 0, y: 0, width: 160, height: 28, layerId: 'L',
+        blocks: [{ kind: 'paragraph', spans: [{ text: 'already v4' }] }] },
+    ],
+    vlans: [], subnets: [],
+    // Legacy free-text site label — must NOT become a Location.
+    racks: [{ id: 'r1', name: 'RK001', ruHeight: 42, site: 'HQ' }],
+    rackCables: [],
+    views: [], interfaces: [], assets: [], customFields: [],
+  });
+
+  const load = (doc: object = v4Doc()) => {
+    const result = loadDocument(JSON.stringify(doc));
+    if (!result.ok) throw new Error(`expected ok load, got ${result.reason}`);
+    return result.doc;
+  };
+
+  it('loads a v4 document and gives it an empty locations collection', () => {
+    const doc = load();
+    expect(doc.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(doc.locations).toEqual([]);
+  });
+
+  it('reports migratedFrom 4 so the UI can warn about the upgrade', () => {
+    const result = loadDocument(JSON.stringify(v4Doc()));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.migratedFrom).toBe(4);
+  });
+
+  it('is non-destructive — devices, racks, interfaces and callout blocks survive', () => {
+    const doc = load();
+    const sw1 = doc.devices.find((d) => d.id === 'sw1')!;
+    expect(sw1.name).toBe('SW1');
+    expect(sw1.ru).toBe(10);
+    expect(sw1.side).toBe('front');
+    expect(sw1.interfaces).toEqual([{ id: 'p1', name: 'Gi0/1' }]);
+    expect(doc.racks[0]!.ruHeight).toBe(42);
+    const t1 = doc.objects.find((o) => o.id === 't1')!;
+    if (t1.kind === 'text') expect(t1.blocks).toHaveLength(1);
+  });
+
+  it('RETAINS legacy free-text site/location and does NOT auto-convert them', () => {
+    const doc = load();
+    // The whole point of OQ-1: no silent hierarchy invention.
+    expect(doc.racks[0]!.site).toBe('HQ');
+    expect(doc.devices[0]!.location).toBe('HQ floor 2');
+    expect(doc.locations).toEqual([]);
+    // …and nothing gained a locationId it didn't ask for.
+    expect(doc.racks[0]!.locationId).toBeUndefined();
+    expect(doc.devices[0]!.locationId).toBeUndefined();
+  });
+
+  it('preserves locations that are already present (idempotent-safe)', () => {
+    const seeded = { ...v4Doc(), locations: [{ id: 'l1', name: 'HQ', kind: 'site' }] };
+    expect(load(seeded).locations).toEqual([{ id: 'l1', name: 'HQ', kind: 'site' }]);
+  });
+
+  it('is idempotent — re-loading an already-migrated doc keeps one locations array', () => {
+    const once = load();
+    const twice = loadDocument(JSON.stringify(once));
+    expect(twice.ok).toBe(true);
+    if (twice.ok) {
+      expect(twice.doc.locations).toEqual([]);
+      expect(twice.doc.racks[0]!.site).toBe('HQ');
+      // Already current → no second migration reported.
+      expect(twice.migratedFrom).toBeUndefined();
+    }
+  });
+
+  it('preserves unknown fields on a location through load→save (extra bag)', () => {
+    const seeded = {
+      ...v4Doc(),
+      locations: [{ id: 'l1', name: 'HQ', kind: 'site', futureField: 42 }],
+    };
+    const roundTripped = load(seeded).locations[0]! as unknown as Record<string, unknown>;
+    expect(roundTripped.futureField).toBe(42);
+  });
+
+  it('migrates the whole chain v1 → current in one load', () => {
+    const v1 = {
+      schemaVersion: 1,
+      appVersion: '0.1.0',
+      project: { id: 'p', name: 'Old', createdAt: NOW, updatedAt: NOW, description: '', units: 'px' },
+      layers: [{ id: 'L', name: 'Default', visible: true, locked: false, order: 0 }],
+      devices: [{ id: 'd1', kind: 'device', type: 'router', name: 'R1', x: 0, y: 0, width: 56, height: 40, layerId: 'L' }],
+      links: [], objects: [], vlans: [], subnets: [], racks: [], views: [],
+      interfaces: [], assets: [], customFields: [],
+    };
+    const doc = load(v1);
+    expect(doc.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(doc.devices[0]!.interfaces).toEqual([]); // v1→v2
+    expect(doc.rackCables).toEqual([]); // v2→v3
+    expect(doc.locations).toEqual([]); // v4→v5
+    expect(doc.devices[0]!.name).toBe('R1');
+  });
+
+  it('REFUSES v6 — the too-new boundary moved with the bump (data safety)', () => {
+    expect(SCHEMA_VERSION).toBe(5);
+    const result = loadDocument(JSON.stringify({ ...v4Doc(), schemaVersion: 6 }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('too-new');
+  });
+
+  it('a fresh document starts with an empty locations collection', () => {
+    expect(createEmptyDocument(NOW).locations).toEqual([]);
+  });
+});
+
 describe('stripDangerousKeys', () => {
   it('removes prototype-pollution keys recursively', () => {
     const evil = JSON.parse(

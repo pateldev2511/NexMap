@@ -62,8 +62,10 @@ NexMap already has the core of a usable local network designer:
   Home & small office (Wi-Fi, mesh, smart home, home office, gaming, home lab,
   apartment) and Enterprise & data center (branch, three-tier campus, DMZ, data
   center rack, WAN hub-and-spoke, HA core, hybrid cloud, wireless campus).
-- **Network model:** typed devices, links, text notes, shapes/zones, image/SVG
-  underlays, VLANs, subnets, racks, layers, saved views, and `.nexmap` documents.
+- **Network model:** typed devices, first-class interfaces/ports (name, media,
+  speed, access VLAN) that links can reference per endpoint, plus text notes,
+  shapes/zones, image/SVG underlays, VLANs, subnets, racks, layers, saved views,
+  and `.nexmap` documents.
 - **Validation:** duplicate IP/name, invalid IP/CIDR, missing link endpoints,
   overlapping subnets, VLAN range/duplicates, IP outside subnet, missing gateway,
   trunk/access mismatch, orphaned devices, and rack RU collisions/overflow.
@@ -93,14 +95,18 @@ NexMap already has the core of a usable local network designer:
 
 These are the main reasons the project should still be treated as WIP:
 
-- No stable release process or published package yet.
-- Contributor guide, issue templates, security policy, and project governance are
-  still missing.
-- File format/schema may still evolve before a stable `1.0`.
-- First-class interfaces/ports are not modeled yet; endpoint interface labels are
-  still free text.
-- Advanced routing is still basic; obstacle avoidance and cable tracing are
-  future work.
+- No stable release process or published package yet; `CHANGELOG.md` does not yet
+  enforce minor/patch semantics.
+- File format/schema may still evolve before a stable `1.0`. The current on-disk
+  version is schema v5; migrations are forward-only and a newer-than-supported
+  file is refused rather than silently downgraded.
+- Devices and racks carry no spatial hierarchy yet — a `locations` collection
+  exists in schema v5, but the site/building/floor/room tree is not wired into
+  the UI, so `Rack.site` is still free text in practice.
+- Advanced routing is still basic; obstacle avoidance is future work.
+- Physical cabling is point-to-point only: there is no multi-hop cable tracing
+  through patch panels, and nothing reconciles `rackCables[]` against the logical
+  `links[]`.
 - Browser/E2E coverage is still lighter than the unit coverage.
 - Accessibility, mobile/tablet ergonomics, and large-diagram performance still
   need more real-user testing.
@@ -199,9 +205,11 @@ file when the project matters.
 The detailed roadmap lives in [`TODOS.md`](TODOS.md). Near-term open-source work
 should focus on:
 
-- contributor docs, issue templates, and release notes;
-- first-class interfaces/ports;
-- better connector routing and cable tracing;
+- a location hierarchy (site → building → floor → room → row) with fully-qualified
+  port paths, and multi-hop cable tracing through patch panels — planned in
+  [`docs/designs/spatial-model-and-tracing.md`](docs/designs/spatial-model-and-tracing.md);
+- release notes and a published release process;
+- better connector routing (obstacle avoidance);
 - word-level rich-text editing and swatch chips in callout legends;
 - guided discovery import;
 - performance and accessibility passes on large diagrams.

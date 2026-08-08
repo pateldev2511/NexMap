@@ -75,6 +75,23 @@ export const MIGRATIONS: Record<number, Migration> = {
       };
     }),
   }),
+  // v4 → v5: location hierarchy. Purely ADDITIVE — adds the empty `locations`
+  // collection and nothing else. Every other v5 field (Rack.locationId,
+  // Device.locationId) is OPTIONAL and absent means "unplaced", so existing racks
+  // and devices are left byte-identical.
+  //
+  // Deliberately does NOT convert the legacy free-text `Rack.site` / `Device.location`
+  // into Location nodes. Inventing a hierarchy from free text would be a silent,
+  // surprising mutation of the user's data; an explicit undoable in-app action does
+  // that conversion when the user asks for it. `site`/`location` are retained either
+  // way — dropping a populated field is forbidden by the rules at the top of this file.
+  //
+  // Older builds refuse a v5 file (too-new guard) rather than re-save and drop `locations`.
+  4: (doc) => ({
+    ...doc,
+    schemaVersion: 5,
+    locations: Array.isArray(doc.locations) ? doc.locations : [],
+  }),
 };
 
 export type LoadResult =
