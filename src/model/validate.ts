@@ -15,7 +15,16 @@ import {
   parseCidr,
   stripPrefix,
 } from '@/lib/ipcidr';
-import type { Device, Link, Rack, Subnet, ValidationIssue, Vlan } from './types';
+import { cycleIds, duplicateSiblingTokens, oddNesting, orphanRefs } from './location';
+import type {
+  Device,
+  Link,
+  Location,
+  Rack,
+  Subnet,
+  ValidationIssue,
+  Vlan,
+} from './types';
 
 let counter = 0;
 function issueId(): string {
@@ -34,6 +43,123 @@ export interface ValidationInput {
   vlans?: Vlan[];
   subnets?: Subnet[];
   racks?: Rack[];
+  locations?: Location[];
+}
+
+/**
+ * Rule (E12): a `parentId` cycle is an ERROR. It is never auto-broken — picking a
+ * link to sever would silently move part of the user's tree somewhere they never
+ * asked for. Traversal degrades safely meanwhile (see model/location.ts).
+ */
+function checkLocationCycles(locations: Location[]): ValidationIssue[] {
+  const onCycle = cycleIds(locations);
+  if (onCycle.size === 0) return [];
+  const names = locations
+    .filter((l) => onCycle.has(l.id))
+    .map((l) => l.name)
+    .join(', ');
+  return [
+    {
+      id: issueId(),
+      severity: 'error',
+      code: 'location-cycle',
+      message: `Location hierarchy contains a loop (${names}). Re-parent one of them to break it.`,
+      objectIds: [...onCycle],
+    },
+  ];
+}
+
+/**
+ * Rule (E13): a `parentId` pointing at a location that no longer exists. Warn, and
+ * the navigator shows the node as a root so its subtree can't hide.
+ */
+function checkLocationOrphans(locations: Location[]): ValidationIssue[] {
+  return orphanRefs(locations).map((l) => ({
+    id: issueId(),
+    severity: 'warn' as const,
+    code: 'location-orphan-ref',
+    message: `${l.name} points at a parent location that no longer exists; showing it at the top level.`,
+    objectIds: [l.id],
+  }));
+}
+
+/**
+ * Rule (E15): two siblings sharing a path token make the fully-qualified path
+ * ambiguous — two different racks could address to the same string. Warn only:
+ * duplicate names are legal, just unhelpful.
+ */
+function checkLocationDuplicateCodes(locations: Location[]): ValidationIssue[] {
+  return duplicateSiblingTokens(locations).map((d) => ({
+    id: issueId(),
+    severity: 'warn' as const,
+    code: 'location-duplicate-sibling-code',
+    message: `More than one location here resolves to "${d.token}", so qualified paths are ambiguous.`,
+    objectIds: d.ids,
+  }));
+}
+
+/**
+ * Rule (E16): odd containment order, e.g. a floor inside a room. WARN ONLY and
+ * deliberately so — real estate is messy and blocking it would fight the user.
+ */
+function checkLocationNesting(locations: Location[]): ValidationIssue[] {
+  const byId = new Map(locations.map((l) => [l.id, l]));
+  return oddNesting(locations).map(({ childId, parentId }) => {
+    const child = byId.get(childId)!;
+    const parent = byId.get(parentId)!;
+    return {
+      id: issueId(),
+      severity: 'info' as const,
+      code: 'location-odd-nesting',
+      message: `${child.name} (${child.kind}) sits inside ${parent.name} (${parent.kind}), which is an unusual order.`,
+      objectIds: [childId, parentId],
+    };
+  });
+}
+
+/**
+ * Rule: a rack or device pointing at a location id that does not exist. Distinct
+ * from `location-orphan-ref` (which is location→location); this one is
+ * placement→location and leaves the item effectively unplaced.
+ */
+function checkLocationRefs(
+  devices: Device[],
+  racks: Rack[],
+  locations: Location[],
+): ValidationIssue[] {
+  if (locations.length === 0) {
+    // Nothing to point at — but a stale ref left over from a deleted tree still counts.
+    const stale = [
+      ...racks.filter((r) => r.locationId != null),
+      ...devices.filter((d) => d.locationId != null),
+    ];
+    if (stale.length === 0) return [];
+  }
+  const ids = new Set(locations.map((l) => l.id));
+  const issues: ValidationIssue[] = [];
+  for (const r of racks) {
+    if (r.locationId != null && !ids.has(r.locationId)) {
+      issues.push({
+        id: issueId(),
+        severity: 'warn',
+        code: 'location-missing-ref',
+        message: `Rack ${r.name} references a location that no longer exists.`,
+        objectIds: [r.id],
+      });
+    }
+  }
+  for (const d of devices) {
+    if (d.locationId != null && !ids.has(d.locationId)) {
+      issues.push({
+        id: issueId(),
+        severity: 'warn',
+        code: 'location-missing-ref',
+        message: `${d.name} references a location that no longer exists.`,
+        objectIds: [d.id],
+      });
+    }
+  }
+  return issues;
 }
 
 /** Rule: a device must have a non-empty name. */
@@ -418,8 +544,14 @@ export function validate({
   vlans = [],
   subnets = [],
   racks = [],
+  locations = [],
 }: ValidationInput): ValidationIssue[] {
   return [
+    ...checkLocationCycles(locations),
+    ...checkLocationOrphans(locations),
+    ...checkLocationDuplicateCodes(locations),
+    ...checkLocationNesting(locations),
+    ...checkLocationRefs(devices, racks, locations),
     ...checkDuplicateIps(devices),
     ...checkInvalidIpCidr(devices),
     ...checkMissingEndpoints(devices, links),

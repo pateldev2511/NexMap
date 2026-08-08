@@ -14,6 +14,7 @@ import type {
   Device,
   Layer,
   Link,
+  Location,
   Rack,
   RackCable,
   Subnet,
@@ -518,6 +519,64 @@ export class DeleteRackCommand implements Command {
   }
   undo(s: ModelState) {
     if (this.removed) s.racks.set(this.id, this.removed);
+  }
+}
+
+// ─── Locations (schema v5) ───────────────────────────────────────────────────
+// A flat Map like vlans/racks. Reparenting is just an UpdateLocationCommand that
+// writes `parentId`, so it needs no special command — but the STORE must refuse a
+// reparent that would form a cycle before dispatching (see `wouldCycle`), because
+// a command's job is to be reversible, not to arbitrate legality.
+
+export class AddLocationCommand implements Command {
+  readonly label = 'Add location';
+  constructor(private readonly loc: Location) {}
+  apply(s: ModelState) {
+    s.locations.set(this.loc.id, this.loc);
+  }
+  undo(s: ModelState) {
+    s.locations.delete(this.loc.id);
+  }
+}
+
+export class UpdateLocationCommand implements Command {
+  readonly label = 'Edit location';
+  constructor(
+    readonly id: string,
+    private readonly before: Partial<Location>,
+    private readonly after: Partial<Location>,
+  ) {}
+  apply(s: ModelState) {
+    const l = s.locations.get(this.id);
+    if (l) s.locations.set(this.id, { ...l, ...this.after });
+  }
+  undo(s: ModelState) {
+    const l = s.locations.get(this.id);
+    if (l) s.locations.set(this.id, { ...l, ...this.before });
+  }
+  mergeWith(next: Command): Command | null {
+    // Coalesce a stream of same-field edits (typing a name) into one undo entry.
+    if (
+      next instanceof UpdateLocationCommand &&
+      next.id === this.id &&
+      sameKeys(this.after, next.after)
+    ) {
+      return new UpdateLocationCommand(this.id, this.before, next.after);
+    }
+    return null;
+  }
+}
+
+export class DeleteLocationCommand implements Command {
+  readonly label = 'Delete location';
+  private removed?: Location;
+  constructor(private readonly id: string) {}
+  apply(s: ModelState) {
+    this.removed = s.locations.get(this.id);
+    s.locations.delete(this.id);
+  }
+  undo(s: ModelState) {
+    if (this.removed) s.locations.set(this.id, this.removed);
   }
 }
 

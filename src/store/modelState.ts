@@ -14,6 +14,7 @@ import type {
   Device,
   Layer,
   Link,
+  Location,
   NexMapDocument,
   ProjectMeta,
   Rack,
@@ -35,6 +36,12 @@ export interface ModelState {
   racks: Map<string, Rack>;
   /** Physical rack cables (schema v3), keyed by id. Separate from logical `links`. */
   rackCables: Map<string, RackCable>;
+  /**
+   * Location tree (schema v5), keyed by id. Flat by design — the hierarchy lives
+   * in each node's `parentId`, so a reparent is one field write and no index can
+   * drift. Tree questions are answered by the pure helpers in `model/location.ts`.
+   */
+  locations: Map<string, Location>;
   views: Map<string, View>;
   /** deviceId → set of link IDs touching it. */
   adjacency: Map<string, Set<string>>;
@@ -55,6 +62,9 @@ export function fromDocument(doc: NexMapDocument): ModelState {
     subnets: new Map((doc.subnets ?? []).map((s) => [s.id, s])),
     racks: new Map((doc.racks ?? []).map((r) => [r.id, r])),
     rackCables: new Map((doc.rackCables ?? []).map((c) => [c.id, c])),
+    // `?? []` is load-bearing: a hand-authored or future v5 file can be stamped
+    // v5 yet omit the collection, in which case the migration never runs.
+    locations: new Map((doc.locations ?? []).map((l) => [l.id, l])),
     views: new Map((doc.views ?? []).map((v) => [v.id, v])),
     adjacency: new Map(),
   };
@@ -77,6 +87,7 @@ export function toDocument(state: ModelState, base: NexMapDocument): NexMapDocum
     subnets: [...state.subnets.values()],
     racks: [...state.racks.values()],
     rackCables: [...state.rackCables.values()],
+    locations: [...state.locations.values()],
     views: [...state.views.values()],
   };
 }

@@ -18,6 +18,8 @@ import type {
   Interface,
   Link,
   Layer,
+  Location,
+  LocationKind,
   NexMapDocument,
   Rack,
   RackCable,
@@ -48,6 +50,7 @@ import {
   createLink,
   createImageObject,
   createLayer,
+  createLocation,
   createRack,
   createRackCable,
   createShapeObject,
@@ -65,11 +68,19 @@ import { avoidRoute } from '@/lib/routing';
 import { pointInPolygon, type Point } from '@/lib/geometry';
 import { parseNexText, buildModel, type Diagnostic as NexDiagnostic } from '@/lib/nextext';
 import { analyzeHealth, edgeDisjointPaths, type HealthReport } from '@/lib/health';
+import {
+  deleteBlockers,
+  isBlocked,
+  planSiteConversion,
+  wouldCycle,
+  type DeleteBlockers,
+} from '@/model/location';
 import { History } from './history';
 import {
   AddDeviceCommand,
   AddLayerCommand,
   AddLinkCommand,
+  AddLocationCommand,
   AddObjectCommand,
   AddRackCableCommand,
   AddRackCommand,
@@ -77,6 +88,7 @@ import {
   AddVlanCommand,
   DeleteCommand,
   DeleteLayerCommand,
+  DeleteLocationCommand,
   DeleteRackCableCommand,
   DeleteRackCommand,
   DeleteSubnetCommand,
@@ -87,6 +99,7 @@ import {
   UpdateDeviceCommand,
   UpdateLayerCommand,
   UpdateLinkCommand,
+  UpdateLocationCommand,
   UpdateObjectCommand,
   UpdateRackCableCommand,
   UpdateRackCommand,
@@ -443,6 +456,32 @@ export interface ProjectStore {
   /** Deep-copy a rack with its mounted gear and intra-rack cables. Returns the new id. */
   cloneRack(rackId: string): string | null;
   racksAll(): Rack[];
+  // Locations (schema v5) — the spatial hierarchy.
+  addLocation(name: string, kind: LocationKind, parentId?: string): string;
+  updateLocation(id: string, before: Partial<Location>, after: Partial<Location>): void;
+  /**
+   * Move a node under a new parent (pass `undefined` to promote to a root).
+   * REFUSES and returns false if it would create a cycle — the model never holds
+   * a cycle we would then have to report.
+   */
+  reparentLocation(id: string, parentId: string | undefined): boolean;
+  /**
+   * Delete an EMPTY location. Returns the blockers when it still holds child
+   * locations, racks or devices (E14/SD-13): blocked, never cascaded, so a subtree
+   * cannot be lost to one click. `null` = deleted.
+   */
+  deleteLocation(id: string): DeleteBlockers | null;
+  /** Point a rack at a location (`undefined` unplaces it). One undoable edit. */
+  setRackLocation(rackId: string, locationId: string | undefined): void;
+  /** Point a device at a location (`undefined` unplaces it). One undoable edit. */
+  setDeviceLocation(deviceId: string, locationId: string | undefined): void;
+  /**
+   * Convert legacy free-text `Rack.site` values into real site locations
+   * (SD-10/OQ-1) as ONE undoable transaction. Never clobbers a rack that already
+   * has a `locationId`, and never clears `site`. Returns how many of each it made.
+   */
+  convertSitesToLocations(): { created: number; assigned: number };
+  locationsAll(): Location[];
   // Rack designer (schema v3) — placement + physical cabling.
   /** Validate + write a device's rack slot atomically. Returns the fit result. */
   placeInRack(deviceId: string, rackId: string, slot: Slot): FitResult;
@@ -1103,6 +1142,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           vlans: [...model.vlans.values()],
           subnets: [...model.subnets.values()],
           racks: [...model.racks.values()],
+          locations: [...model.locations.values()],
         }),
         canUndo: history.canUndo,
         canRedo: history.canRedo,
@@ -1877,6 +1917,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         vlans: [...model.vlans.values()],
         subnets: [...model.subnets.values()],
         racks: [...model.racks.values()],
+        locations: [...model.locations.values()],
       });
       // Topology health rides the same debounce — all O(V+E), main-thread (eng-review lock).
       const health = analyzeHealth(devices, links);
@@ -1909,6 +1950,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           vlans: [...model.vlans.values()],
           subnets: [...model.subnets.values()],
           racks: [...model.racks.values()],
+          locations: [...model.locations.values()],
         }),
         canUndo: false,
         canRedo: false,
@@ -2038,6 +2080,98 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       }
       history.commitCoalesceBoundary();
     },
+    addLocation(name, kind, parentId) {
+      const l = createLocation(name, kind, parentId ? { parentId } : {});
+      commit(new AddLocationCommand(l));
+      history.commitCoalesceBoundary();
+      get().runValidation();
+      return l.id;
+    },
+    updateLocation(id, before, after) {
+      commit(new UpdateLocationCommand(id, before, after));
+      get().runValidation();
+    },
+    reparentLocation(id, parentId) {
+      if (!model.locations.has(id)) return false;
+      // Guard BEFORE writing: a command's contract is reversibility, not legality.
+      if (parentId != null && !model.locations.has(parentId)) return false;
+      const locs = [...model.locations.values()];
+      if (wouldCycle(locs, id, parentId)) return false;
+      const current = model.locations.get(id)!;
+      if ((current.parentId ?? undefined) === (parentId ?? undefined)) return true;
+      commit(
+        new UpdateLocationCommand(
+          id,
+          { parentId: current.parentId },
+          { parentId: parentId },
+        ),
+      );
+      history.commitCoalesceBoundary();
+      get().runValidation();
+      return true;
+    },
+    deleteLocation(id) {
+      if (!model.locations.has(id)) return null;
+      const blockers = deleteBlockers(
+        [...model.locations.values()],
+        [...model.racks.values()],
+        [...model.devices.values()],
+        id,
+      );
+      if (isBlocked(blockers)) return blockers;
+      commit(new DeleteLocationCommand(id));
+      history.commitCoalesceBoundary();
+      get().runValidation();
+      return null;
+    },
+    setRackLocation(rackId, locationId) {
+      const r = model.racks.get(rackId);
+      if (!r) return;
+      if (locationId != null && !model.locations.has(locationId)) return;
+      commit(
+        new UpdateRackCommand(rackId, { locationId: r.locationId }, { locationId }),
+      );
+      history.commitCoalesceBoundary();
+      get().runValidation();
+    },
+    setDeviceLocation(deviceId, locationId) {
+      const d = model.devices.get(deviceId);
+      if (!d) return;
+      if (locationId != null && !model.locations.has(locationId)) return;
+      commit(
+        new UpdateDeviceCommand(deviceId, { locationId: d.locationId }, { locationId }),
+      );
+      history.commitCoalesceBoundary();
+      get().runValidation();
+    },
+    convertSitesToLocations() {
+      const plan = planSiteConversion([...model.racks.values()]);
+      if (plan.names.length === 0) return { created: 0, assigned: 0 };
+
+      // Mint the sites first so their ids are known, then point the racks at them —
+      // all inside ONE transaction, so undo restores the exact prior state.
+      const created = plan.names.map((name) => createLocation(name, 'site'));
+      const cmds: Command[] = created.map((l) => new AddLocationCommand(l));
+      for (const [rackId, nameIdx] of plan.assign) {
+        const rack = model.racks.get(rackId);
+        if (!rack) continue;
+        cmds.push(
+          new UpdateRackCommand(
+            rackId,
+            { locationId: rack.locationId },
+            { locationId: created[nameIdx]!.id },
+          ),
+        );
+      }
+      commit(transaction('Convert sites to locations', cmds));
+      history.commitCoalesceBoundary();
+      get().runValidation();
+      return { created: created.length, assigned: plan.assign.size };
+    },
+    locationsAll() {
+      return [...model.locations.values()];
+    },
+
     cloneRack(rackId) {
       const src = model.racks.get(rackId);
       if (!src) return null;
