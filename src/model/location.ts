@@ -332,6 +332,34 @@ export function orphanRefs(locations: readonly Location[]): Location[] {
   return locations.filter((l) => l.parentId != null && !byId.has(l.parentId));
 }
 
+/**
+ * Fully-qualified address of a single PORT, e.g. `HQ/28/RK001/SW01/Gi0/1` —
+ * the label Patchbox-style trace hops are read by.
+ *
+ * Location resolution, in order:
+ *  1. the device's own `locationId` (non-racked gear: wall ports, APs);
+ *  2. otherwise its rack's `locationId`, with the rack name as a segment.
+ *
+ * A device placed in a rack that itself has no location still yields
+ * `RK001/SW01/Gi0/1` — partial beats blank, because an unplaced rack is common
+ * and the rack name alone is usually enough to find the gear.
+ */
+export function portPath(
+  locations: readonly Location[],
+  racks: readonly Rack[],
+  devices: readonly Device[],
+  deviceId: string,
+  ifaceId: string,
+): string {
+  const device = devices.find((d) => d.id === deviceId);
+  if (!device) return '';
+  const iface = device.interfaces?.find((i) => i.id === ifaceId);
+  const rack = device.rackId ? racks.find((r) => r.id === device.rackId) : undefined;
+  // The device's own placement wins; a racked device inherits the rack's.
+  const locationId = device.locationId ?? rack?.locationId;
+  return qualifiedPath(locations, locationId, rack?.name, device.name, iface?.name);
+}
+
 export interface FlatRow {
   location: Location;
   /** 0 for a display root. */

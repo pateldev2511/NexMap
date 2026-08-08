@@ -1,5 +1,6 @@
 import { useProjectStore } from '@/store/projectStore';
-import type { CanvasObject, Device, DeviceType, Link } from '@/model/types';
+import type { CanvasObject, Device, DeviceType, Interface, Link } from '@/model/types';
+import { coupledPartner } from '@/model/coupling';
 import { NexIcon } from '@/ui/icons/NexIcon';
 import { isValidIp, isValidCidr } from '@/lib/ipcidr';
 import { nextFreeHost } from '@/lib/ipam';
@@ -24,6 +25,7 @@ import {
   MAX_LABEL_HEIGHT,
   DEFAULT_LABEL_HEIGHT,
 } from '@/canvas/nodeCard';
+import { PortTrace } from './PortTrace';
 import { RichTextEditor } from './RichTextEditor';
 import { ComboBox } from './ComboBox';
 import styles from './Inspector.module.css';
@@ -332,6 +334,7 @@ function InterfacesSection({ device }: { device: Device }) {
   const addInterface = useProjectStore((s) => s.addInterface);
   const updateInterface = useProjectStore((s) => s.updateInterface);
   const deleteInterface = useProjectStore((s) => s.deleteInterface);
+  const selectPort = useProjectStore((s) => s.selectPort);
   const endEdit = useProjectStore((s) => s.endEdit);
   const interfaces = device.interfaces ?? [];
 
@@ -345,6 +348,15 @@ function InterfacesSection({ device }: { device: Device }) {
       )}
       {interfaces.map((iface) => (
         <div key={iface.id} className={styles.ifaceRow}>
+          <button
+            type="button"
+            className={styles.ifaceTrace}
+            onClick={() => selectPort(device.id, iface.id)}
+            aria-label={`Trace port ${iface.name}`}
+            title="Show this port's physical path"
+          >
+            ▸
+          </button>
           <input
             value={iface.name}
             placeholder="Gi0/1"
@@ -893,6 +905,110 @@ function ProjectInspector() {
   );
 }
 
+/**
+ * The PORT scope (schema v5) — Patchbox's third inspector level, below Rack and
+ * Device. Shows what the port IS (name, media, speed, VLAN, face) and, more
+ * importantly, where it actually GOES.
+ */
+function PortInspector({ device, iface }: { device: Device; iface: Interface }) {
+  useProjectStore((s) => s.rev);
+  const s = useProjectStore.getState;
+  const updateInterface = useProjectStore((s) => s.updateInterface);
+  const endEdit = useProjectStore((s) => s.endEdit);
+
+  const trace = s().tracePort(device.id, iface.id);
+  const partner = coupledPartner(device, iface);
+  // A `throughTo` that is set but does not resolve is a validation error; say so
+  // here too rather than rendering a blank where a pass-through should be.
+  const brokenCoupling = iface.throughTo != null && partner === undefined;
+
+  return (
+    <>
+      <div className={styles.group}>
+        <div className={styles.groupTitle}>Port</div>
+        <Field label="Name">
+          <input
+            value={iface.name}
+            placeholder="Gi0/1"
+            aria-label="Port name"
+            onChange={(e) => updateInterface(device.id, iface.id, { name: e.target.value })}
+            onBlur={endEdit}
+          />
+        </Field>
+        <Field label="Media / kind">
+          <input
+            value={iface.kind ?? ''}
+            placeholder="RJ45, LC/UPC, SFP+"
+            aria-label="Media / kind"
+            onChange={(e) => updateInterface(device.id, iface.id, { kind: e.target.value })}
+            onBlur={endEdit}
+          />
+        </Field>
+        <Field label="Speed">
+          <input
+            value={iface.speed ?? ''}
+            placeholder="1G, 10G"
+            aria-label="Port speed"
+            onChange={(e) => updateInterface(device.id, iface.id, { speed: e.target.value })}
+            onBlur={endEdit}
+          />
+        </Field>
+        <Field label="Access VLAN">
+          <input
+            type="number"
+            min={VLAN_MIN}
+            max={VLAN_MAX}
+            value={iface.vlan ?? ''}
+            placeholder="1–4094"
+            aria-label="Port access VLAN"
+            onChange={(e) =>
+              updateInterface(device.id, iface.id, { vlan: parseVlanId(e.target.value) })
+            }
+            onBlur={endEdit}
+          />
+        </Field>
+        <Field label="Face">
+          <select
+            value={iface.side ?? 'front'}
+            aria-label="Port face"
+            onChange={(e) =>
+              updateInterface(device.id, iface.id, {
+                side: e.target.value as Interface['side'],
+              })
+            }
+          >
+            <option value="front">Front</option>
+            <option value="rear">Rear</option>
+          </select>
+        </Field>
+        {(partner || brokenCoupling) && (
+          <Field label="Pass-through">
+            {partner ? (
+              <button
+                type="button"
+                className={styles.ifaceAdd}
+                onClick={() => s().selectPort(device.id, partner.id)}
+                title="Jump to the coupled port on the other face"
+              >
+                <span>↔ {partner.name}</span>
+              </button>
+            ) : (
+              <div className={styles.fieldError}>
+                Wired through to a port that does not resolve — see Validation.
+              </div>
+            )}
+          </Field>
+        )}
+      </div>
+
+      <div className={styles.group}>
+        <div className={styles.groupTitle}>Physical path</div>
+        <PortTrace result={trace} currentIfaceId={iface.id} />
+      </div>
+    </>
+  );
+}
+
 function Field({
   label,
   error,
@@ -915,6 +1031,7 @@ export function Inspector() {
   // rev drives refresh when the selected object's fields change.
   useProjectStore((s) => s.rev);
   const selection = useProjectStore((s) => s.selection);
+  const selectedPort = useProjectStore((s) => s.selectedPort);
   const store = useProjectStore.getState;
   const ids = [...selection];
 
@@ -922,7 +1039,19 @@ export function Inspector() {
   let head = 'Project';
   let sub = '';
 
-  if (ids.length === 0) {
+  // PORT scope first. Resolved defensively: the referenced device or interface can
+  // vanish (delete, undo, a reloaded file), and a stale ref must fall through to the
+  // next scope rather than render an empty panel.
+  const portDevice = selectedPort ? store().getDevice(selectedPort.deviceId) : undefined;
+  const portIface = selectedPort
+    ? portDevice?.interfaces?.find((i) => i.id === selectedPort.ifaceId)
+    : undefined;
+
+  if (portDevice && portIface) {
+    head = portIface.name || 'Port';
+    sub = store().portLabel(portDevice.id, portIface.id) || portDevice.name;
+    body = <PortInspector device={portDevice} iface={portIface} />;
+  } else if (ids.length === 0) {
     body = <ProjectInspector />;
   } else if (ids.length === 1) {
     const id = ids[0]!;

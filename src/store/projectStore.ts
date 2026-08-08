@@ -21,6 +21,7 @@ import type {
   Location,
   LocationKind,
   NexMapDocument,
+  PortRef,
   Rack,
   RackCable,
   RackCableEnd,
@@ -39,7 +40,12 @@ import { checkConnect, pruneCablesForInterfaces } from '@/rack/rackCables';
 import { presetByKey } from '@/rack/rackDevicePresets';
 import { catalogById } from '@/rack/rackCatalog';
 import { estimateCableLengthFt } from '@/rack/cableLength';
-import { isTransitive, planPassThroughPairs } from '@/rack/cableTrace';
+import {
+  isTransitive,
+  planPassThroughPairs,
+  traceFrom,
+  type TraceResult,
+} from '@/rack/cableTrace';
 import { proposePowerBalance } from '@/rack/rackPower';
 import { pickBulkPatch } from '@/rack/rackBulk';
 import { rackFieldsFromPreset, rackPresetById, DEFAULT_RACK_PRESET } from '@/rack/rackTypes';
@@ -73,6 +79,7 @@ import {
   deleteBlockers,
   isBlocked,
   planSiteConversion,
+  portPath,
   wouldCycle,
   type DeleteBlockers,
 } from '@/model/location';
@@ -265,6 +272,14 @@ export interface ProjectStore {
   /** Bumps on every model change — subscribe to trigger renders. */
   rev: number;
   selection: Set<string>;
+  /**
+   * The port scope (schema v5). Independent of `selection`, which holds canvas
+   * objects: a port is not a canvas object, it lives INSIDE a device. Set by
+   * clicking a port row or a trace hop; cleared by any canvas selection change so
+   * the inspector can never show a port belonging to gear you just navigated away
+   * from.
+   */
+  selectedPort: PortRef | null;
   issues: ValidationIssue[];
   /** Topology-health report, recomputed on the same debounce as validation. */
   health: HealthReport;
@@ -403,6 +418,13 @@ export interface ProjectStore {
   lassoSelect(points: Point[], additive?: boolean): void;
   selectAll(): void;
   clearSelection(): void;
+  /** Focus a port. Returns false when the device or interface does not resolve. */
+  selectPort(deviceId: string, ifaceId: string): boolean;
+  clearSelectedPort(): void;
+  /** Walk the physical path out of a port. Pure read — no history entry. */
+  tracePort(deviceId: string, ifaceId: string): TraceResult;
+  /** Fully-qualified address of a port, e.g. "HQ/28/RK001/SW01/Gi0/1". */
+  portLabel(deviceId: string, ifaceId: string): string;
   /** Duplicate selected devices (offset, new IDs) as one undoable entry. */
   duplicateSelection(): void;
   copySelection(): void;
@@ -611,6 +633,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
   return {
     rev: 0,
     selection: new Set<string>(),
+    selectedPort: null,
     issues: [],
     health: {
       issues: [],
@@ -1146,6 +1169,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       set({
         rev: get().rev + 1,
         selection: new Set(),
+        selectedPort: null,
         issues: validate({
           devices: [...model.devices.values()],
           links: [...model.links.values()],
@@ -1853,19 +1877,21 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         return;
       commit(new DeleteCommand(deviceIds, linkIds, objectIds), { reindex: true });
       history.commitCoalesceBoundary();
-      set({ selection: new Set() });
+      // Deleting gear can strand the port scope on a device that no longer exists.
+      // The inspector also resolves defensively, but clearing here keeps state honest.
+      set({ selection: new Set(), selectedPort: null });
     },
 
     select(ids, additive = false) {
       const next = additive ? new Set(get().selection) : new Set<string>();
       for (const id of ids) next.add(id);
-      set({ selection: next });
+      set({ selection: next, selectedPort: null });
     },
 
     boxSelect(box, additive = false) {
       const next = additive ? new Set(get().selection) : new Set<string>();
       for (const id of index.query(box)) next.add(id);
-      set({ selection: next });
+      set({ selection: next, selectedPort: null });
     },
 
     lassoSelect(points, additive = false) {
@@ -1877,7 +1903,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       for (const o of model.objects.values()) {
         if (inside(o.x + o.width / 2, o.y + o.height / 2)) next.add(o.id);
       }
-      set({ selection: next });
+      set({ selection: next, selectedPort: null });
     },
 
     selectAll() {
@@ -1891,7 +1917,36 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     },
 
     clearSelection() {
-      set({ selection: new Set() });
+      set({ selection: new Set(), selectedPort: null });
+    },
+
+    selectPort(deviceId, ifaceId) {
+      const d = model.devices.get(deviceId);
+      if (!d) return false;
+      if (!(d.interfaces ?? []).some((i) => i.id === ifaceId)) return false;
+      set({ selectedPort: { deviceId, ifaceId } });
+      return true;
+    },
+
+    clearSelectedPort() {
+      if (get().selectedPort) set({ selectedPort: null });
+    },
+
+    tracePort(deviceId, ifaceId) {
+      return traceFrom([...model.devices.values()], [...model.rackCables.values()], {
+        deviceId,
+        ifaceId,
+      });
+    },
+
+    portLabel(deviceId, ifaceId) {
+      return portPath(
+        [...model.locations.values()],
+        [...model.racks.values()],
+        [...model.devices.values()],
+        deviceId,
+        ifaceId,
+      );
     },
 
     duplicateSelection() {

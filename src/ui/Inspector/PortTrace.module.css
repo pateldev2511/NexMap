@@ -1,0 +1,94 @@
+.trace {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* One hop. A button because clicking it navigates — keyboard and SR users get it free. */
+.hop {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 3px 4px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--chrome-fg);
+  cursor: pointer;
+}
+
+.hop:hover {
+  background: var(--canvas-bg);
+}
+
+.hop.current {
+  background: var(--canvas-bg);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* How this hop was reached: cable vs internal pass-through. */
+.via {
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--chrome-fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.viaCoupling {
+  color: var(--accent);
+}
+
+.path {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.pathTail {
+  font-weight: 600;
+}
+
+/* Everything before the last segment is context, so it recedes. */
+.pathHead {
+  color: var(--chrome-fg-muted);
+}
+
+/* Why the walk stopped. Never hidden — a trace that looks complete when it isn't
+   is worse than no trace. */
+.outcome {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin-top: 6px;
+  padding: 5px 7px;
+  font-size: 10px;
+  line-height: 1.45;
+  border-radius: 4px;
+  border: 1px solid var(--chrome-border);
+  color: var(--chrome-fg-muted);
+}
+
+.ok {
+  border-color: var(--sev-ok, var(--chrome-border));
+  color: var(--chrome-fg);
+}
+
+.warn {
+  border-color: var(--sev-warn);
+  color: var(--chrome-fg);
+}
+
+.error {
+  border-color: var(--sev-error);
+  color: var(--chrome-fg);
+}
+
+.glyph {
+  flex: 0 0 auto;
+  font-weight: 700;
+}

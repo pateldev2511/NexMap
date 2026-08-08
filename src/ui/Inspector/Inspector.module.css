@@ -139,6 +139,27 @@
   min-width: 0;
 }
 
+/* Drills from the Device scope into the Port scope (schema v5). */
+.ifaceTrace {
+  flex: 0 0 16px;
+  display: grid;
+  place-items: center;
+  height: 22px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: var(--chrome-fg-muted);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.ifaceTrace:hover {
+  color: var(--accent);
+  background: var(--canvas-bg);
+}
+
 .ifaceSpeed {
   flex: 0 0 64px !important;
 }

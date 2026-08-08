@@ -458,11 +458,20 @@ export interface Rack {
   extra?: ExtraFields;
 }
 
-/** One end of a rack cable: a physical port on a device (schema v3). */
-export interface RackCableEnd {
+/**
+ * A reference to one physical port — a device plus one of its interfaces. Used for
+ * cable endpoints, trace hops, and the selected-port scope in the inspector.
+ */
+export interface PortRef {
   deviceId: string;
   ifaceId: string;
 }
+
+/**
+ * One end of a rack cable: a physical port on a device (schema v3). An alias rather
+ * than an empty extending interface, which lint rightly flags as redundant.
+ */
+export type RackCableEnd = PortRef;
 
 /**
  * A physical patch cable between two device ports (schema v3). Kept in its OWN
