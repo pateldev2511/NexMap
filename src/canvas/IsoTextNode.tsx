@@ -7,6 +7,8 @@ import styles from './Canvas.module.css';
 interface IsoTextNodeProps {
   object: TextObject;
   selected: boolean;
+  /** Demoted because something else is selected (focus dimming). */
+  dimmed?: boolean;
   gridSize: number;
   tile: IsoTile;
   onPointerDown: (e: React.PointerEvent, id: string) => void;
@@ -21,6 +23,7 @@ interface IsoTextNodeProps {
 function IsoTextNodeImpl({
   object,
   selected,
+  dimmed,
   gridSize,
   tile,
   onPointerDown,
@@ -30,7 +33,9 @@ function IsoTextNodeImpl({
   const { width, height } = object;
   return (
     <g
-      className={`${styles.objNode} ${selected ? styles.selected : ''}`}
+      className={`${styles.objNode} ${selected ? styles.selected : ''} ${
+        dimmed ? styles.dimmed : ''
+      }`}
       onPointerDown={(e) => onPointerDown(e, object.id)}
       data-id={object.id}
     >

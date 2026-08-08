@@ -11,6 +11,8 @@ import styles from './Canvas.module.css';
 interface DeviceNodeProps {
   device: Device;
   selected: boolean;
+  /** Demoted because something else is selected (focus dimming). */
+  dimmed?: boolean;
   /** Current zoom — drives level-of-detail (DA-DES-3.4). */
   scale: number;
   /** Highlighted as a valid drop target while connecting. */
@@ -32,6 +34,7 @@ interface DeviceNodeProps {
 function DeviceNodeImpl({
   device,
   selected,
+  dimmed,
   scale,
   validTarget,
   hasIssue,
@@ -60,7 +63,7 @@ function DeviceNodeImpl({
     <g
       className={`${styles.node} ${selected ? styles.selected : ''} ${
         validTarget ? styles.validTarget : ''
-      }`}
+      } ${dimmed ? styles.dimmed : ''}`}
       transform={`translate(${device.x} ${device.y})`}
       onPointerDown={(e) => onPointerDown(e, device.id)}
       tabIndex={0}

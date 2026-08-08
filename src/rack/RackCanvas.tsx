@@ -173,10 +173,11 @@ const RackFocusScene = memo(function RackFocusScene({
       ))}
       {layout.panels.map(({ d, panel, jacks }) => {
         const isSel = d.id === selectedId || (selectedIds?.has(d.id) ?? false);
+        const anySel = selectedId != null || (selectedIds?.size ?? 0) > 0;
         return (
           <g
             key={d.id}
-            className={styles.devhit}
+            className={`${styles.devhit} ${anySel && !isSel ? styles.devDimmed : ''}`}
             onPointerDown={(e) => onDevDown(e, d)}
             role="button"
             tabIndex={0}

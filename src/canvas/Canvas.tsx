@@ -1628,6 +1628,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
               key={o.id}
               object={o}
               selected={selection.has(o.id)}
+              dimmed={selection.size > 0 && !selection.has(o.id)}
               onPointerDown={onDevicePointerDown}
             />
           ))}
@@ -1636,6 +1637,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
               key={o.id}
               object={o}
               selected={selection.has(o.id)}
+              dimmed={selection.size > 0 && !selection.has(o.id)}
               onPointerDown={onDevicePointerDown}
               labelUpright={projection === 'iso' ? isoUprightTransform : undefined}
             />
@@ -1849,6 +1851,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           {projection !== 'iso' &&
             devices.map((dev) => (
               <DeviceNode
+                dimmed={selection.size > 0 && !selection.has(dev.id)}
                 key={dev.id}
                 device={dev}
                 selected={selection.has(dev.id)}
@@ -1870,6 +1873,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
                 key={o.id}
                 object={o}
                 selected={selection.has(o.id)}
+                dimmed={selection.size > 0 && !selection.has(o.id)}
                 onPointerDown={onDevicePointerDown}
               />
             ))}
@@ -1940,6 +1944,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
               .sort((a, b) => a.x + a.y - (b.x + b.y)) // painter's: far tiles first
               .map((dev) => (
                 <IsoDeviceNode
+                  dimmed={selection.size > 0 && !selection.has(dev.id)}
                   key={dev.id}
                   device={dev}
                   selected={selection.has(dev.id)}
@@ -1959,6 +1964,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
                   key={o.id}
                   object={o}
                   selected={selection.has(o.id)}
+                  dimmed={selection.size > 0 && !selection.has(o.id)}
                   gridSize={GRID_SIZE}
                   tile={ISO_TILE}
                   onPointerDown={onDevicePointerDown}
@@ -2423,8 +2429,13 @@ const LinkLayer = memo(function LinkLayer({
         const last = pts[pts.length - 1]!;
         const srcLbl = l.sourceInterface ? alongFrom(first, pts[1]!, 24) : null;
         const tgtLbl = l.targetInterface ? alongFrom(last, pts[pts.length - 2]!, 24) : null;
+        // Focus dimming: a link stays lit when it is selected OR either endpoint is,
+        // because the links touching a selected device are exactly the context that
+        // makes the selection meaningful ("what connects to this").
+        const incident = selection.has(l.sourceId) || selection.has(l.targetId);
+        const dimmed = selection.size > 0 && !sel && !incident;
         return (
-          <g key={l.id}>
+          <g key={l.id} className={dimmed ? styles.dimmed : undefined}>
             {projection === 'iso' && (
               <path className={styles.linkShadow} d={d} style={{ strokeWidth: stroke.width + 3 }} />
             )}

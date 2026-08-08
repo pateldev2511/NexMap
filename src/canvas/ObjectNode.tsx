@@ -7,6 +7,8 @@ import styles from './Canvas.module.css';
 interface ObjectNodeProps {
   object: CanvasObject;
   selected: boolean;
+  /** Demoted because something else is selected (focus dimming). */
+  dimmed?: boolean;
   onPointerDown: (e: React.PointerEvent, id: string) => void;
   /** When set (iso mode), de-shears the shape label to stay upright. */
   labelUpright?: (ax: number, ay: number) => string;
@@ -16,10 +18,11 @@ interface ObjectNodeProps {
 function ObjectNodeImpl({
   object,
   selected,
+  dimmed,
   onPointerDown,
   labelUpright,
 }: ObjectNodeProps) {
-  const cls = `${styles.objNode} ${selected ? styles.selected : ''}`;
+  const cls = `${styles.objNode} ${selected ? styles.selected : ''} ${dimmed ? styles.dimmed : ''}`;
   if (object.kind === 'image') {
     return (
       <g

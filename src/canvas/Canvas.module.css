@@ -611,3 +611,20 @@
   min-width: 42px;
   text-align: center;
 }
+
+/* ── Focus dimming (W4b) ────────────────────────────────────────────────────
+   Selecting something demotes everything else so a dense diagram reads at a
+   glance. Deliberately NOT a heavy fade: dimmed gear is context a user still has
+   to be able to read, and the project's a11y stance says visual layout may be
+   mouse-primary but must not drop below legibility. Tune via --focus-dim.
+   The transition (not the dimming) is dropped under reduced-motion. */
+.dimmed {
+  opacity: var(--focus-dim, 0.42);
+  transition: opacity 120ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dimmed {
+    transition: none;
+  }
+}

@@ -218,6 +218,10 @@ const RowScene = memo(function RowScene({
           const r = deviceRect(rack, d);
           const panel = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
           const sel = d.id === selectedId || (selectedIds?.has(d.id) ?? false);
+          const anySel = selectedId != null || (selectedIds?.size ?? 0) > 0;
+          // `dimmedId` is the drag ghost and must win; focus dimming is the weaker,
+          // wider demotion applied to everything the selection isn't.
+          const focusDim = anySel && !sel;
           const hit = searchHits.has(d.id);
           return (
             <g
@@ -225,7 +229,7 @@ const RowScene = memo(function RowScene({
               data-dev-id={d.id}
               onPointerDown={(e) => onDevDown(e, d, rack)}
               style={{ cursor: 'grab' }}
-              opacity={dimmedId === d.id ? 0.35 : 1}
+              opacity={dimmedId === d.id ? 0.35 : focusDim ? 0.42 : 1}
             >
               <g dangerouslySetInnerHTML={{ __html: deviceFaceParts(d, panel, face).join('') }} />
               {colorBy !== 'gear' && (() => {

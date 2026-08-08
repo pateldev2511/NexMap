@@ -415,6 +415,21 @@
 .devhit {
   cursor: grab;
 }
+
+/* Focus dimming (W4b): selecting one unit demotes the rest of the rack so a 42U
+   cabinet of 24-port panels reads at a glance. Kept legible on purpose — cables
+   already dim harder (to 0.16) because they are decoration; GEAR still has to be
+   readable while dimmed. Transition only is dropped under reduced-motion. */
+.devDimmed {
+  opacity: var(--focus-dim, 0.42);
+  transition: opacity 120ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .devDimmed {
+    transition: none;
+  }
+}
 .devhit:active {
   cursor: grabbing;
 }

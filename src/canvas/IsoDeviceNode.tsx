@@ -12,6 +12,8 @@ import styles from './Canvas.module.css';
 interface IsoDeviceNodeProps {
   device: Device;
   selected: boolean;
+  /** Demoted because something else is selected (focus dimming). */
+  dimmed?: boolean;
   scale: number;
   gridSize: number;
   tile: IsoTile;
@@ -30,6 +32,7 @@ interface IsoDeviceNodeProps {
 function IsoDeviceNodeImpl({
   device,
   selected,
+  dimmed,
   scale,
   gridSize,
   tile,
@@ -66,7 +69,7 @@ function IsoDeviceNodeImpl({
     <g
       className={`${styles.isoNode} ${selected ? styles.selected : ''} ${
         validTarget ? styles.validTarget : ''
-      }`}
+      } ${dimmed ? styles.dimmed : ''}`}
       onPointerDown={(e) => onPointerDown(e, device.id)}
       tabIndex={0}
       role="button"
