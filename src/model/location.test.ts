@@ -8,6 +8,7 @@ import {
   descendantIds,
   displayRoots,
   duplicateSiblingTokens,
+  flattenTree,
   isBlocked,
   locationChain,
   locationPath,
@@ -389,6 +390,70 @@ describe('planSiteConversion (SD-10 / OQ-1)', () => {
 
   it('is a no-op on an empty rack list', () => {
     expect(planSiteConversion([])).toEqual({ names: [], assign: new Map() });
+  });
+});
+
+describe('flattenTree', () => {
+  it('emits depth-first rows with correct depths', () => {
+    const rows = flattenTree(sound());
+    expect(rows.map((r) => [r.location.id, r.depth])).toEqual([
+      ['hq', 0],
+      ['b1', 1],
+      ['f2', 2],
+      ['r28', 3],
+    ]);
+  });
+
+  it('marks which rows have children', () => {
+    const rows = flattenTree(sound());
+    expect(rows.map((r) => r.hasChildren)).toEqual([true, true, true, false]);
+  });
+
+  it('collapsing hides descendants but keeps the node', () => {
+    const rows = flattenTree(sound(), (id) => id === 'b1');
+    expect(rows.map((r) => r.location.id)).toEqual(['hq', 'b1']);
+  });
+
+  it('lists two sibling roots', () => {
+    const rows = flattenTree([loc('a', 'site'), loc('b', 'site')]);
+    expect(rows.map((r) => r.location.id)).toEqual(['a', 'b']);
+  });
+
+  // E12: the render path must be total — a cycle cannot recurse forever.
+  it('terminates on a cycle and still emits every node exactly once', () => {
+    const locs = [loc('a', 'room', 'b'), loc('b', 'room', 'a'), loc('hq', 'site')];
+    const rows = flattenTree(locs);
+    const ids = rows.map((r) => r.location.id).sort();
+    expect(ids).toEqual(['a', 'b', 'hq']);
+    expect(rows).toHaveLength(3);
+  });
+
+  it('emits a self-parenting node exactly once', () => {
+    const rows = flattenTree([loc('a', 'room', 'a')]);
+    expect(rows).toHaveLength(1);
+  });
+
+  it('shows an orphan at depth 0 with its subtree', () => {
+    const locs = [loc('a', 'room', 'ghost'), loc('b', 'row', 'a')];
+    expect(flattenTree(locs).map((r) => [r.location.id, r.depth])).toEqual([
+      ['a', 0],
+      ['b', 1],
+    ]);
+  });
+
+  it('caps runaway depth instead of emitting forever', () => {
+    const deep: Location[] = [loc('n0', 'site')];
+    for (let i = 1; i < MAX_LOCATION_DEPTH + 5; i++) {
+      deep.push(loc(`n${i}`, 'room', `n${i - 1}`));
+    }
+    const rows = flattenTree(deep);
+    // Every node still gets a row (the tail is appended flat), and none exceed the cap.
+    expect(rows).toHaveLength(deep.length);
+    expect(Math.max(...rows.map((r) => r.depth))).toBeLessThan(MAX_LOCATION_DEPTH);
+  });
+
+  it('is empty for no locations (E17)', () => {
+    expect(flattenTree([])).toEqual([]);
   });
 });
 

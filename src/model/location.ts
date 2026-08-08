@@ -332,6 +332,71 @@ export function orphanRefs(locations: readonly Location[]): Location[] {
   return locations.filter((l) => l.parentId != null && !byId.has(l.parentId));
 }
 
+export interface FlatRow {
+  location: Location;
+  /** 0 for a display root. */
+  depth: number;
+  hasChildren: boolean;
+}
+
+/**
+ * Flatten the tree into ordered rows for the navigator.
+ *
+ * Lives here rather than in the component ON PURPOSE: a `parentId` cycle would
+ * otherwise recurse forever inside React and white-screen the app. Every node is
+ * emitted at most once (visited set) and depth is capped, so a corrupt tree
+ * renders as a finite, if odd, list.
+ *
+ * `isCollapsed` hides a node's children without hiding the node.
+ */
+export function flattenTree(
+  locations: readonly Location[],
+  isCollapsed: (id: string) => boolean = () => false,
+): FlatRow[] {
+  const byParent = new Map<string, Location[]>();
+  for (const l of locations) {
+    if (l.parentId == null) continue;
+    const list = byParent.get(l.parentId);
+    if (list) list.push(l);
+    else byParent.set(l.parentId, [l]);
+  }
+
+  const roots = displayRoots(locations);
+
+  // Pass 1: what is reachable at all, IGNORING collapse. Anything outside this set
+  // is stranded by a cycle — as opposed to merely hidden by a collapsed ancestor,
+  // which must stay hidden.
+  const reachable = new Set<string>();
+  const mark = (node: Location, depth: number): void => {
+    if (reachable.has(node.id) || depth >= MAX_LOCATION_DEPTH) return;
+    reachable.add(node.id);
+    for (const kid of byParent.get(node.id) ?? []) mark(kid, depth + 1);
+  };
+  for (const root of roots) mark(root, 0);
+
+  // Pass 2: the visible rows, honouring collapse.
+  const rows: FlatRow[] = [];
+  const emitted = new Set<string>();
+  const walk = (node: Location, depth: number): void => {
+    if (emitted.has(node.id) || depth >= MAX_LOCATION_DEPTH) return;
+    emitted.add(node.id);
+    const kids = byParent.get(node.id) ?? [];
+    rows.push({ location: node, depth, hasChildren: kids.length > 0 });
+    if (isCollapsed(node.id)) return;
+    for (const kid of kids) walk(kid, depth + 1);
+  };
+  for (const root of roots) walk(root, 0);
+
+  // Cycle-stranded nodes still get a row — a bad parentId must never make a
+  // location silently disappear from the navigator.
+  for (const l of locations) {
+    if (reachable.has(l.id) || emitted.has(l.id)) continue;
+    emitted.add(l.id);
+    rows.push({ location: l, depth: 0, hasChildren: (byParent.get(l.id) ?? []).length > 0 });
+  }
+  return rows;
+}
+
 export interface SiteConversion {
   /** Site nodes to create — caller mints the ids via `createLocation`. */
   names: string[];

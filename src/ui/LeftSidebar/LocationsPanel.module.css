@@ -1,0 +1,251 @@
+.panel {
+  border-top: 1px solid var(--chrome-border);
+  display: flex;
+  flex-direction: column;
+  max-height: 40%;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--chrome-fg-muted);
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.add {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: none;
+  color: var(--chrome-fg-muted);
+  padding: 0;
+  cursor: pointer;
+}
+
+.add svg {
+  width: 15px;
+  height: 15px;
+}
+
+.add:hover {
+  color: var(--accent);
+}
+
+.list {
+  overflow-y: auto;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+
+.row:hover {
+  background: var(--canvas-bg);
+}
+
+.row.active {
+  background: var(--canvas-bg);
+  border-left-color: var(--accent);
+}
+
+/* Nodes stranded by a parentId loop — surfaced, never hidden. */
+.row.broken {
+  border-left-color: var(--sev-error);
+}
+
+.twisty {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 20px;
+  flex: 0 0 18px;
+  background: transparent;
+  border: none;
+  color: var(--chrome-fg-muted);
+  padding: 0;
+  cursor: pointer;
+}
+
+.twisty svg {
+  width: 12px;
+  height: 12px;
+  transition: transform 120ms ease;
+}
+
+.twisty.collapsed svg {
+  transform: rotate(-90deg);
+}
+
+/* Keeps alignment for leaves, which have no twisty to click. */
+.twistySpacer {
+  flex: 0 0 18px;
+}
+
+.kind {
+  flex: 0 0 auto;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--chrome-fg-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 1px 2px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.kind:hover,
+.kind:focus {
+  border-color: var(--chrome-border);
+  outline: none;
+}
+
+.name {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--chrome-fg);
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.name:focus {
+  border-color: var(--accent);
+  background: var(--chrome-bg);
+  outline: none;
+}
+
+.count {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--chrome-fg-muted);
+  font-variant-numeric: tabular-nums;
+  padding: 0 2px;
+}
+
+.iconBtn {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  background: transparent;
+  border: none;
+  color: var(--chrome-fg-muted);
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.iconBtn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.iconBtn:hover {
+  color: var(--chrome-fg);
+}
+
+.del:hover {
+  color: var(--sev-error);
+}
+
+.empty {
+  padding: 4px 12px 12px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--chrome-fg-muted);
+}
+
+.emptyActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.cta {
+  background: var(--chrome-bg);
+  color: var(--chrome-fg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 5px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.cta:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ctaPrimary {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Why a delete was refused (E14). Not a toast — it must persist while the user reads. */
+.blocked {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0 8px 8px;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--chrome-fg);
+  background: var(--canvas-bg);
+  border: 1px solid var(--sev-warn);
+  border-radius: 5px;
+}
+
+.blockedDismiss {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: var(--chrome-fg-muted);
+  cursor: pointer;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
+.blockedDismiss svg {
+  width: 12px;
+  height: 12px;
+}
+
+.breadcrumb {
+  padding: 0 12px 8px;
+  font-size: 10px;
+  color: var(--chrome-fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
