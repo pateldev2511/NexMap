@@ -27,6 +27,13 @@
 import { useRef, useState, useEffect, useMemo, useCallback, memo } from 'react';
 import type { Device, Rack, RackCable } from '@/model/types';
 import { fit, panBy, zoomAt, zoomTo, type Viewport, IDENTITY } from './viewport';
+import {
+  initialLodTier,
+  lodTier,
+  showsFaceplates,
+  showsPorts,
+  type LodTier,
+} from './lod';
 import { normalizeWheel, resolveWheel } from '@/input/wheel';
 import { getWheelAction } from '@/lib/prefs';
 import {
@@ -94,7 +101,7 @@ type Col = { rack: Rack; frontX: number; rearX: number; size: ReturnType<typeof 
  */
 const RowScene = memo(function RowScene({
   cols, devices, cables, activeRackId, selectedId, selectedIds, searchHits, showRear, colorBy,
-  dragRackId, dimmedId, onDevDown, onReorder,
+  dragRackId, dimmedId, tier, onDevDown, onReorder,
 }: {
   cols: Col[];
   devices: Device[];
@@ -102,6 +109,13 @@ const RowScene = memo(function RowScene({
   activeRackId?: string;
   selectedId: string | null;
   selectedIds?: Set<string>;
+  /**
+   * Zoom tier (W6). A plain STRING, derived by RackRow from the viewport scale.
+   * Passing the raw scale would break this memo and re-render the whole scene on
+   * every zoom frame — the exact hot path rowScene.perf.test.tsx pins. Because the
+   * tier only changes at a hysteresis boundary, zooming within a tier is free.
+   */
+  tier: LodTier;
   searchHits: Set<string>;
   showRear: boolean;
   colorBy: ColorByMode;
@@ -231,7 +245,44 @@ const RowScene = memo(function RowScene({
               style={{ cursor: 'grab' }}
               opacity={dimmedId === d.id ? 0.35 : focusDim ? 0.42 : 1}
             >
-              <g dangerouslySetInnerHTML={{ __html: deviceFaceParts(d, panel, face).join('') }} />
+              {showsFaceplates(tier) ? (
+                <g dangerouslySetInnerHTML={{ __html: deviceFaceParts(d, panel, face).join('') }} />
+              ) : (
+                /* Far tier: a plain block instead of generating faceplate art. At this
+                   zoom the art is sub-pixel detail nobody can read, and skipping it is
+                   what makes a 20-rack row cheap to draw. */
+                <rect
+                  data-far-block={d.id}
+                  x={panel.x}
+                  y={panel.y}
+                  width={panel.w}
+                  height={panel.h}
+                  rx={2}
+                  fill="#334155"
+                  stroke="#0f172a"
+                  strokeWidth={0.75}
+                  pointerEvents="none"
+                />
+              )}
+              {/* Near tier only: individual jacks. Below this a jack is ~2px, so
+                  drawing it would imply an aim you cannot actually achieve (E20). */}
+              {showsPorts(tier) &&
+                devicePortLayout(d, panel).map((pr) => (
+                  <rect
+                    key={`jack-${d.id}-${pr.ifaceId}`}
+                    data-port={`${d.id}:${pr.ifaceId}`}
+                    x={pr.x}
+                    y={pr.y}
+                    width={pr.w}
+                    height={pr.h}
+                    rx={1}
+                    fill="none"
+                    stroke="#f8fafc"
+                    strokeOpacity={0.28}
+                    strokeWidth={0.6}
+                    pointerEvents="none"
+                  />
+                ))}
               {colorBy !== 'gear' && (() => {
                 const tint = deviceColorBy(d, colorBy);
                 return tint ? <rect x={panel.x} y={panel.y} width={panel.w} height={panel.h} rx={3} fill={tint} fillOpacity={0.6} pointerEvents="none" /> : null;
@@ -353,6 +404,18 @@ export function RackRow({
   const [vp, setVp] = useState<Viewport>(IDENTITY);
   const vpRef = useRef(vp);
   vpRef.current = vp;
+
+  /**
+   * Zoom tier, sticky across renders so the hysteresis has somewhere to live (W6/E19).
+   *
+   * Derived during render rather than via state + effect: `lodTier` is idempotent
+   * (proved in lod.test.ts), so recomputing from the previous tier and an unchanged
+   * scale always yields that same tier. That makes this safe under React's
+   * double-invoked render and avoids the extra render pass an effect would cost.
+   */
+  const tierRef = useRef<LodTier>(initialLodTier(IDENTITY.scale));
+  const tier = lodTier(vp.scale, tierRef.current);
+  tierRef.current = tier;
   const content = { w: width, h: height + 18 };
   const rect = () => containerRef.current?.getBoundingClientRect();
 
@@ -746,6 +809,7 @@ export function RackRow({
           activeRackId={activeRackId}
           selectedId={selectedId}
           selectedIds={selectedIds}
+          tier={tier}
           searchHits={searchHits}
           showRear={showRear}
           colorBy={colorBy}
