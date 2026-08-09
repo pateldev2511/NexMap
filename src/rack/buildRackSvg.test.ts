@@ -9,7 +9,7 @@ import {
   cableScheduleRows,
   cableScheduleCsv,
 } from './buildRackSvg';
-import type { Device, Rack, RackCable } from '@/model/types';
+import type { Device, Location, Rack, RackCable } from '@/model/types';
 
 const rack: Rack = { id: 'r1', name: 'MDF "Main"', ruHeight: 42 };
 
@@ -111,8 +111,48 @@ describe('cable schedule (E3)', () => {
   it('derives installer rows with device:port labels', () => {
     const rows = cableScheduleRows([sw, srv], [cable]);
     expect(rows).toEqual([
-      { color: '#22d3ee', label: 'uplink', from: 'core-sw:Gi1/0/1', to: 'esxi-01:vmnic0', lengthFt: '', vlan: '' },
+      {
+        color: '#22d3ee',
+        label: 'uplink',
+        from: 'core-sw:Gi1/0/1',
+        to: 'esxi-01:vmnic0',
+        // Empty with no location tree — a project without locations exports as before.
+        fromPath: '',
+        toPath: '',
+        lengthFt: '',
+        vlan: '',
+      },
     ]);
+  });
+
+  // W7 export parity: a printed schedule must carry the SAME qualified addresses the
+  // port inspector shows, or an installer cannot tell which rack in which room.
+  it('carries fully-qualified endpoint paths when a location tree exists', () => {
+    const locations: Location[] = [
+      { id: 'hq', name: 'HQ', kind: 'site', code: 'HQ' },
+      { id: 'r28', name: 'Room 28', kind: 'room', parentId: 'hq', code: '28' },
+    ];
+    const racks: Rack[] = [{ id: 'rk1', name: 'RK001', ruHeight: 42, locationId: 'r28' }];
+    const placed = (d: Device): Device => ({ ...d, rackId: 'rk1', ru: 1, ruSpan: 1 });
+    const rows = cableScheduleRows([placed(sw), placed(srv)], [cable], locations, racks);
+    expect(rows[0]!.fromPath).toBe('HQ/28/RK001/core-sw/Gi1/0/1');
+    expect(rows[0]!.toPath).toBe('HQ/28/RK001/esxi-01/vmnic0');
+    // The short labels are untouched — the SVG table's fixed columns still fit.
+    expect(rows[0]!.from).toBe('core-sw:Gi1/0/1');
+  });
+
+  it('adds the path columns to the CSV only when there is something to put in them', () => {
+    const locations: Location[] = [{ id: 'hq', name: 'HQ', kind: 'site', code: 'HQ' }];
+    const racks: Rack[] = [{ id: 'rk1', name: 'RK001', ruHeight: 42, locationId: 'hq' }];
+    const placed = (d: Device): Device => ({ ...d, rackId: 'rk1', ru: 1, ruSpan: 1 });
+    const csv = cableScheduleCsv([placed(sw), placed(srv)], [cable], locations, racks);
+    const lines = csv.split('\n');
+    expect(lines[0]).toBe('Color,Label,From,To,From path,To path,VLAN,Length (ft)');
+    expect(lines[1]).toContain('"HQ/RK001/core-sw/Gi1/0/1"');
+    // …and stays at the original six columns without locations.
+    expect(cableScheduleCsv([sw, srv], [cable]).split('\n')[0]).toBe(
+      'Color,Label,From,To,VLAN,Length (ft)',
+    );
   });
 
   it('falls back to ids when a name is missing, and CSV-quotes fields', () => {

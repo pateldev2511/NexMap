@@ -6,6 +6,71 @@ minor/patch semantics are not yet enforced.
 
 ## [Unreleased]
 
+The spatial model release: racks, devices and ports gained real addresses, and
+the physical cabling layer became traceable and comparable against the drawing.
+Plan: `docs/designs/spatial-model-and-tracing.md`. Suite 757 → 1070 unit tests.
+
+### Added
+
+- **Location hierarchy (schema v5).** A site → building → floor → room → row
+  tree. Racks and devices point at a location, so every port has a
+  fully-qualified address like `HQ/28/RK001/SW01/Gi1/0/13`. Paths are DERIVED on
+  every read, never stored, so renaming a room can't leave a stale copy behind.
+  Traversal is cycle-safe and depth-capped: a corrupt or hand-edited file
+  degrades to a marked partial path instead of hanging the UI.
+- **Locations navigator.** A tree in the left sidebar; clicking a row selects
+  everything placed there. Adding a child defaults to the next rung down.
+  Deleting a location that still holds anything is REFUSED with a count of what
+  is inside — never cascaded, so a subtree can't be lost to one click.
+- **Legacy site conversion.** One undoable step turns free-text `Rack.site`
+  values into real site locations, deduping case-insensitively. Never clobbers a
+  rack that already has a location, and never clears the original text.
+- **Multi-hop cable tracing.** Patch-panel front/rear ports can be wired through
+  to each other (`Interface.throughTo`), and a trace walks cable → pass-through →
+  cable to the far end. It always reports WHY it stopped — terminated, un-patched,
+  looped, ambiguous, or depth-capped — because a trace that looks complete when it
+  isn't is worse than no trace. Only patch panels are treated as pass-through.
+- **Port inspector scope.** A third inspector level below Rack and Device: name,
+  media, speed, access VLAN, face, a jump to the coupled port, and the full
+  physical path. Clicking any hop navigates to that port.
+- **Bulk pass-through pairing.** Wires a whole patch panel's faces together in
+  one undoable edit, mirroring front-only panels into new rear ports. Idempotent.
+- **Cabling panel.** Compares the DESIGNED topology against the PATCHED cabling
+  and reports the delta: documented-and-patched, designed-but-not-cabled, and
+  cabled-but-undocumented, plus cables that are part of no complete circuit. Only
+  links whose both endpoints are rack-mounted are in scope, so a diagram drawn
+  without racks reports nothing rather than flagging every link.
+- **Focus dimming.** Selecting anything demotes everything else in both
+  designers. A link stays lit when either endpoint is selected, since those links
+  are what make the selection meaningful.
+- **Zoom-tiered rack canvas.** The row view now draws rack outlines when zoomed
+  out, faceplates at mid zoom, and individual ports up close, with separate
+  enter/exit thresholds per boundary so the drawing can't flicker while you rest
+  at one. Port hit-testing is suppressed — not merely hidden — below the port
+  tier, so a device drag at low zoom can never become a stray cable.
+- **Inline port cabling in the row view.** Drag jack to jack across the whole row
+  without drilling into a single rack.
+
+### Changed
+
+- Exported cable schedules carry fully-qualified endpoint paths alongside the
+  short `device:port` labels, so a printed patch list matches the on-screen trace.
+  Generated title blocks include the rack's location.
+- New validations: location cycles (error), orphaned and duplicate-sibling
+  locations, odd containment order (info — real estate is messy, so it warns
+  rather than blocks), stale placement references, and four malformed
+  pass-through cases.
+
+### Fixed
+
+- `README.md` claimed first-class interfaces/ports were "not modeled yet" (they
+  shipped in schema v2) and that the contributor guide, issue templates and
+  security policy were "still missing" (all present). Both corrected.
+- `src/model/types.ts` now states that per-field `(schema vN)` comments record
+  the version a field was INTRODUCED in, not the current version — the newest
+  annotations said v3 while v4 had already shipped, which nearly caused a
+  colliding migration.
+
 ## [0.6.2] - 2026-07-05
 
 The pointer-native canvas release: both designers' input layers were rebuilt

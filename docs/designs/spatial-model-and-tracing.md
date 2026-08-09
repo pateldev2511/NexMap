@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: SHIPPED
 ---
 # CEO Plan: Spatial Model, Cable Tracing & Unified Rack Canvas
 Authored 2026-08-08 (user brief + Patchbox video teardown)
@@ -414,6 +414,31 @@ multi-page row PDF; auto-colour cables by speed/media; drag-between-racks in row
 view; rack-level asset record (responsible person / manufacturer / purchase
 date / operation start) as seen in the Patchbox rack inspector — worth doing,
 but it is a form, not architecture.
+
+## Outcome (recorded 2026-08-09)
+
+All seven workstreams landed on `feat/spatial-model-tracing`; suite 757 → 1070 unit
+tests, typecheck clean, lint unchanged at its 9 pre-existing warnings, build green
+at every step.
+
+Where the plan was WRONG, and what was done instead — recorded because the next
+reader deserves the corrections, not just the wins:
+
+| # | Plan said | Reality |
+| --- | --- | --- |
+| 1 | target schema v4 | `SCHEMA_VERSION` was ALREADY 4 (the type comments still said v3 because callouts bumped it afterwards). Shipped as v5. |
+| 2 | add a `trace-loop` validation | `rackHealth` already reports `rack-loop` with the STP explanation. Dropped as duplicate noise; the engine still returns `end: 'loop'`. |
+| 3 | (unstated) | `ambiguous` is unreachable through the store — `checkConnect` already refuses a second cable on an occupied port. It survives only for hand-edited files. |
+| 4 | (unstated) | Gestures cannot be tested through jsdom: no `PointerEvent`, so `e.button` arrives undefined and nothing arms. `pointer-native-canvas.md` already said so. The arbitration was extracted as pure functions and the real drag moved to a chromium spec. |
+| 5 | W6 retires the drill-in | Port work no longer needs it, but callouts / cable mini-controls / marquee / place-at-U are still single-rack only. The drill-in stays as an explicit toggle — a more honest SD-6 fallback than a hidden setting. |
+
+Also corrected along the way: two false claims in `README.md`, and a `types.ts`
+header now warning that per-field `(schema vN)` comments record the version a
+field was INTRODUCED in, not the current one.
+
+Open follow-ups are tracked in `TODOS.md` under this plan's heading. The largest
+is the drill-in retirement; the most urgent is running
+`e2e/rack-row-cable.spec.ts`, which is committed but has never executed.
 
 ## Constraints
 

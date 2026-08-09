@@ -58,7 +58,9 @@ behavior green and is undoable where it mutates the model.
       rubber-banding — all now capture the SVG and track correctly; pointer-capture
       calls are wrapped so a stray throw can't abort a gesture.
 - Deferred to a later polish pass: connector-label drag-reposition, save-in-place
-      UX clarity on Firefox/Safari, first-class `interfaces`/`assets`/`customFields`.
+      UX clarity on Firefox/Safari, `assets`/`customFields`. (First-class
+      `interfaces` shipped in Stage 3; ports gained `side`/`throughTo` and a
+      dedicated inspector scope in the spatial-model plan below.)
 
 ## Phase 9 — Isometric View Mode (v2 headline)  🚧 IN PROGRESS
 
@@ -111,6 +113,43 @@ canonical; isometric is a **render/edit mode**, toggled per view.
 camera, device tiles, editing, connectors, labels, export, and a coherent icon
 set) layered on the flat, self-validating model — plus draw.io-style pointer
 parity and an error boundary.
+
+## Spatial model, cable tracing & unified rack canvas (plan 2026-08-08)
+
+Plan: [`docs/designs/spatial-model-and-tracing.md`](docs/designs/spatial-model-and-tracing.md).
+Schema v5. Suite 757 → 1070 unit tests.
+
+- [x] **W1 Schema v5 scaffold** — `Location`/`LocationKind`, `locations[]`, optional
+      `Rack.locationId`/`Device.locationId`, `createLocation`, the v4→v5 migration
+      (additive; legacy `site` retained and NOT auto-converted), plus README/type-comment
+      truth fixes.
+- [x] **W2 Location tree** — cycle-safe depth-capped traversal, derived qualified paths,
+      store actions each one undo entry, five validations, and a navigator with a blocked
+      (never cascading) delete and an undoable legacy-site conversion.
+- [x] **W3 Cable tracing** — `Interface.side`/`throughTo`, `rack/cableTrace.ts` reporting
+      terminated/open/loop/ambiguous/depth-capped, bulk pass-through pairing, and four
+      coupling validations. `trace-loop` deliberately NOT added — `rackHealth` already
+      reports `rack-loop`.
+- [x] **W4 Port scope + focus dimming** — third inspector scope with the full traced path
+      and click-a-hop navigation; dimming in both designers.
+- [x] **W5 Physical/logical reconciler** — derived three-way delta + Cabling panel +
+      actionable rack insights. Kept a reconciler, NOT a merge, so `links[]` stays purely
+      logical (SD-11).
+- [x] **W6 Unified rack canvas** — zoom-tiered LOD with hysteresis; inline port cabling.
+      Drill-in retirement still open (see "Deferred from Rack Designer v3").
+- [x] **W7 Close-out** — export parity (qualified paths in the cable schedule, location in
+      generated title blocks), README/CHANGELOG/TODOS.
+
+Open follow-ups from this plan:
+- [ ] Retire the single-rack drill-in: port callouts, cable mini-controls, marquee and
+      place-at-U into the row canvas first.
+- [ ] Run `e2e/rack-row-cable.spec.ts` — committed but never executed (Playwright's
+      chromium was not installed in the authoring environment).
+- [ ] Associate `Inspector`'s `Field` labels with their controls: a pre-existing a11y gap
+      where no inspector field is programmatically labelled. Worked around with explicit
+      `aria-label`s on the new port fields only.
+- [ ] Consider widening trace pass-through beyond `patch-panel` (a `generic` splice, or a
+      per-device flag) — deliberately narrow for now, behind `isTransitive()`.
 
 ## Post-Phase-9 stretch
 
@@ -470,9 +509,13 @@ not commodity styling. Run /plan-design-review before implementing (UI scope).
 - [ ] **True rear-face port art** (P3). The rear column currently shows the same front
       faceplate; real rear layouts differ (PSUs, fan trays, rear ports). Add rear-specific
       art in `rackDeviceArt.ts` keyed on `side`. Effort: CC ~30m.
-- [ ] **Pan/zoom unified canvas + inline port editing** (P3). v3 keeps a focus drill-in for
-      port-level work; a future infinite pan/zoom canvas could place gear + cable inline with
-      no drill-in step (the rejected "unified canvas" CEO option). Needs viewport math.
+- [~] **Pan/zoom unified canvas + inline port editing** (P3). SUBSTANTIALLY DELIVERED
+      by `docs/designs/spatial-model-and-tracing.md` W6: the row canvas gained
+      zoom-tiered LOD (rack outlines → faceplates → ports, with hysteresis so the
+      drawing can't flicker at a boundary) and inline jack-to-jack cabling, so
+      port-level work no longer needs the drill-in. REMAINING before the drill-in can
+      be deleted: callouts, cable mini-controls, marquee, and place-at-U are still
+      single-rack only. The two views stay as an explicit toggle until then (SD-6).
 
 ## Deferred from rack-designer ship review (2026-06-10)
 - [x] **Validate rack-cable endpoints exist** ✅ (checkbox synced 2026-07-03 —

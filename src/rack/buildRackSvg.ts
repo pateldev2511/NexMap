@@ -7,7 +7,8 @@
  * buildPdfBlob(). The live editor shares only the LAYOUT math (rackLayout.ts), never
  * this markup. Every user string is run through escapeXml.
  */
-import type { Device, Rack, RackCable, TextObject } from '@/model/types';
+import type { Device, Location, Rack, RackCable, TextObject } from '@/model/types';
+import { portPath } from '@/model/location';
 import { escapeXml } from '@/io/export/buildSvg';
 import { calloutRowsOrPlaceholder, rowAnchor } from '@/model/callout';
 import { DEFAULT_LEADER, leaderDashArray, leaderGeometry, type LeaderRect } from '@/model/leader';
@@ -340,13 +341,33 @@ export interface CableScheduleRow {
   label: string;
   from: string;
   to: string;
+  /**
+   * Fully-qualified endpoint paths, e.g. "HQ/28/RK001/SW01/Gi1/0/13" (schema v5).
+   * Empty when no location tree exists. Kept SEPARATE from `from`/`to` on purpose:
+   * the exported SVG table has fixed column widths tuned for "SW01:Gi1/0/13", and a
+   * full path would overflow it. The CSV — which an installer actually works from —
+   * gets both.
+   */
+  fromPath: string;
+  toPath: string;
   lengthFt: string;
   /** Port VLAN(s): a single id when both ends agree, "a/b" when they differ, "" when unset. */
   vlan: string;
 }
 
-/** Derive the installer-facing patch list from drawn cables (E3). */
-export function cableScheduleRows(devices: Device[], cables: RackCable[]): CableScheduleRow[] {
+/**
+ * Derive the installer-facing patch list from drawn cables (E3).
+ *
+ * `locations`/`racks` are optional: supply them and each row also carries the
+ * fully-qualified endpoint path shown by the port inspector, so a printed schedule
+ * and the on-screen trace agree. Omit them and the output is exactly as before.
+ */
+export function cableScheduleRows(
+  devices: Device[],
+  cables: RackCable[],
+  locations: Location[] = [],
+  racks: Rack[] = [],
+): CableScheduleRow[] {
   const byId = new Map(devices.map((d) => [d.id, d]));
   const ifaceOf = (deviceId: string, ifaceId: string) =>
     byId.get(deviceId)?.interfaces?.find((i) => i.id === ifaceId);
@@ -362,24 +383,45 @@ export function cableScheduleRows(devices: Device[], cables: RackCable[]): Cable
     if (va != null && vb != null) return va === vb ? String(va) : `${va}/${vb}`;
     return String(va ?? vb);
   };
+  const qualified = (deviceId: string, ifaceId: string): string =>
+    locations.length > 0 ? portPath(locations, racks, devices, deviceId, ifaceId) : '';
   return cables.map((c) => ({
     color: c.color,
     label: c.label ?? '',
     from: endLabel(c.aEnd.deviceId, c.aEnd.ifaceId),
     to: endLabel(c.bEnd.deviceId, c.bEnd.ifaceId),
+    fromPath: qualified(c.aEnd.deviceId, c.aEnd.ifaceId),
+    toPath: qualified(c.bEnd.deviceId, c.bEnd.ifaceId),
     lengthFt: c.lengthFt != null ? String(c.lengthFt) : '',
     vlan: vlanCol(c),
   }));
 }
 
-/** CSV patch list. Reuses the simple quoting convention of the existing CSV exports. */
-export function cableScheduleCsv(devices: Device[], cables: RackCable[]): string {
+/**
+ * CSV patch list. Reuses the simple quoting convention of the existing CSV exports.
+ *
+ * The qualified-path columns are only emitted when a location tree exists, so a
+ * project without locations produces the identical CSV it always did.
+ */
+export function cableScheduleCsv(
+  devices: Device[],
+  cables: RackCable[],
+  locations: Location[] = [],
+  racks: Rack[] = [],
+): string {
   const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
-  const header = ['Color', 'Label', 'From', 'To', 'VLAN', 'Length (ft)'].join(',');
-  const rows = cableScheduleRows(devices, cables).map((r) =>
-    [q(r.color), q(r.label), q(r.from), q(r.to), q(r.vlan), q(r.lengthFt)].join(','),
+  const rows = cableScheduleRows(devices, cables, locations, racks);
+  const withPaths = rows.some((r) => r.fromPath !== '' || r.toPath !== '');
+  const header = withPaths
+    ? ['Color', 'Label', 'From', 'To', 'From path', 'To path', 'VLAN', 'Length (ft)']
+    : ['Color', 'Label', 'From', 'To', 'VLAN', 'Length (ft)'];
+  const body = rows.map((r) =>
+    (withPaths
+      ? [q(r.color), q(r.label), q(r.from), q(r.to), q(r.fromPath), q(r.toPath), q(r.vlan), q(r.lengthFt)]
+      : [q(r.color), q(r.label), q(r.from), q(r.to), q(r.vlan), q(r.lengthFt)]
+    ).join(','),
   );
-  return [header, ...rows].join('\n');
+  return [header.join(','), ...body].join('\n');
 }
 
 /* ── connection table (export-safe SVG) ──────────────────────────────────────── */

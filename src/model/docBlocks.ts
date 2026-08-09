@@ -12,6 +12,13 @@ export interface TitleBlockInput {
   rackName?: string;
   /** Pre-formatted date string (caller supplies — keeps this pure). */
   date: string;
+  /**
+   * Fully-qualified location path, e.g. "HQ/28" (schema v5). DERIVED by the caller
+   * from the location tree — a printed elevation is useless to an installer who
+   * cannot tell which room the rack is in. Omitted when the rack is unplaced, so a
+   * project with no locations prints exactly as it did before.
+   */
+  location?: string;
   deviceCount?: number;
   revision?: string;
 }
@@ -22,7 +29,9 @@ export function titleBlockBlocks(input: TitleBlockInput): CalloutBlock[] {
     { kind: 'heading', spans: [{ text: input.projectName || 'Untitled' }] },
   ];
   if (input.rackName) blocks.push({ kind: 'subheading', spans: [{ text: input.rackName }] });
-  const lines: string[] = [`Date: ${input.date}`];
+  const lines: string[] = [];
+  if (input.location) lines.push(`Location: ${input.location}`);
+  lines.push(`Date: ${input.date}`);
   if (input.deviceCount != null) {
     lines.push(`Devices: ${input.deviceCount}`);
   }

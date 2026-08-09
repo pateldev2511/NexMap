@@ -726,7 +726,7 @@ export function RackDesigner() {
   }
   function exportCsv() {
     if (!rack) return;
-    const csv = cableScheduleCsv(devices, cables);
+    const csv = cableScheduleCsv(devices, cables, s().locationsAll(), racks);
     downloadBlob(new Blob([csv], { type: 'text/csv' }), `${exportName()}-cables.csv`);
   }
   function exportLabels() {

@@ -63,9 +63,24 @@ NexMap already has the core of a usable local network designer:
   apartment) and Enterprise & data center (branch, three-tier campus, DMZ, data
   center rack, WAN hub-and-spoke, HA core, hybrid cloud, wireless campus).
 - **Network model:** typed devices, first-class interfaces/ports (name, media,
-  speed, access VLAN) that links can reference per endpoint, plus text notes,
-  shapes/zones, image/SVG underlays, VLANs, subnets, racks, layers, saved views,
-  and `.nexmap` documents.
+  speed, access VLAN, front/rear face) that links can reference per endpoint, plus
+  text notes, shapes/zones, image/SVG underlays, VLANs, subnets, racks, layers,
+  saved views, and `.nexmap` documents.
+- **Locations:** a site → building → floor → room → row tree, so every rack,
+  device, and port has a real address like `HQ/28/RK001/SW01/Gi1/0/13`. Paths are
+  derived, never stored, so a rename can't leave a stale copy behind. A tree
+  navigator selects everything placed at a location, and legacy free-text site
+  names convert in one undoable step.
+- **Cable tracing:** follow a circuit port by port through patch panels — front
+  jack to rear punchdown to the next hop — and see *why* a trace stopped
+  (terminated, un-patched, looped, ambiguous). Clicking a hop jumps to that port.
+- **Diagram vs reality:** a Cabling panel compares what you DESIGNED (`links`)
+  against what is actually PATCHED (`rackCables` plus pass-throughs) and reports
+  the delta — documented-and-patched, designed-but-not-cabled, and cabled-but-
+  undocumented. Only rack-mounted gear is in scope, so a diagram drawn without
+  racks stays quiet.
+- **Focus dimming:** selecting anything demotes everything else, in both
+  designers, so a dense diagram or a 42U cabinet reads at a glance.
 - **Validation:** duplicate IP/name, invalid IP/CIDR, missing link endpoints,
   overlapping subnets, VLAN range/duplicates, IP outside subnet, missing gateway,
   trunk/access mismatch, orphaned devices, and rack RU collisions/overflow.
@@ -100,13 +115,13 @@ These are the main reasons the project should still be treated as WIP:
 - File format/schema may still evolve before a stable `1.0`. The current on-disk
   version is schema v5; migrations are forward-only and a newer-than-supported
   file is refused rather than silently downgraded.
-- Devices and racks carry no spatial hierarchy yet — a `locations` collection
-  exists in schema v5, but the site/building/floor/room tree is not wired into
-  the UI, so `Rack.site` is still free text in practice.
 - Advanced routing is still basic; obstacle avoidance is future work.
-- Physical cabling is point-to-point only: there is no multi-hop cable tracing
-  through patch panels, and nothing reconciles `rackCables[]` against the logical
-  `links[]`.
+- The rack designer still has two views (row and single-rack). Port-level work no
+  longer needs the single-rack drill-in, but callouts, cable mini-controls,
+  marquee, and place-at-U remain single-rack only.
+- Cable tracing follows one unambiguous path. A port carrying two cables reports
+  the ambiguity rather than guessing, and only patch panels are treated as
+  pass-through.
 - Browser/E2E coverage is still lighter than the unit coverage.
 - Accessibility, mobile/tablet ergonomics, and large-diagram performance still
   need more real-user testing.
@@ -205,8 +220,8 @@ file when the project matters.
 The detailed roadmap lives in [`TODOS.md`](TODOS.md). Near-term open-source work
 should focus on:
 
-- a location hierarchy (site → building → floor → room → row) with fully-qualified
-  port paths, and multi-hop cable tracing through patch panels — planned in
+- retiring the single-rack drill-in once callouts, cable mini-controls, marquee
+  and place-at-U work in the unified row canvas — the remaining half of
   [`docs/designs/spatial-model-and-tracing.md`](docs/designs/spatial-model-and-tracing.md);
 - release notes and a published release process;
 - better connector routing (obstacle avoidance);

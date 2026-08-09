@@ -79,6 +79,7 @@ import { analyzeHealth, edgeDisjointPaths, type HealthReport } from '@/lib/healt
 import {
   deleteBlockers,
   isBlocked,
+  locationPath as locationPathOf,
   planSiteConversion,
   portPath,
   wouldCycle,
@@ -575,10 +576,16 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       const deviceCount = rackId
         ? [...model.devices.values()].filter((d) => d.rackId === rackId).length
         : model.devices.size;
+      // The rack's own placement, derived — never stored, so a rename upstream is
+      // reflected the next time the block is regenerated.
+      const locationPath = rack
+        ? locationPathOf([...model.locations.values()], rack.locationId)
+        : '';
       return titleBlockBlocks({
         projectName: model.project.name,
         rackName: rack?.name,
         date,
+        ...(locationPath ? { location: locationPath } : {}),
         deviceCount,
       });
     }

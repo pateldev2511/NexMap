@@ -203,7 +203,7 @@ describe('E24 perf gate — ~1k ports', () => {
     expect(elapsed).toBeLessThan(8000);
   });
 
-  it('the far tier is cheaper than the near tier at the same scene size', () => {
+  it('the far tier provably does less work than the near tier', () => {
     s().newProject(NOW);
     for (let r = 0; r < 20; r++) {
       const rack = s().addRack(`RK${r}`);
