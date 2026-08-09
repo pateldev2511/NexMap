@@ -16,6 +16,16 @@
 import type { Device } from '@/model/types';
 import { escapeXml } from '@/io/export/buildSvg';
 import { portLayout, PATCH_PORT_OPTS, type Rect, type PortRect } from './rackLayout';
+import {
+  applianceFaceZones,
+  clampLabel,
+  fanCircles,
+  labelMaxChars,
+  labelRoom,
+  patchPanelRows,
+  serverFaceZones,
+  switchFaceZones,
+} from './faceZones';
 import { panelKindFor } from './panelKind';
 import { isFullDepth, slotOf } from './rackModel';
 import { rackPhotoSkinParts } from './rackPhotoSkins';
@@ -160,29 +170,34 @@ export function devicePortLayout(device: Device, panel: Rect): PortRect[] {
   const kind = panelKindFor(device.type);
   if (ports.length === 0) return [];
   if (kind === 'server') {
-    const reservedRight = Math.min(panel.w * 0.42, 260);
-    return portLayout(panel, ports, {
-      gap: 3,
-      nameZone: Math.min(88, panel.w * 0.18),
-      rightInset: reservedRight,
-      maxJack: 12,
-    });
+    // Laid out INSIDE the reserved port band, so vents/fans/drives — which derive
+    // from the same zones — cannot collide with a jack. See faceZones.ts.
+    const z = serverFaceZones(panel);
+    return portLayout(z.ports, ports, { gap: 3, nameZone: 0, rightInset: 0, maxJack: 12 });
   }
   if (kind === 'ups' || kind === 'psu' || kind === 'cable-mgr' || kind === 'blank') return [];
   if (kind === 'patch') {
-    // Real 1U patch panels run ALL keystones in ONE row, banked in 6s. Shared
-    // opts with the photo skin so drawn ports and hit markers always align.
-    return portLayout(panel, ports, PATCH_PORT_OPTS);
+    // Rows derive from PHYSICAL DENSITY (24 keystones per 19" row), so a 24-port
+    // panel is 1×24 and a 48-port panel is 2×24 — one row of 48 would need ~744mm
+    // of a ~450mm panel and does not exist as hardware. Shared opts with the photo
+    // skin so drawn ports and hit markers always align.
+    return portLayout(panel, ports, {
+      ...PATCH_PORT_OPTS,
+      rows: patchPanelRows(ports.length),
+    });
   }
-  if (kind === 'switch') {
+  if (kind === 'switch' || kind === 'firewall') {
     // Switches DO stack 24/48 ports in two staggered rows (odd top / even
-    // bottom via the column-major fill), separated into banks of 6.
-    return portLayout(panel, ports, { groupEvery: 6, groupGap: 6 });
+    // bottom via the column-major fill), separated into banks of 6. Laid out in
+    // the reserved band so vents and SFP cages can't sit on a jack.
+    const z = switchFaceZones(panel);
+    return portLayout(z.ports, ports, { groupEvery: 6, groupGap: 6, nameZone: 0, rightInset: 0 });
   }
   if (kind === 'appliance') {
-    // Router / LB / WLC: a single sparse row of interface ports, room on the
-    // left for a console/mgmt port (drawn by the art, not an interface).
-    return portLayout(panel, ports, { rows: 1, nameZone: 120, maxJack: 13 });
+    // Router / LB / WLC: a sparse row of interface ports. Console/mgmt live in the
+    // aux zone and are drawn by the art, not modelled as interfaces.
+    const z = applianceFaceZones(panel);
+    return portLayout(z.ports, ports, { rows: 1, nameZone: 0, rightInset: 0, maxJack: 13 });
   }
   return portLayout(panel, ports);
 }
@@ -192,11 +207,15 @@ function labelParts(device: Device, p: Rect): string[] {
   const primary = vendorModel || device.name;
   const secondary = vendorModel ? device.name : '';
   const max = Math.max(10, Math.min(12, p.h * 0.23));
+  // Truncate to the reserved label margin. Previously unbounded, so on 1U gear the
+  // name was drawn straight through the vent block and the jack rows.
+  const room = labelRoom(panelKindFor(device.type), p);
+  const clip = (t: string, size: number) => clampLabel(t, labelMaxChars(room, size));
   const out = [
-    `<text data-facelabel="1" x="${n(p.x + 8)}" y="${n(p.y + Math.min(p.h / 2 + 4, 18))}" font-family="ui-monospace,Menlo,monospace" font-size="${n(max)}" font-weight="800" fill="${C.text}">${escapeXml(primary)}</text>`,
+    `<text data-facelabel="1" x="${n(p.x + 8)}" y="${n(p.y + Math.min(p.h / 2 + 4, 18))}" font-family="ui-monospace,Menlo,monospace" font-size="${n(max)}" font-weight="800" fill="${C.text}">${escapeXml(clip(primary, max))}</text>`,
   ];
   if (secondary && p.h >= 44) {
-    out.push(`<text x="${n(p.x + 8)}" y="${n(p.y + Math.min(p.h - 9, 34))}" font-family="ui-monospace,Menlo,monospace" font-size="8.5" fill="${C.textMut}">${escapeXml(secondary)}</text>`);
+    out.push(`<text x="${n(p.x + 8)}" y="${n(p.y + Math.min(p.h - 9, 34))}" font-family="ui-monospace,Menlo,monospace" font-size="8.5" fill="${C.textMut}">${escapeXml(clip(secondary, 8.5))}</text>`);
   }
   return out;
 }
@@ -205,7 +224,7 @@ function ventSlats(x: number, y: number, w: number, h: number, count: number): s
   const out: string[] = [];
   const gap = w / count;
   for (let i = 0; i < count; i++) {
-    out.push(`<rect x="${n(x + i * gap + gap * 0.28)}" y="${n(y)}" width="${n(Math.max(1.2, gap * 0.36))}" height="${n(h)}" rx="0.8" fill="${C.vent}"/>`);
+    out.push(`<rect data-fx="vent" x="${n(x + i * gap + gap * 0.28)}" y="${n(y)}" width="${n(Math.max(1.2, gap * 0.36))}" height="${n(h)}" rx="0.8" fill="${C.vent}"/>`);
   }
   return out;
 }
@@ -215,7 +234,7 @@ function fan(cx: number, cy: number, r: number): string {
     const rad = (a * Math.PI) / 180;
     return `<line x1="${n(cx - r * 0.82 * Math.cos(rad))}" y1="${n(cy - r * 0.82 * Math.sin(rad))}" x2="${n(cx + r * 0.82 * Math.cos(rad))}" y2="${n(cy + r * 0.82 * Math.sin(rad))}" stroke="#475569" stroke-width="0.8"/>`;
   }).join('');
-  return `<circle cx="${n(cx)}" cy="${n(cy)}" r="${n(r)}" fill="#0a0f16" stroke="#475569" stroke-width="1"/>${blades}<circle cx="${n(cx)}" cy="${n(cy)}" r="${n(r * 0.28)}" fill="#64748b"/>`;
+  return `<circle data-fx="fan" cx="${n(cx)}" cy="${n(cy)}" r="${n(r)}" fill="#0a0f16" stroke="#475569" stroke-width="1"/>${blades}<circle cx="${n(cx)}" cy="${n(cy)}" r="${n(r * 0.28)}" fill="#64748b"/>`;
 }
 
 /** A realistic RJ45 jack at (x,y,w,h): dark cavity + bottom-center clip notch + link/act LEDs. */
@@ -356,15 +375,17 @@ export function deviceFaceParts(
 
   if (kind === 'switch' || kind === 'firewall') {
     out.push(plate());
-    out.push(...ventSlats(panel.x + 62, panel.y + Math.max(4, panel.h * 0.22), 24, Math.max(8, panel.h * 0.5), 6));
+    const z = switchFaceZones(panel);
+    out.push(...ventSlats(z.vents.x, z.vents.y, z.vents.w, z.vents.h, 6));
     for (const j of devicePortLayout(device, panel)) out.push(rj45(j.x, j.y, j.w, j.h));
-    // SFP+ uplink cages on the right edge
-    const cageW = Math.min(44, panel.w * 0.09);
-    const cageX = panel.x + panel.w - cageW - 6;
+    // SFP+ uplink cages, inside their reserved zone. Previously drawn at
+    // `panel.w - cageW - 6` while ports ran to `panel.w - 10`, so the last two
+    // jack columns sat underneath them.
+    const cages = z.cages!;
     for (let i = 0; i < 2; i++) {
-      const cy = panel.y + panel.h / 2 - 9 + i * 11;
-      out.push(`<rect x="${n(cageX)}" y="${n(cy)}" width="${cageW}" height="9" rx="1.5" fill="${C.cage}" stroke="${C.cageBd}" stroke-width="0.75"/>`);
-      out.push(`<rect x="${n(cageX + 3)}" y="${n(cy + 2)}" width="${cageW - 6}" height="5" fill="${C.notch}"/>`);
+      const cy = cages.y + cages.h / 2 - 9 + i * 11;
+      out.push(`<rect data-fx="cage" x="${n(cages.x)}" y="${n(cy)}" width="${n(cages.w)}" height="9" rx="1.5" fill="${C.cage}" stroke="${C.cageBd}" stroke-width="0.75"/>`);
+      out.push(`<rect x="${n(cages.x + 3)}" y="${n(cy + 2)}" width="${n(cages.w - 6)}" height="5" fill="${C.notch}"/>`);
     }
     if (kind === 'firewall') {
       // a couple of zone ticks under the name
@@ -381,50 +402,59 @@ export function deviceFaceParts(
       : device.type === 'load-balancer' ? '#ef4444'
       : '#14b8a6'; // wireless-controller / access-point
     out.push(plate({ led: accent }));
+    const za = applianceFaceZones(panel);
     const cy = panel.y + panel.h / 2;
-    // Console + mgmt ports (left).
-    out.push(`<rect x="${n(panel.x + 62)}" y="${n(cy - 5)}" width="10" height="10" rx="1.5" fill="${C.cage}" stroke="#38bdf8" stroke-width="0.9"/>`);
-    out.push(`<rect x="${n(panel.x + 76)}" y="${n(cy - 5)}" width="10" height="10" rx="1.5" fill="${C.cage}" stroke="#f59e0b" stroke-width="0.9"/>`);
+    // Console + mgmt ports, inside the aux zone (never the port band).
+    out.push(`<rect x="${n(za.aux!.x)}" y="${n(cy - 5)}" width="10" height="10" rx="1.5" fill="${C.cage}" stroke="#38bdf8" stroke-width="0.9"/>`);
+    out.push(`<rect x="${n(za.aux!.x + 14)}" y="${n(cy - 5)}" width="10" height="10" rx="1.5" fill="${C.cage}" stroke="#f59e0b" stroke-width="0.9"/>`);
+    out.push(...ventSlats(za.vents.x, za.vents.y, za.vents.w, za.vents.h, 6));
     // Sparse data ports.
     for (const j of devicePortLayout(device, panel)) out.push(rj45(j.x, j.y, j.w, j.h));
     // Activity LED bar + accent stripe under the name.
     for (let i = 0; i < 5; i++) {
-      out.push(`<circle cx="${n(panel.x + 96 + i * 5)}" cy="${n(panel.y + 7)}" r="1.4" fill="${i < 3 ? 'url(#rkLedG)' : C.vent}"/>`);
+      out.push(`<circle cx="${n(za.aux!.x + i * 5)}" cy="${n(panel.y + 4.5)}" r="1.4" fill="${i < 3 ? 'url(#rkLedG)' : C.vent}"/>`);
     }
     out.push(`<rect x="${n(panel.x + 8)}" y="${n(panel.y + panel.h - 7)}" width="40" height="3" rx="1" fill="${accent}"/>`);
   } else if (kind === 'patch') {
     out.push(plate({ faceplate: 'url(#rkPatch)', led: '#3a4654' }));
     const jacks = devicePortLayout(device, panel);
+    const patchRows = patchPanelRows(jacks.length);
     jacks.forEach((j, i) => {
       out.push(`<rect x="${n(j.x)}" y="${n(j.y)}" width="${n(j.w)}" height="${n(j.h)}" rx="1" fill="#1b222b" stroke="#5b6573" stroke-width="0.7"/>`);
       out.push(`<rect x="${n(j.x + j.w / 2 - j.w * 0.17)}" y="${n(j.y + j.h - 2)}" width="${n(j.w * 0.34)}" height="2" fill="${C.notch}"/>`);
-      // number every port that has room
-      if (j.w >= 12) out.push(`<text x="${n(j.x + j.w / 2)}" y="${n(j.y - 1)}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="5" fill="${C.patchText}">${i + 1}</text>`);
+      // Number every port that has room. On a two-row panel the TOP row is numbered
+      // above and the BOTTOM row below — numbering both above would print row 2's
+      // labels on top of row 1's jacks (and is not how real panels are marked).
+      if (j.w >= 12) {
+        const isBottom = patchRows > 1 && i % patchRows === patchRows - 1;
+        const ty = isBottom ? j.y + j.h + 5 : j.y - 1;
+        out.push(`<text x="${n(j.x + j.w / 2)}" y="${n(ty)}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="5" fill="${C.patchText}">${i + 1}</text>`);
+      }
     });
   } else if (kind === 'server') {
     out.push(plate());
-    const tall = panel.h >= 52;
-    const driveCols = tall ? 8 : 6;
-    const driveRows = tall ? 2 : 1;
-    const driveAreaW = Math.min(panel.w * 0.36, tall ? 220 : 112);
-    const driveAreaX = panel.x + panel.w - driveAreaW - 11;
+    // Every element below is positioned from serverFaceZones, so none of them can
+    // land on a port. The old free-floating magic numbers put jacks on top of the
+    // vent slats at 1U and on top of the fans at 2U+ (measured: 405 collisions).
+    const z = serverFaceZones(panel);
+    const driveCols = z.tall ? 8 : 6;
+    const driveRows = z.tall ? 2 : 1;
     const driveGap = 3;
-    const bw = (driveAreaW - (driveCols - 1) * driveGap) / driveCols;
-    const bh = Math.max(12, (panel.h - 14 - (driveRows - 1) * driveGap) / driveRows);
+    const bw = (z.drives.w - (driveCols - 1) * driveGap) / driveCols;
+    const bh = Math.max(8, (z.drives.h - (driveRows - 1) * driveGap) / driveRows);
     for (let row = 0; row < driveRows; row++) {
       for (let col = 0; col < driveCols; col++) {
-        const bx = driveAreaX + col * (bw + driveGap);
-        const by = panel.y + 7 + row * (bh + driveGap);
-        out.push(`<rect x="${n(bx)}" y="${n(by)}" width="${n(bw)}" height="${n(bh)}" rx="2" fill="${C.drive}" stroke="${C.driveBd}" stroke-width="0.75"/>`);
-        out.push(`<rect x="${n(bx + 2.2)}" y="${n(by + 3)}" width="${n(Math.max(2, bw * 0.15))}" height="${n(bh - 6)}" rx="1" fill="${C.driveRail}"/>`);
+        const bx = z.drives.x + col * (bw + driveGap);
+        const by = z.drives.y + row * (bh + driveGap);
+        out.push(`<rect data-fx="drive" x="${n(bx)}" y="${n(by)}" width="${n(bw)}" height="${n(bh)}" rx="2" fill="${C.drive}" stroke="${C.driveBd}" stroke-width="0.75"/>`);
+        out.push(`<rect x="${n(bx + 2.2)}" y="${n(by + 3)}" width="${n(Math.max(2, bw * 0.15))}" height="${n(Math.max(2, bh - 6))}" rx="1" fill="${C.driveRail}"/>`);
         out.push(`<circle cx="${n(bx + bw - 3.5)}" cy="${n(by + bh - 3.5)}" r="1.35" fill="url(#rkLedG)"/>`);
       }
     }
-    const fanR = Math.min(tall ? 15 : 8, panel.h * 0.28);
-    const fanY = panel.y + panel.h / 2;
-    const fanStart = driveAreaX - (tall ? 78 : 58);
-    for (let i = 0; i < (tall ? 2 : 1); i++) out.push(fan(fanStart + i * (fanR * 2 + 8), fanY, fanR));
-    out.push(...ventSlats(panel.x + 78, panel.y + panel.h - 12, Math.max(22, driveAreaX - panel.x - 170), 7, 12));
+    for (const f of fanCircles(z.fans, z.tall ? 2 : 1)) out.push(fan(f.cx, f.cy, f.r));
+    // A 1U chassis has no room for a slat block outside the port band, and a real
+    // 1U server's perforation belongs to the bezel anyway — so `vents` is null there.
+    if (z.vents) out.push(...ventSlats(z.vents.x, z.vents.y, z.vents.w, z.vents.h, 12));
     for (const j of devicePortLayout(device, panel)) out.push(rj45(j.x, j.y, j.w, j.h));
     // status LCD + recessed power button near the label, similar to enterprise servers.
     out.push(`<rect x="${n(panel.x + 8)}" y="${n(panel.y + panel.h - 11)}" width="34" height="8" rx="1.5" fill="url(#rkLCD)" stroke="#2dd4bf" stroke-width="0.6"/>`);

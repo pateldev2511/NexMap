@@ -25,9 +25,18 @@ describe('devicePortLayout — faceplate realism (W2)', () => {
     expect(rowCount(rects)).toBe(1);
   });
 
-  it('a 48-port patch panel is still one row (dense keystone strip)', () => {
+  // BEHAVIOUR CHANGE (user decision, 2026-08-09): a 48-port panel is now TWO rows.
+  // One row of 48 keystones would need ~744mm across a ~450mm 19" panel — it does
+  // not exist as hardware, and drawing it produced ~6.4mm jacks, under half a real
+  // keystone. Density is now derived: 24 per row.
+  it('a 24-port patch panel is one row', () => {
+    expect(rowCount(devicePortLayout(withPorts('patch-panel', 24), panel))).toBe(1);
+  });
+
+  it('a 48-port patch panel is TWO rows of 24, matching real hardware', () => {
     const rects = devicePortLayout(withPorts('patch-panel', 48), panel);
-    expect(rowCount(rects)).toBe(1);
+    expect(rowCount(rects)).toBe(2);
+    expect(rects).toHaveLength(48);
   });
 
   it('patch keystones are banked in 6s (a wider gap every 6th port)', () => {

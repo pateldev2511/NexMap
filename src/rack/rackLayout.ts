@@ -126,7 +126,11 @@ export interface PortRect extends Rect {
  */
 export const PATCH_PORT_OPTS = {
   rows: 1,
-  nameZone: 28,
+  // A real panel has a brand margin at the left edge; 28px was too narrow for the
+  // printed label, so the name ran under ports 1-2. Widening it costs ~2px of jack
+  // pitch on a 24-port panel and buys an honest margin. Shared by the photo skin AND
+  // devicePortLayout, so drawn ports and hit markers move together.
+  nameZone: 104,
   rightInset: 12,
   gap: 2,
   groupEvery: 6,

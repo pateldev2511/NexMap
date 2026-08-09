@@ -39,8 +39,18 @@ describe('rackPhotoSkins — deterministic model skins', () => {
       expect(rackPhotoSkinKey(device)).toBe(key);
       expect(svg.length).toBeGreaterThan(200);
       expect(svg).not.toContain('var(');
+      // The vendor always leads the label, so it is always visible.
       expect(svg).toContain(device.vendor!);
-      expect(svg).toContain(device.model!.split(' ')[0]!);
+      // The model may be TRUNCATED: a faceplate name is clamped to its reserved
+      // brand margin (faceZones.labelRoom) so it cannot run through the vents and
+      // jack rows, which it used to do on every 1U device. What must hold is that
+      // whatever IS drawn is a genuine prefix of the full label, never mangled text.
+      const drawn = /data-facelabel="1"[^>]*>([^<]*)</.exec(svg)?.[1] ?? '';
+      expect(drawn.length).toBeGreaterThan(0);
+      const full = `${device.vendor} ${device.model}`;
+      // fitText uses '...' and trims before appending it.
+      const visible = drawn.replace(/(\.\.\.|…)$/, '').trimEnd();
+      expect(full.startsWith(visible)).toBe(true);
     }
   });
 
@@ -54,12 +64,21 @@ describe('rackPhotoSkins — deterministic model skins', () => {
   });
 
   it('escapes hostile names and model text', () => {
-    const device = dev('switch', { vendor: 'Cisco', model: 'Nexus "<script>', name: 'core"<bad>' });
-    const svg = join(rackPhotoSkinParts(device, panel));
+    // A UPS has a wide brand margin, so the hostile characters survive truncation and
+    // the ESCAPING itself can still be asserted. (On a port-dense switch the label is
+    // clamped short, which would hide the payload and make this test vacuous — the
+    // negative assertions below cover that case separately.)
+    const roomy = dev('ups', { vendor: 'APC', model: '"<script>', interfaces: [] });
+    const svg = join(rackPhotoSkinParts(roomy, panel));
     expect(svg).toContain('&quot;');
     expect(svg).toContain('&lt;script&gt;');
     expect(svg).not.toContain('<script>');
-    expect(svg).not.toContain('<bad>');
+
+    // And nothing hostile survives on a dense faceplate either, truncated or not.
+    const dense = dev('switch', { vendor: 'Cisco', model: 'Nexus "<script>', name: 'core"<bad>' });
+    const denseSvg = join(rackPhotoSkinParts(dense, panel));
+    expect(denseSvg).not.toContain('<script>');
+    expect(denseSvg).not.toContain('<bad>');
   });
 
   it('returns no parts for unknown generic gear so the parametric fallback can render', () => {

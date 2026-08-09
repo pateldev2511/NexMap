@@ -192,15 +192,13 @@ describe('E24 perf gate — ~1k ports', () => {
       .reduce((n, d) => n + (d.interfaces?.length ?? 0), 0);
     expect(portCount).toBe(960);
 
-    const t0 = performance.now();
     const { container } = renderRow();
     zoom(container, 'in', 1); // force the near tier, drawing every jack
-    const elapsed = performance.now() - t0;
 
+    // No wall-clock ceiling: it flaked under full-suite CPU contention, and a real
+    // blow-up (quadratic layout, re-render storm) would hit vitest's own timeout
+    // rather than merely being slow. What is asserted is that all 960 jacks render.
     expect(jacks(container)).toBe(960);
-    // Generous ceiling — this is a blow-up detector (a quadratic or a re-render
-    // storm), not a benchmark. jsdom is far slower than a real browser.
-    expect(elapsed).toBeLessThan(8000);
   });
 
   it('the far tier provably does less work than the near tier', () => {
@@ -213,17 +211,18 @@ describe('E24 perf gate — ~1k ports', () => {
     }
     const { container } = renderRow();
 
-    const tNear0 = performance.now();
     zoom(container, 'in', 1);
-    const near = performance.now() - tNear0;
-
-    const tFar0 = performance.now();
+    const nearJacks = jacks(container);
     zoom(container, 'out', 6); // well below midExit
-    const far = performance.now() - tFar0;
 
+    // Asserted STRUCTURALLY, not by comparing two wall-clock timings. Comparing
+    // elapsed times between two renders inverts under CPU contention — it flaked
+    // exactly that way during a full-suite run. What matters is that the far tier
+    // emits strictly less: no jacks, no generated faceplate art, one cheap block per
+    // device.
+    expect(nearJacks).toBe(960);
     expect(jacks(container)).toBe(0);
     expect(hasFaceplateArt(container)).toBe(false);
-    // The point of the far tier: skipping art + jacks must actually pay off.
-    expect(far).toBeLessThanOrEqual(near);
+    expect(farBlocks(container)).toBe(20);
   });
 });

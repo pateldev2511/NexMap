@@ -16,6 +16,11 @@ import {
   stripPrefix,
 } from '@/lib/ipcidr';
 import { couplingProblems } from './coupling';
+import {
+  PORTS_PER_PANEL_ROW,
+  patchPanelOverCapacity,
+  patchPanelRows,
+} from './panelDensity';
 import { cycleIds, duplicateSiblingTokens, oddNesting, orphanRefs } from './location';
 import type {
   Device,
@@ -45,6 +50,30 @@ export interface ValidationInput {
   subnets?: Subnet[];
   racks?: Rack[];
   locations?: Location[];
+}
+
+/**
+ * Rule: a patch panel carrying more keystones than its height can physically hold —
+ * 48 ports in 1U needs ~744mm across a ~450mm panel. Reported, never auto-corrected:
+ * existing projects contain exactly this, and resizing someone's rack gear without
+ * being asked would move everything mounted below it.
+ */
+function checkPatchPanelCapacity(devices: Device[]): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  for (const d of devices) {
+    if (d.type !== 'patch-panel') continue;
+    const ports = d.interfaces?.length ?? 0;
+    const span = d.ruSpan ?? 1;
+    if (!patchPanelOverCapacity(ports, span)) continue;
+    issues.push({
+      id: issueId(),
+      severity: 'warn',
+      code: 'patch-panel-over-capacity',
+      message: `${d.name} has ${ports} ports in ${span}U. A 19" panel fits ${PORTS_PER_PANEL_ROW} keystones per row, so this needs ${patchPanelRows(ports)}U — give it more height or split it.`,
+      objectIds: [d.id],
+    });
+  }
+  return issues;
 }
 
 /**
@@ -596,6 +625,7 @@ export function validate({
     ...checkLocationNesting(locations),
     ...checkLocationRefs(devices, racks, locations),
     ...checkPortCoupling(devices),
+    ...checkPatchPanelCapacity(devices),
     ...checkDuplicateIps(devices),
     ...checkInvalidIpCidr(devices),
     ...checkMissingEndpoints(devices, links),

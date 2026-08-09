@@ -61,7 +61,9 @@ export const RACK_DEVICE_PRESETS: readonly RackDevicePreset[] = [
   { key: 'cable-mgr', label: 'Cable manager', type: 'generic', span: 1, ports: 0, portName: eth, watts: 0, weightKg: 1, group: 'Power & cable' },
   // Other
   { key: 'patch-24', label: 'Patch panel (24)', type: 'patch-panel', span: 1, ports: 24, portName: keystone, watts: 0, weightKg: 1.5, group: 'Other' },
-  { key: 'patch-48', label: 'Patch panel (48)', type: 'patch-panel', span: 1, ports: 48, portName: keystone, watts: 0, weightKg: 2.5, group: 'Other' },
+  // 2U: 48 keystones need two 24-wide rows; one row of 48 would need ~744mm across
+  // a ~450mm 19" panel and does not exist as hardware.
+  { key: 'patch-48', label: 'Patch panel (48, 2U)', type: 'patch-panel', span: 2, ports: 48, portName: keystone, watts: 0, weightKg: 2.5, group: 'Other' },
   { key: 'fiber', label: 'Fiber patch (24)', type: 'patch-panel', span: 1, ports: 24, portName: (i) => `LC${i + 1}`, watts: 0, weightKg: 1.5, group: 'Other' },
   { key: 'blank', label: 'Blanking panel', type: 'generic', span: 1, ports: 0, portName: eth, watts: 0, weightKg: 0.3, group: 'Other' },
   { key: 'shelf', label: 'Shelf (2U)', type: 'generic', span: 2, ports: 0, portName: eth, watts: 0, weightKg: 3, group: 'Other' },

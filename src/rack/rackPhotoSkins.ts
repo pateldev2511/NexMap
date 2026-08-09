@@ -9,6 +9,16 @@
 import type { Device } from '@/model/types';
 import { escapeXml } from '@/io/export/buildSvg';
 import { portLayout, PATCH_PORT_OPTS, type Rect } from './rackLayout';
+import { panelKindFor, type PanelKind } from './panelKind';
+import {
+  applianceFaceZones,
+  fanCircles,
+  labelMaxChars,
+  labelRoom,
+  patchPanelRows,
+  serverFaceZones,
+  switchFaceZones,
+} from './faceZones';
 import { isRasterPhotoDataUri } from './rackPhotoUpload';
 
 type RackFace = 'front' | 'rear';
@@ -80,7 +90,43 @@ function dataUriForFace(device: Device, face: RackFace): string | null {
   return null;
 }
 
+/**
+ * The panel kind each skin family is artwork FOR.
+ *
+ * A skin is chosen by vendor/model keywords, which say nothing about what the
+ * device IS. Without this gate a device typed `switch` whose model reads
+ * "PowerEdge R650" got the SERVER skin — drive bays, fans and all — and a Cisco
+ * ISR typed `router` got a switch faceplate with SFP cages. A measured audit found
+ * 405 port/furniture collisions, most of them caused by exactly this mismatch.
+ *
+ * The keyword decides WHICH skin; this decides WHETHER any skin applies at all.
+ */
+const FAMILY_KIND: Record<SkinFamily, PanelKind> = {
+  'server-dell': 'server',
+  'server-hpe': 'server',
+  'storage-array': 'server',
+  'switch-cisco': 'switch',
+  'switch-arista': 'switch',
+  'switch-juniper': 'switch',
+  'firewall-fortinet': 'firewall',
+  'firewall-palo': 'firewall',
+  'load-balancer': 'appliance',
+  'patch-panduit': 'patch',
+  'ups-apc': 'ups',
+};
+
+/**
+ * The keyword-matched family, or null when it does not suit the device's TYPE —
+ * in which case the caller falls back to the generic parametric art, which is
+ * already correct for every kind.
+ */
 function familyFor(device: Device): SkinFamily | null {
+  const candidate = familyByKeyword(device);
+  if (!candidate) return null;
+  return FAMILY_KIND[candidate] === panelKindFor(device.type) ? candidate : null;
+}
+
+function familyByKeyword(device: Device): SkinFamily | null {
   const h = haystack(device);
   if (hasAny(h, ['panduit', 'patch panel', 'cat6 patch', 'fiber patch'])) return 'patch-panduit';
   if (hasAny(h, ['apc', 'smart ups', 'srt 2200'])) return 'ups-apc';
@@ -159,7 +205,9 @@ function rackPhotoSkinPartsRaw(device: Device, panel: Rect, face: RackFace = 'fr
 function base(device: Device, p: Rect, opts: { fill?: string; stroke?: string; labelFill?: string; darkText?: boolean } = {}): string[] {
   const label = modelLabel(device);
   const fontSize = Math.max(8, Math.min(11.5, p.h * 0.22));
-  const maxChars = Math.max(8, Math.floor((p.w - 18) / (fontSize * 0.58)));
+  // Capped against the reserved LABEL MARGIN, not the whole panel: the old
+  // `(p.w - 18)` let a model name run through the vents and jacks on 1U gear.
+  const maxChars = labelMaxChars(labelRoom(panelKindFor(device.type), p), fontSize);
   const textFill = opts.darkText ? '#172033' : (opts.labelFill ?? '#eef5ff');
   return [
     `<rect x="${n(p.x)}" y="${n(p.y + 1.2)}" width="${n(p.w)}" height="${n(p.h)}" rx="3" fill="#020617" fill-opacity="0.34" filter="url(#rkDeviceShadow)"/>`,
@@ -170,7 +218,16 @@ function base(device: Device, p: Rect, opts: { fill?: string; stroke?: string; l
   ];
 }
 
+/**
+ * Vendor badge, drawn BELOW the name.
+ *
+ * Suppressed on a chassis under 2U: the badge sits at `p.h - 15` while the name
+ * baseline is at `p.h / 2 + 4`, so on a 1U panel the two occupy the same 8px and the
+ * badge struck through the model name. The name already leads with the vendor there,
+ * so the badge is redundant rather than missing information.
+ */
 function brandBadge(device: Device, p: Rect, fill: string, accent: string, darkText = false): string {
+  if (p.h < 44) return '';
   const brand = safeText(device.vendor || device.model?.split(/\s+/)[0] || device.name);
   const w = Math.min(58, Math.max(34, brand.length * 5.4 + 11));
   const x = p.x + 8;
@@ -194,7 +251,7 @@ function rj45(x: number, y: number, w: number, h: number): string {
 function vent(x: number, y: number, w: number, h: number, count: number, color = '#121820'): string[] {
   const out: string[] = [];
   const step = w / Math.max(1, count);
-  for (let i = 0; i < count; i++) out.push(`<rect x="${n(x + i * step + step * 0.24)}" y="${n(y)}" width="${n(Math.max(1, step * 0.42))}" height="${n(h)}" rx="0.7" fill="${color}"/>`);
+  for (let i = 0; i < count; i++) out.push(`<rect data-fx="vent" x="${n(x + i * step + step * 0.24)}" y="${n(y)}" width="${n(Math.max(1, step * 0.42))}" height="${n(h)}" rx="0.7" fill="${color}"/>`);
   return out;
 }
 
@@ -203,12 +260,12 @@ function fan(cx: number, cy: number, r: number): string {
     const rad = (deg * Math.PI) / 180;
     return `<line x1="${n(cx - r * 0.82 * Math.cos(rad))}" y1="${n(cy - r * 0.82 * Math.sin(rad))}" x2="${n(cx + r * 0.82 * Math.cos(rad))}" y2="${n(cy + r * 0.82 * Math.sin(rad))}" stroke="#66758a" stroke-width="0.8"/>`;
   }).join('');
-  return `<circle cx="${n(cx)}" cy="${n(cy)}" r="${n(r)}" fill="#080d13" stroke="#566274" stroke-width="0.9"/>${spokes}<circle cx="${n(cx)}" cy="${n(cy)}" r="${n(r * 0.28)}" fill="#718096"/>`;
+  return `<circle data-fx="fan" cx="${n(cx)}" cy="${n(cy)}" r="${n(r)}" fill="#080d13" stroke="#566274" stroke-width="0.9"/>${spokes}<circle cx="${n(cx)}" cy="${n(cy)}" r="${n(r * 0.28)}" fill="#718096"/>`;
 }
 
 function sfpCage(x: number, y: number, w: number, h: number, fill = '#18212c'): string {
   return (
-    `<rect x="${n(x)}" y="${n(y)}" width="${n(w)}" height="${n(h)}" rx="1.4" fill="${fill}" stroke="#64748b" stroke-width="0.65"/>` +
+    `<rect data-fx="cage" x="${n(x)}" y="${n(y)}" width="${n(w)}" height="${n(h)}" rx="1.4" fill="${fill}" stroke="#64748b" stroke-width="0.65"/>` +
     `<rect x="${n(x + 3)}" y="${n(y + h * 0.35)}" width="${n(w - 6)}" height="${n(Math.max(2, h * 0.3))}" fill="#030712"/>`
   );
 }
@@ -217,12 +274,17 @@ function devicePorts(device: Device): { id: string; name: string }[] {
   return (device.interfaces ?? []).map((i) => ({ id: i.id, name: i.name }));
 }
 
+/**
+ * Ports for a server/storage skin. Uses the SAME reserved band as the generic art
+ * (faceZones.ts) — two copies of this geometry is precisely how jacks ended up
+ * drawn on top of vents and fans in the first place.
+ */
 function serverPortLayout(device: Device, p: Rect) {
-  const reservedRight = Math.min(p.w * 0.42, 260);
-  return portLayout(p, devicePorts(device), {
+  const z = serverFaceZones(p);
+  return portLayout(z.ports, devicePorts(device), {
     gap: 3,
-    nameZone: Math.min(88, p.w * 0.18),
-    rightInset: reservedRight,
+    nameZone: 0,
+    rightInset: 0,
     maxJack: 12,
   });
 }
@@ -241,30 +303,25 @@ function customPhotoParts(device: Device, p: Rect, href: string): string[] {
 
 function serverFrontSkin(device: Device, p: Rect, opts: { brandFill: string; accent: string; bezel: string }): string[] {
   const out = base(device, p, { fill: 'url(#rkMetal)' });
-  const tall = p.h >= 52;
-  const driveCols = tall ? 8 : 6;
-  const driveRows = tall ? 2 : 1;
-  const driveAreaW = Math.min(p.w * 0.42, tall ? 250 : 138);
-  const driveAreaX = p.x + p.w - driveAreaW - 9;
+  // All furniture derives from serverFaceZones so it cannot enter the port band.
+  const z = serverFaceZones(p);
+  const driveCols = z.tall ? 8 : 6;
+  const driveRows = z.tall ? 2 : 1;
   const driveGap = 3;
-  const bayH = Math.max(12, (p.h - 14 - (driveRows - 1) * driveGap) / driveRows);
-  const bayW = (driveAreaW - (driveCols - 1) * driveGap) / driveCols;
-  out.push(`<rect x="${n(driveAreaX - 4)}" y="${n(p.y + 5)}" width="${n(driveAreaW + 8)}" height="${n(p.h - 10)}" rx="3" fill="${opts.bezel}" stroke="#334155" stroke-width="0.8"/>`);
+  const bayH = Math.max(8, (z.drives.h - (driveRows - 1) * driveGap) / driveRows);
+  const bayW = (z.drives.w - (driveCols - 1) * driveGap) / driveCols;
+  out.push(`<rect x="${n(z.drives.x - 4)}" y="${n(z.drives.y)}" width="${n(z.drives.w + 8)}" height="${n(z.drives.h)}" rx="3" fill="${opts.bezel}" stroke="#334155" stroke-width="0.8"/>`);
   for (let r = 0; r < driveRows; r++) {
     for (let c = 0; c < driveCols; c++) {
-      const x = driveAreaX + c * (bayW + driveGap);
-      const y = p.y + 7 + r * (bayH + driveGap);
-      out.push(`<rect x="${n(x)}" y="${n(y)}" width="${n(bayW)}" height="${n(bayH)}" rx="1.8" fill="#111923" stroke="#465466" stroke-width="0.65"/>`);
-      out.push(`<rect x="${n(x + 2)}" y="${n(y + 2)}" width="${n(Math.max(2, bayW * 0.17))}" height="${n(bayH - 4)}" rx="1" fill="#2f3b49"/>`);
+      const x = z.drives.x + c * (bayW + driveGap);
+      const y = z.drives.y + 2 + r * (bayH + driveGap);
+      out.push(`<rect data-fx="drive" x="${n(x)}" y="${n(y)}" width="${n(bayW)}" height="${n(bayH)}" rx="1.8" fill="#111923" stroke="#465466" stroke-width="0.65"/>`);
+      out.push(`<rect x="${n(x + 2)}" y="${n(y + 2)}" width="${n(Math.max(2, bayW * 0.17))}" height="${n(Math.max(2, bayH - 4))}" rx="1" fill="#2f3b49"/>`);
       out.push(`<circle cx="${n(x + bayW - 3.4)}" cy="${n(y + bayH - 3.4)}" r="1.25" fill="url(#rkLedG)"/>`);
     }
   }
-  const fanR = Math.min(tall ? 14 : 8, p.h * 0.26);
-  const fanY = p.y + p.h / 2;
-  const fanCount = tall ? 3 : 2;
-  const fanStart = Math.max(p.x + 102, driveAreaX - fanCount * (fanR * 2 + 6));
-  for (let i = 0; i < fanCount; i++) out.push(fan(fanStart + i * (fanR * 2 + 6), fanY, fanR));
-  out.push(...vent(p.x + 72, p.y + Math.max(6, p.h - 13), Math.max(18, driveAreaX - p.x - 190), 7, 14));
+  for (const f of fanCircles(z.fans, z.tall ? 3 : 2)) out.push(fan(f.cx, f.cy, f.r));
+  if (z.vents) out.push(...vent(z.vents.x, z.vents.y, z.vents.w, z.vents.h, 14));
   for (const j of serverPortLayout(device, p)) out.push(rj45(j.x, j.y, j.w, j.h));
   out.push(`<rect x="${n(p.x + 8)}" y="${n(p.y + p.h - 12)}" width="34" height="8" rx="1.6" fill="url(#rkLCD)" stroke="${opts.accent}" stroke-width="0.65"/>`);
   out.push(`<circle cx="${n(p.x + 52)}" cy="${n(p.y + p.h - 8)}" r="3.2" fill="#0f172a" stroke="${opts.accent}" stroke-width="0.75"/>`);
@@ -276,8 +333,11 @@ function storageFrontSkin(device: Device, p: Rect): string[] {
   const out = base(device, p, { fill: '#18202b' });
   const cols = p.h >= 76 ? 12 : 10;
   const rows = p.h >= 76 ? 3 : 2;
-  const areaX = p.x + 68;
-  const areaW = p.w - 86;
+  // A storage array is mostly bays, so they claim everything right of the reserved
+  // port band — but never the band itself.
+  const zs = serverFaceZones(p);
+  const areaX = zs.fans.x;
+  const areaW = zs.drives.x + zs.drives.w - zs.fans.x;
   const gap = 2.5;
   const bayW = (areaW - (cols - 1) * gap) / cols;
   const bayH = Math.max(10, (p.h - 16 - (rows - 1) * gap) / rows);
@@ -286,7 +346,7 @@ function storageFrontSkin(device: Device, p: Rect): string[] {
     for (let c = 0; c < cols; c++) {
       const x = areaX + c * (bayW + gap);
       const y = p.y + 8 + r * (bayH + gap);
-      out.push(`<rect x="${n(x)}" y="${n(y)}" width="${n(bayW)}" height="${n(bayH)}" rx="1.5" fill="#1f2937" stroke="#4b5563" stroke-width="0.55"/>`);
+      out.push(`<rect data-fx="drive" x="${n(x)}" y="${n(y)}" width="${n(bayW)}" height="${n(bayH)}" rx="1.5" fill="#1f2937" stroke="#4b5563" stroke-width="0.55"/>`);
       out.push(`<path d="M ${n(x + 2)} ${n(y + bayH - 3)} h ${n(Math.max(2, bayW - 4))}" stroke="#64748b" stroke-width="0.7"/>`);
       out.push(`<circle cx="${n(x + bayW - 3)}" cy="${n(y + 3)}" r="1.1" fill="url(#rkLedG)"/>`);
     }
@@ -298,13 +358,21 @@ function storageFrontSkin(device: Device, p: Rect): string[] {
 
 function switchFrontSkin(device: Device, p: Rect, opts: { faceplate: string; brandFill: string; accent: string; uplinkColor: string }): string[] {
   const out = base(device, p, { fill: opts.faceplate, stroke: '#1f2937' });
-  const ports = portLayout(p, devicePorts(device));
-  const ventW = Math.min(36, p.w * 0.08);
-  out.push(...vent(p.x + 68, p.y + Math.max(4, p.h * 0.24), ventW, Math.max(8, p.h * 0.5), 8, '#263241'));
+  // Same reserved zones as the generic art (faceZones.ts), so the two paths cannot
+  // drift and no jack can land under a vent slat or an SFP cage.
+  const z = switchFaceZones(p);
+  const ports = portLayout(z.ports, devicePorts(device), {
+    groupEvery: 6,
+    groupGap: 6,
+    nameZone: 0,
+    rightInset: 0,
+  });
+  out.push(...vent(z.vents.x, z.vents.y, z.vents.w, z.vents.h, 8, '#263241'));
   for (const j of ports) out.push(rj45(j.x, j.y, j.w, j.h));
-  const cageW = Math.min(44, p.w * 0.09);
-  const cageX = p.x + p.w - cageW - 7;
-  for (let i = 0; i < 2; i++) out.push(sfpCage(cageX, p.y + p.h / 2 - 10 + i * 11, cageW, 9, opts.uplinkColor));
+  const cages = z.cages!;
+  for (let i = 0; i < 2; i++) {
+    out.push(sfpCage(cages.x, cages.y + cages.h / 2 - 10 + i * 11, cages.w, 9, opts.uplinkColor));
+  }
   out.push(`<path d="M ${n(p.x + 7)} ${n(p.y + p.h - 3.2)} h ${n(Math.min(86, p.w * 0.22))}" stroke="${opts.accent}" stroke-width="2.2"/>`);
   out.push(brandBadge(device, p, opts.brandFill, opts.accent));
   return out;
@@ -312,10 +380,17 @@ function switchFrontSkin(device: Device, p: Rect, opts: { faceplate: string; bra
 
 function applianceFrontSkin(device: Device, p: Rect, opts: { faceplate: string; brandFill: string; accent: string; darkText?: boolean }): string[] {
   const out = base(device, p, { fill: opts.faceplate, darkText: opts.darkText });
-  const ports = portLayout(p, devicePorts(device));
-  const usablePorts = ports.slice(0, Math.max(ports.length, 8));
-  for (const j of usablePorts) out.push(rj45(j.x, j.y, j.w, j.h));
-  out.push(...vent(p.x + p.w - Math.min(80, p.w * 0.18), p.y + Math.max(5, p.h * 0.22), Math.min(46, p.w * 0.12), Math.max(8, p.h * 0.5), 7, opts.darkText ? '#94a3b8' : '#111827'));
+  // The old layout drew vents at `p.w - 80` while ports ran to `p.w - 10`, so the
+  // right-hand jacks sat on the slats. Both now derive from the reserved zones.
+  const z = applianceFaceZones(p);
+  const ports = portLayout(z.ports, devicePorts(device), {
+    rows: 1,
+    nameZone: 0,
+    rightInset: 0,
+    maxJack: 13,
+  });
+  for (const j of ports) out.push(rj45(j.x, j.y, j.w, j.h));
+  out.push(...vent(z.vents.x, z.vents.y, z.vents.w, z.vents.h, 7, opts.darkText ? '#94a3b8' : '#111827'));
   out.push(`<rect x="${n(p.x + 8)}" y="${n(p.y + p.h - 7)}" width="24" height="3" rx="1" fill="${opts.accent}"/>`);
   out.push(`<rect x="${n(p.x + 36)}" y="${n(p.y + p.h - 7)}" width="24" height="3" rx="1" fill="${opts.darkText ? '#2563eb' : '#38bdf8'}"/>`);
   out.push(brandBadge(device, p, opts.brandFill, opts.accent, opts.darkText));
@@ -327,12 +402,22 @@ function patchPanelSkin(device: Device, p: Rect): string[] {
   // ONE row banked in 6s (W2a) — and the SAME opts devicePortLayout uses, so the
   // drawn ports sit exactly where the cable hit markers do. A 24-port panel is
   // 1×24, never 2×12.
-  const ports = portLayout(p, devicePorts(device), PATCH_PORT_OPTS);
+  const ports = portLayout(p, devicePorts(device), {
+    ...PATCH_PORT_OPTS,
+    rows: patchPanelRows(devicePorts(device).length),
+  });
   out.push(`<rect x="${n(p.x + 5)}" y="${n(p.y + 5)}" width="${n(p.w - 10)}" height="${n(p.h - 10)}" rx="2" fill="#dbe3ec" fill-opacity="0.34" stroke="#64748b" stroke-width="0.55"/>`);
   ports.forEach((j, i) => {
     out.push(`<rect x="${n(j.x)}" y="${n(j.y)}" width="${n(j.w)}" height="${n(j.h)}" rx="1" fill="#111827" stroke="#6b7280" stroke-width="0.65"/>`);
     out.push(`<rect x="${n(j.x + j.w / 2 - j.w * 0.17)}" y="${n(j.y + j.h - 2)}" width="${n(j.w * 0.34)}" height="2" fill="#030712"/>`);
-    if (j.w >= 12) out.push(`<text x="${n(j.x + j.w / 2)}" y="${n(j.y - 1)}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="5" fill="#334155">${i + 1}</text>`);
+    // Top row numbered above, bottom row below — as real two-row panels are marked,
+    // and so row 2's numbers don't print on row 1's jacks.
+    if (j.w >= 12) {
+      const rows = patchPanelRows(ports.length);
+      const isBottom = rows > 1 && i % rows === rows - 1;
+      const ty = isBottom ? j.y + j.h + 5 : j.y - 1;
+      out.push(`<text x="${n(j.x + j.w / 2)}" y="${n(ty)}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="5" fill="#334155">${i + 1}</text>`);
+    }
   });
   out.push(brandBadge(device, p, '#f8fafc', '#64748b', true));
   return out;
