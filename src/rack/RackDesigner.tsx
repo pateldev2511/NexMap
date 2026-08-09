@@ -42,7 +42,7 @@ import { hasBulkChanges } from './rackBulk';
 import { validatePhoto, isRasterPhotoDataUri, PHOTO_ACCEPT } from './rackPhotoUpload';
 import { deviceFaceParts, RACK_ART_DEFS } from './rackDeviceArt';
 import { estimateCableLengthFt } from './cableLength';
-import type { Device, TextObject } from '@/model/types';
+import type { Device, RackCableEnd, TextObject } from '@/model/types';
 import styles from './RackDesigner.module.css';
 
 /** Human-readable reason for a rejected drop. */
@@ -633,6 +633,22 @@ export function RackDesigner() {
   }
 
   /** Move a rack one slot left/right in the row by swapping `order` with its neighbor. */
+  /**
+   * Connect two physical ports. ONE implementation shared by the focused editor and
+   * the unified row canvas (W6b) — duplicating it would let the two views drift on
+   * colour cycling, length estimation, or what gets selected afterwards.
+   */
+  function connectPorts(a: RackCableEnd, b: RackCableEnd) {
+    // Cycle the default palette so consecutive drag-cables aren't all one color.
+    const color = CABLE_COLORS[cables.length % CABLE_COLORS.length]!;
+    const aDevice = devices.find((d) => d.id === a.deviceId);
+    const bDevice = devices.find((d) => d.id === b.deviceId);
+    const lengthFt =
+      aDevice && bDevice ? estimateCableLengthFt(aDevice, bDevice, racks) ?? undefined : undefined;
+    const id = s().connectRackCable(a, b, color, undefined, lengthFt);
+    if (id) setSelCable(id);
+  }
+
   function reorderRack(id: string, dir: -1 | 1) {
     const i = racks.findIndex((r) => r.id === id);
     const j = i + dir;
@@ -1047,6 +1063,7 @@ export function RackDesigner() {
                 else s().select([]);
               }}
               onReorder={reorderRack}
+              onConnectPorts={connectPorts}
               onMoveDeviceToRack={(deviceId, targetRackId, wantedU) => moveDeviceToRack(deviceId, targetRackId, false, wantedU)}
               gestureApi={rackGestureApi}
             />
@@ -1138,15 +1155,7 @@ export function RackDesigner() {
                 onDropPreset={dropPreset}
                 onSelect={selectDevice}
                 onMarquee={(ids, additive) => s().select(ids, additive)}
-                onConnectPorts={(a, b) => {
-                  // Cycle the default palette so consecutive drag-cables aren't all one color.
-                  const color = CABLE_COLORS[cables.length % CABLE_COLORS.length]!;
-                  const aDevice = devices.find((d) => d.id === a.deviceId);
-                  const bDevice = devices.find((d) => d.id === b.deviceId);
-                  const lengthFt = aDevice && bDevice ? estimateCableLengthFt(aDevice, bDevice, racks) ?? undefined : undefined;
-                  const id = s().connectRackCable(a, b, color, undefined, lengthFt);
-                  if (id) setSelCable(id);
-                }}
+                onConnectPorts={connectPorts}
                 onSelectCable={setSelCable}
                 onMoveTo={moveTo}
               />

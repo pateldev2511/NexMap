@@ -63,12 +63,20 @@ import { rackBudget, occupiedUnits } from './rackBudget';
 import { deviceFaceParts, deviceOppositeFaceParts, devicePortLayout, rackShellParts, RACK_ART_DEFS } from './rackDeviceArt';
 import { deviceColorBy, type ColorByMode } from './rackColorBy';
 import { cablePath } from './cablePath';
+import { rowPortTargets, groupPortsByDevice, resolvePress, resolveDrop } from './rowPorts';
+import { portCenter, type PortTarget } from './portHit';
 import styles from './RackDesigner.module.css';
 
 export interface RackRowProps {
   racks: Rack[];
   devices: Device[];
   cables: RackCable[];
+  /**
+   * Connect two physical ports (W6b). Absent → port cabling is disabled entirely
+   * and a press on a jack falls through to device-move, which is what keeps the
+   * row view usable in contexts that do not own the cable model (tests, exports).
+   */
+  onConnectPorts?: (a: PortTarget, b: PortTarget) => void;
   activeRackId?: string;
   selectedId: string | null;
   selectedIds?: Set<string>;
@@ -89,6 +97,8 @@ const FACE_GAP = 22;
 
 type PanData = { tx: number; ty: number; faceRackId: string | null; button: number };
 type MoveData = { deviceId: string; slot: Slot; name: string; fromRackId: string; additive: boolean };
+/** Port-to-port cable drag (W6b). Only the source is fixed; the target is resolved on drop. */
+type CableData = { source: PortTarget };
 type DropTarget = { rackId: string; colX: number; u: number; ok: boolean; reason: string | null };
 type DragState = { deviceId: string; span: number; name: string; target: DropTarget | null };
 type Col = { rack: Rack; frontX: number; rearX: number; size: ReturnType<typeof cabinetSize> };
@@ -101,7 +111,7 @@ type Col = { rack: Rack; frontX: number; rearX: number; size: ReturnType<typeof 
  */
 const RowScene = memo(function RowScene({
   cols, devices, cables, activeRackId, selectedId, selectedIds, searchHits, showRear, colorBy,
-  dragRackId, dimmedId, tier, onDevDown, onReorder,
+  dragRackId, dimmedId, tier, portsByDevice, onDevDown, onReorder,
 }: {
   cols: Col[];
   devices: Device[];
@@ -109,6 +119,11 @@ const RowScene = memo(function RowScene({
   activeRackId?: string;
   selectedId: string | null;
   selectedIds?: Set<string>;
+  /**
+   * Visible ports, grouped by device. Passed in rather than recomputed here so the
+   * drawn jacks and RackRow's hit targets are provably the same geometry.
+   */
+  portsByDevice: Map<string, PortTarget[]>;
   /**
    * Zoom tier (W6). A plain STRING, derived by RackRow from the viewport scale.
    * Passing the raw scale would break this memo and re-render the whole scene on
@@ -267,7 +282,7 @@ const RowScene = memo(function RowScene({
               {/* Near tier only: individual jacks. Below this a jack is ~2px, so
                   drawing it would imply an aim you cannot actually achieve (E20). */}
               {showsPorts(tier) &&
-                devicePortLayout(d, panel).map((pr) => (
+                (portsByDevice.get(d.id) ?? []).map((pr) => (
                   <rect
                     key={`jack-${d.id}-${pr.ifaceId}`}
                     data-port={`${d.id}:${pr.ifaceId}`}
@@ -375,7 +390,7 @@ const RowScene = memo(function RowScene({
 
 export function RackRow({
   racks, devices, cables, activeRackId, selectedId, selectedIds, searchHits, showRear, colorBy,
-  onFocusRack, onSelect, onReorder, onMoveDeviceToRack, gestureApi,
+  onFocusRack, onSelect, onReorder, onMoveDeviceToRack, onConnectPorts, gestureApi,
 }: RackRowProps) {
   const [dragRackId, setDragRackId] = useState<string | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -416,6 +431,25 @@ export function RackRow({
   const tierRef = useRef<LodTier>(initialLodTier(IDENTITY.scale));
   const tier = lodTier(vp.scale, tierRef.current);
   tierRef.current = tier;
+
+  /**
+   * Every visible port, in row-SVG space. ONE array feeds both the drawn jacks
+   * (via RowScene) and hit-testing (below) — drawing from one computation and
+   * hit-testing from another is the desync that puts a cable on the wrong port.
+   */
+  const portTargets = useMemo(
+    () => rowPortTargets(cols, devices, showRear),
+    [cols, devices, showRear],
+  );
+  // Read through refs inside the STABLE onDevDown: closing over these directly
+  // would churn its identity on every zoom tier change and defeat RowScene's memo.
+  const portsByDevice = useMemo(() => groupPortsByDevice(portTargets), [portTargets]);
+  const portTargetsRef = useRef(portTargets);
+  portTargetsRef.current = portTargets;
+  const onConnectPortsRef = useRef(onConnectPorts);
+  onConnectPortsRef.current = onConnectPorts;
+  /** Live cable rubber-band head, in row-SVG space. Null when not dragging one. */
+  const [cablePt, setCablePt] = useState<{ x: number; y: number } | null>(null);
   const content = { w: width, h: height + 18 };
   const rect = () => containerRef.current?.getBoundingClientRect();
 
@@ -522,7 +556,9 @@ export function RackRow({
         }
         break;
       case 'update':
-        if (ef.gesture === 'pan') {
+        if (ef.gesture === 'cable') {
+          setCablePt(svgPoint(ef.x, ef.y));
+        } else if (ef.gesture === 'pan') {
           const prev = panPrev.current;
           panPrev.current = { x: ef.x, y: ef.y };
           setVp((v) => panBy(v, ef.x - prev.x, ef.y - prev.y));
@@ -576,6 +612,14 @@ export function RackRow({
           setDrag(null);
           setDragRackId(null);
           if (t) onMoveDeviceToRack?.(d.deviceId, t.rackId, t.u);
+        } else if (ef.gesture === 'cable') {
+          const src = (ef.data as CableData).source;
+          const p = svgPoint(ef.x, ef.y);
+          setCablePt(null);
+          // `resolveDrop` (unit-tested) returns null for a drop on nothing or back
+          // on the source — a changed mind, not a rejected-looking error.
+          const target = resolveDrop(src, portTargetsRef.current, p.x, p.y);
+          if (target) onConnectPortsRef.current?.(src, target);
         }
         break;
       case 'cancel':
@@ -583,6 +627,11 @@ export function RackRow({
           dragRef.current = null;
           setDrag(null);
           setDragRackId(null);
+        } else if (ef.gesture === 'cable') {
+          // E21/E22: Escape, a lost pointer (pointercancel), or a window blur all
+          // land here. Clearing the rubber-band is the WHOLE undo — no cable was
+          // ever created, so there is no partial commit to unwind.
+          setCablePt(null);
         }
         break;
       case 'click':
@@ -648,6 +697,31 @@ export function RackRow({
     if (machine.current.phase !== 'idle') return; // container routes second pointers
     if (e.button !== 0) return; // middle/right bubble to the container pan
     e.stopPropagation();
+
+    // Arbiter priority: port > device, same order as the focused editor. The
+    // decision itself is the pure `resolvePress` (unit-tested) — this only dispatches.
+    const p = svgPoint(e.clientX, e.clientY);
+    const press = resolvePress({
+      tier: tierRef.current,
+      cablingEnabled: onConnectPortsRef.current != null,
+      ports: portTargetsRef.current,
+      x: p.x,
+      y: p.y,
+    });
+    if (press.kind === 'cable') {
+      dispatchRef.current({
+        type: 'arm',
+        gesture: 'cable',
+        data: { source: press.source } satisfies CableData,
+        swallowTrailingClick: true,
+        pointerId: e.pointerId,
+        pointerType: e.pointerType as PointerKind,
+        x: e.clientX,
+        y: e.clientY,
+      });
+      return;
+    }
+
     dispatchRef.current({
       type: 'arm',
       gesture: 'moveDev',
@@ -732,6 +806,46 @@ export function RackRow({
     setVp((v) => zoomTo(v, v.scale * k, r?.width ?? 800, r?.height ?? 600));
   };
 
+  /**
+   * Live cable rubber-band, plus a dot on every candidate port so it is obvious
+   * WHERE a cable may land. Only exists while a cable gesture is active, so it
+   * costs nothing the rest of the time.
+   */
+  const renderCableDrag = () => {
+    if (!cablePt) return null;
+    if (machine.current.gesture !== 'cable' || machine.current.phase !== 'active') return null;
+    const src = (machine.current.data as CableData | null)?.source;
+    if (!src) return null;
+    const from = portCenter(src);
+    return (
+      <g pointerEvents="none" data-testid="row-cable-drag">
+        {portTargets.map((pt) => {
+          const c = portCenter(pt);
+          return (
+            <circle
+              key={`cand-${pt.deviceId}-${pt.ifaceId}`}
+              cx={c.x}
+              cy={c.y}
+              r={2.5}
+              fill="var(--accent)"
+              opacity={0.5}
+            />
+          );
+        })}
+        <line
+          x1={from.x}
+          y1={from.y}
+          x2={cablePt.x}
+          y2={cablePt.y}
+          stroke="var(--accent)"
+          strokeWidth={2}
+          strokeDasharray="5 3"
+        />
+        <circle cx={from.x} cy={from.y} r={4} fill="none" stroke="var(--accent)" strokeWidth={2} />
+      </g>
+    );
+  };
+
   /** Live drop preview: the device's U-span outlined at the hovered bay. */
   const renderDropPreview = () => {
     const t = drag?.target;
@@ -810,6 +924,7 @@ export function RackRow({
           selectedId={selectedId}
           selectedIds={selectedIds}
           tier={tier}
+          portsByDevice={portsByDevice}
           searchHits={searchHits}
           showRear={showRear}
           colorBy={colorBy}
@@ -819,6 +934,7 @@ export function RackRow({
           onReorder={onReorder}
         />
         {renderDropPreview()}
+        {renderCableDrag()}
       </svg>
       <div className={styles.zoomControls} data-canvas-chrome data-demote="chrome">
         <button onClick={() => zoomStep(1 / 1.2)} aria-label="Zoom out" title="Zoom out">−</button>
