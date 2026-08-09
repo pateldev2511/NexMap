@@ -329,6 +329,7 @@ describe('empty and degenerate input', () => {
       backed: [],
       unbacked: [],
       undocumented: [],
+      power: [],
       outOfScope: 0,
       danglingCables: 0,
     });
@@ -348,5 +349,63 @@ describe('empty and degenerate input', () => {
     const first = reconcile([sw, a, b], [], cables);
     const second = reconcile([sw, a, b], [], cables);
     expect(JSON.stringify(first)).toBe(JSON.stringify(second));
+  });
+});
+
+describe('power feeds are held apart from data findings', () => {
+  /** A rack UPS with C13 outlets, as the library preset creates it. */
+  const ups = (id: string, outlets: number): Device =>
+    device(
+      id,
+      'ups',
+      Array.from({ length: outlets }, (_, i) => iface(`${id}o${i + 1}`)),
+      { ruSpan: 2 },
+    );
+
+  it('a UPS-to-server run is reported as POWER, not as undocumented cabling', () => {
+    // Power is not modelled in links[], so counting every feed as a discrepancy
+    // would bury the real findings.
+    const u = ups('ups1', 4);
+    const srv = device('srv', 'server', [iface('psu1')]);
+    const r = reconcile([u, srv], [], [cable(['ups1', 'ups1o1'], ['srv', 'psu1'])]);
+    expect(r.power).toHaveLength(1);
+    expect(r.undocumented).toEqual([]);
+    expect(isClean(r)).toBe(true);
+  });
+
+  it('a data run alongside a power run still reports the data one', () => {
+    const u = ups('ups1', 4);
+    const sw = device('sw', 'switch', [iface('p1')]);
+    const srv = device('srv', 'server', [iface('nic1'), iface('psu1')]);
+    const r = reconcile(
+      [u, sw, srv],
+      [],
+      [cable(['ups1', 'ups1o1'], ['srv', 'psu1']), cable(['sw', 'p1'], ['srv', 'nic1'])],
+    );
+    expect(r.power).toHaveLength(1);
+    expect(r.undocumented).toHaveLength(1);
+    expect(isClean(r)).toBe(false);
+  });
+
+  it('an explicit non-power media on a UPS port is treated as DATA', () => {
+    // A UPS network-management card is an ethernet port, not an outlet.
+    const u = device('ups1', 'ups', [iface('nmc', { kind: 'RJ45' })], { ruSpan: 2 });
+    const sw = device('sw', 'switch', [iface('p1')]);
+    const r = reconcile([u, sw], [], [cable(['ups1', 'nmc'], ['sw', 'p1'])]);
+    expect(r.power).toEqual([]);
+    expect(r.undocumented).toHaveLength(1);
+  });
+
+  it('a documented power link is still BACKED rather than double-counted', () => {
+    const u = ups('ups1', 2);
+    const srv = device('srv', 'server', [iface('psu1')]);
+    const r = reconcile(
+      [u, srv],
+      [link('l1', 'ups1', 'srv')],
+      [cable(['ups1', 'ups1o1'], ['srv', 'psu1'])],
+    );
+    expect(r.backed).toHaveLength(1);
+    expect(r.power).toEqual([]);
+    expect(r.undocumented).toEqual([]);
   });
 });

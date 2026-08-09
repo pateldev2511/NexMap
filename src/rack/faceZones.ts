@@ -219,6 +219,43 @@ export function applianceFaceZones(p: Rect): NetworkFaceZones {
   return { label, vents, ports, cages: null, aux };
 }
 
+// ─── Power gear (rack UPS) ───────────────────────────────────────────────────
+
+/**
+ * Zones for a rack UPS faceplate: label → battery module → status LCD → outlets.
+ *
+ * `outlets` is the reserved band, exactly like `ports` elsewhere: the outlets are
+ * real cablable ports now, so the battery block and LCD must derive AROUND them
+ * rather than being placed by independent magic numbers. The APC skin previously
+ * drew no outlets at all — just a vent block, which read as vents rather than as
+ * something you could plug into.
+ */
+export interface UpsFaceZones {
+  label: Rect;
+  battery: Rect;
+  lcd: Rect;
+  /** RESERVED for outlets. */
+  outlets: Rect;
+}
+
+export function upsFaceZones(p: Rect): UpsFaceZones {
+  const labelW = clamp(p.w * 0.24, 56, 150);
+  const outletsW = clamp(p.w * 0.40, 80, 300);
+  const right = p.x + p.w - RIGHT_PAD;
+  const outlets = { x: right - outletsW, y: p.y + 5, w: outletsW, h: Math.max(10, p.h - 10) };
+
+  const midX = p.x + labelW + 6;
+  const midW = Math.max(0, outlets.x - 8 - midX);
+  // Battery takes the larger share of what is left; the LCD sits between it and the
+  // outlets. Both collapse to zero width on a very narrow panel rather than overlap.
+  const batteryW = midW * 0.62;
+  const battery = { x: midX, y: p.y + 6, w: batteryW, h: Math.max(8, p.h - 12) };
+  const lcdW = Math.max(0, midW - batteryW - 8);
+  const lcd = { x: battery.x + batteryW + 8, y: p.y + 6, w: lcdW, h: Math.max(8, p.h - 12) };
+
+  return { label: { x: p.x, y: p.y, w: labelW, h: p.h }, battery, lcd, outlets };
+}
+
 // ─── Patch panels ────────────────────────────────────────────────────────────
 // Density lives in `model/panelDensity.ts` — it is a fact about hardware, not about
 // drawing, and `model/validate.ts` needs it (model must never import from rack/).
@@ -251,7 +288,10 @@ export function labelRoom(kind: string, p: Rect): number {
   // A patch panel's jack row starts right after its brand margin, so the label gets
   // exactly that margin (PATCH_PORT_OPTS.nameZone) and no more.
   if (kind === 'patch') return 94;
-  // UPS / PDU / fillers have no dense jack field crowding the label.
+  // A UPS label gets exactly its zone width, so the battery block / vents that
+  // follow cannot clip the model name.
+  if (kind === 'ups') return clamp(p.w * 0.24, 56, 150) - 10;
+  // Fillers have no dense field crowding the label.
   return Math.max(40, Math.min(p.w * 0.3, 150));
 }
 

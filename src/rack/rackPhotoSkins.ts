@@ -10,6 +10,8 @@ import type { Device } from '@/model/types';
 import { escapeXml } from '@/io/export/buildSvg';
 import { portLayout, PATCH_PORT_OPTS, type Rect } from './rackLayout';
 import { panelKindFor, type PanelKind } from './panelKind';
+import { devicePortLayout } from './portLayouts';
+import { outletGlyph } from './glyphs';
 import {
   applianceFaceZones,
   fanCircles,
@@ -18,6 +20,7 @@ import {
   patchPanelRows,
   serverFaceZones,
   switchFaceZones,
+  upsFaceZones,
 } from './faceZones';
 import { isRasterPhotoDataUri } from './rackPhotoUpload';
 
@@ -425,13 +428,26 @@ function patchPanelSkin(device: Device, p: Rect): string[] {
 
 function upsFrontSkin(device: Device, p: Rect): string[] {
   const out = base(device, p, { fill: '#171d25' });
+  // The vendor chip sits BELOW the model name, not over it. It used to be a
+  // full-height panel drawn from p.y + 7, which covered the name `base()` had just
+  // drawn at p.y + 18 — an APC UPS showed a red badge and an unreadable model.
   const badgeW = Math.min(72, p.w * 0.18);
-  out.push(`<rect x="${n(p.x + 9)}" y="${n(p.y + 7)}" width="${n(badgeW)}" height="${n(Math.max(16, p.h - 14))}" rx="2.5" fill="#111827" stroke="#475569" stroke-width="0.8"/>`);
-  out.push(`<rect x="${n(p.x + 15)}" y="${n(p.y + 13)}" width="${n(Math.max(26, badgeW - 12))}" height="10" rx="1.8" fill="#7f1d1d" stroke="#ef4444" stroke-width="0.6"/>`);
-  out.push(`<text x="${n(p.x + 15 + Math.max(26, badgeW - 12) / 2)}" y="${n(p.y + 20.6)}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="6.5" font-weight="900" fill="#fee2e2">${safeText(device.vendor || 'UPS')}</text>`);
-  const ventX = p.x + badgeW + 24;
-  out.push(...vent(ventX, p.y + 8, Math.max(30, p.w - badgeW - 46), Math.max(12, p.h - 16), 20, '#0b1118'));
-  out.push(`<circle cx="${n(p.x + p.w - 18)}" cy="${n(p.y + p.h / 2)}" r="${n(Math.min(8, p.h * 0.22))}" fill="#0f172a" stroke="#64748b" stroke-width="0.8"/>`);
+  const chipH = 10;
+  const chipY = Math.min(p.y + p.h - chipH - 5, p.y + p.h / 2 + 8);
+  out.push(`<rect x="${n(p.x + 9)}" y="${n(chipY - 3)}" width="${n(badgeW)}" height="${n(chipH + 6)}" rx="2.5" fill="#111827" stroke="#475569" stroke-width="0.8"/>`);
+  out.push(`<rect x="${n(p.x + 15)}" y="${n(chipY)}" width="${n(Math.max(26, badgeW - 12))}" height="${n(chipH)}" rx="1.8" fill="#7f1d1d" stroke="#ef4444" stroke-width="0.6"/>`);
+  out.push(`<text x="${n(p.x + 15 + Math.max(26, badgeW - 12) / 2)}" y="${n(chipY + 7.6)}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="6.5" font-weight="900" fill="#fee2e2">${safeText(device.vendor || 'UPS')}</text>`);
+  // This skin previously drew a full-width vent block and NO outlets, so an APC UPS
+  // read as a louvre panel and had nothing to plug into. Vents now stop where the
+  // reserved outlet band begins, and the outlets are drawn from the same layout
+  // hit-testing uses.
+  const zu = upsFaceZones(p);
+  // Vents occupy the battery zone — starting them at a fixed offset from the badge
+  // let them clip the tail of the model name.
+  const ventX = zu.battery.x;
+  const ventW = Math.max(18, zu.outlets.x - 10 - ventX);
+  out.push(...vent(ventX, p.y + 8, ventW, Math.max(12, p.h - 16), 20, '#0b1118'));
+  for (const o of devicePortLayout(device, p)) out.push(outletGlyph(o.x, o.y, o.w, o.h));
   return out;
 }
 

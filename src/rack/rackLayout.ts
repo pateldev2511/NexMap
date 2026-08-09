@@ -163,7 +163,12 @@ export function portLayout(
   const groupGap = opts.groupGap ?? 0;
 
   const areaX = panel.x + nameZone;
-  const areaW = Math.max(20, panel.w - nameZone - rightInset);
+  // The 20px floor must never exceed the panel itself: a 0U PDU strip is only 16px
+  // wide, and an unclamped floor pushed its outlets 1.5px outside the chassis.
+  const areaW = Math.max(
+    Math.min(20, Math.max(4, panel.w - 2)),
+    panel.w - nameZone - rightInset,
+  );
   const areaY = panel.y + 4;
   const areaH = Math.max(8, panel.h - 8);
 

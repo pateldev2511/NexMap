@@ -13,6 +13,7 @@
  */
 import type { Device, RackCable, ValidationIssue } from '@/model/types';
 import { cutVerticesAndBridges } from '@/lib/health';
+import { isPowerDataMismatch, isPowerPort } from '@/model/powerPorts';
 
 export interface CablingReport {
   issues: ValidationIssue[];
@@ -133,6 +134,15 @@ export function analyzeCabling(devices: Device[], cables: RackCable[]): CablingR
     const ib = ifaceOf(c.bEnd.deviceId, c.bEnd.ifaceId);
     if (ia?.speed && ib?.speed && ia.speed !== ib.speed) {
       push('rack-speed-mismatch', `Speed mismatch: ${nameOf(c.aEnd.deviceId)}:${ia.name} is ${ia.speed} but ${nameOf(c.bEnd.deviceId)}:${ib.name} is ${ib.speed} — the link negotiates down.`, [c.id]);
+    }
+    // Power/data mismatch: a mains outlet cabled to a data jack is physically
+    // impossible and is nearly always a mis-drag onto a neighbouring port. Lives here
+    // rather than in model/validate.ts because it needs the CABLES, and the physical
+    // layer is deliberately kept out of logical validation.
+    if (a && b && ia && ib && isPowerDataMismatch({ device: a, iface: ia }, { device: b, iface: ib })) {
+      const powerSide = isPowerPort(a, ia) ? `${nameOf(c.aEnd.deviceId)}:${ia.name}` : `${nameOf(c.bEnd.deviceId)}:${ib.name}`;
+      const dataSide = isPowerPort(a, ia) ? `${nameOf(c.bEnd.deviceId)}:${ib.name}` : `${nameOf(c.aEnd.deviceId)}:${ia.name}`;
+      push('rack-power-data-mismatch', `${powerSide} is a power outlet but ${dataSide} is a data port — a mains lead cannot land on a data jack.`, [c.id]);
     }
     if (ia?.kind && ib?.kind && ia.kind.toLowerCase() !== ib.kind.toLowerCase()) {
       push('rack-media-mismatch', `Media mismatch: ${nameOf(c.aEnd.deviceId)}:${ia.name} is ${ia.kind} but ${nameOf(c.bEnd.deviceId)}:${ib.name} is ${ib.kind}.`, [c.id]);

@@ -123,9 +123,11 @@ function CablingPanel({ reconciliation }: { reconciliation: Reconciliation }) {
   const focus = useProjectStore((s) => s.focusObject);
   const selectPort = useProjectStore((s) => s.selectPort);
   const store = useProjectStore.getState;
-  const { backed, unbacked, undocumented, outOfScope, danglingCables } = reconciliation;
+  const { backed, unbacked, undocumented, power, outOfScope, danglingCables } =
+    reconciliation;
 
-  const nothingInScope = backed.length + unbacked.length === 0 && undocumented.length === 0;
+  const nothingInScope =
+    backed.length + unbacked.length === 0 && undocumented.length === 0 && power.length === 0;
   if (nothingInScope) {
     return (
       <div className={styles.empty}>
@@ -158,6 +160,11 @@ function CablingPanel({ reconciliation }: { reconciliation: Reconciliation }) {
         <span>
           <strong>{undocumented.length}</strong> cabled, not documented
         </span>
+        {power.length > 0 && (
+          <span title="End-to-end power feeds from a UPS or PDU outlet. Not a discrepancy — power is not drawn in the logical topology.">
+            <strong>{power.length}</strong> power {power.length === 1 ? 'feed' : 'feeds'}
+          </span>
+        )}
         {danglingCables > 0 && (
           <span title="Cables that are not part of any complete end-to-end path">
             <strong>{danglingCables}</strong> going nowhere

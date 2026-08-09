@@ -47,6 +47,7 @@ import {
   type TraceResult,
 } from '@/rack/cableTrace';
 import { reconcile, type Reconciliation } from '@/rack/reconcile';
+import { DEFAULT_OUTLET_MEDIA, isPowerDevice } from '@/model/powerPorts';
 import { proposePowerBalance } from '@/rack/rackPower';
 import { pickBulkPatch } from '@/rack/rackBulk';
 import { rackFieldsFromPreset, rackPresetById, DEFAULT_RACK_PRESET } from '@/rack/rackTypes';
@@ -2375,7 +2376,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           if (!p) continue;
           const catalog = td.catalogId ? catalogById(td.catalogId) : undefined;
           const interfaces = p.ports > 0
-            ? Array.from({ length: p.ports }, (_, i) => createInterface(p.portName(i)))
+            ? Array.from({ length: p.ports }, (_, i) =>
+                createInterface(p.portName(i), isPowerDevice(p.type) ? { kind: DEFAULT_OUTLET_MEDIA } : {}),
+              )
             : [];
           const dev = createDevice(p.type, -9999, -9999, firstLayerId(), {
             ...(td.name ? { name: td.name } : {}),

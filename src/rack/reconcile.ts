@@ -17,6 +17,7 @@
  * unmounted device simply has no physical layer to disagree with.
  */
 import { isTransitive, traceFrom } from './cableTrace';
+import { isPowerPort } from '@/model/powerPorts';
 import type { Device, Link, PortRef, RackCable } from '@/model/types';
 
 /** An end-to-end physical path between two ENDPOINT ports (panels are intermediate). */
@@ -49,8 +50,19 @@ export interface Reconciliation {
   backed: BackedLink[];
   /** Designed but not patched. */
   unbacked: UnbackedLink[];
-  /** Patched but not designed. */
+  /**
+   * Patched but not designed. POWER feeds are deliberately excluded — see `power`.
+   */
   undocumented: Circuit[];
+  /**
+   * End-to-end POWER feeds: a run with a UPS/PDU outlet at either end.
+   *
+   * Held separately because power is NOT part of the logical topology — nobody draws
+   * mains in a network diagram — so counting every feed as "cabled, not documented"
+   * would bury the real findings under noise. Surfaced positively instead: a traced
+   * power feed is good news, not a discrepancy.
+   */
+  power: Circuit[];
   /** Links skipped because both endpoints are not rack-mounted (see SCOPE RULE). */
   outOfScope: number;
   /**
@@ -181,14 +193,27 @@ export function reconcile(
     }
   }
 
-  const undocumented = circuits.filter((_, i) => !consumed.has(i));
+  // Split the unmatched circuits: power feeds are expected to have no logical
+  // counterpart, data runs are genuine findings.
+  const unmatched = circuits.filter((_, i) => !consumed.has(i));
+  const isPower = (c: Circuit): boolean =>
+    endIsPower(byId, c.a) || endIsPower(byId, c.b);
+  const power = unmatched.filter(isPower);
+  const undocumented = unmatched.filter((c) => !isPower(c));
 
   // Cables that no complete circuit traverses.
   const usedCables = new Set<string>();
   for (const c of circuits) for (const id of c.cableIds) usedCables.add(id);
   const danglingCables = cables.filter((c) => !usedCables.has(c.id)).length;
 
-  return { backed, unbacked, undocumented, outOfScope, danglingCables };
+  return { backed, unbacked, undocumented, power, outOfScope, danglingCables };
+}
+
+/** Whether a circuit end lands on a UPS/PDU outlet. */
+function endIsPower(byId: Map<string, Device>, e: PortRef): boolean {
+  const d = byId.get(e.deviceId);
+  const iface = d?.interfaces?.find((i) => i.id === e.ifaceId);
+  return d != null && iface != null && isPowerPort(d, iface);
 }
 
 /** True when there is nothing to report — used to keep the panel quiet by default. */

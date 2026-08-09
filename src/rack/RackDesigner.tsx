@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import { createInterface, defaultDeviceName } from '@/model/schema';
+import { DEFAULT_OUTLET_MEDIA, isPowerDevice } from '@/model/powerPorts';
 import { rasterize, downloadBlob } from '@/io/export/raster';
 import { buildPdfBlob } from '@/io/export/pdf';
 import { RackCanvas, type RejectInfo, type RackGestureApi } from './RackCanvas';
@@ -420,7 +421,9 @@ export function RackDesigner() {
     const name = `${base} ${n}`;
     const id = s().addDeviceAt(preset.type, -9999, -9999);
     const ifaces = preset.ports > 0
-      ? Array.from({ length: preset.ports }, (_, i) => createInterface(preset.portName(i)))
+      ? Array.from({ length: preset.ports }, (_, i) =>
+          createInterface(preset.portName(i), isPowerDevice(preset.type) ? { kind: DEFAULT_OUTLET_MEDIA } : {}),
+        )
       : [];
     s().updateDevice(
       id,

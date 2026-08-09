@@ -15,7 +15,7 @@
  */
 import type { Device } from '@/model/types';
 import { escapeXml } from '@/io/export/buildSvg';
-import { portLayout, PATCH_PORT_OPTS, type Rect, type PortRect } from './rackLayout';
+import { type Rect } from './rackLayout';
 import {
   applianceFaceZones,
   clampLabel,
@@ -25,10 +25,16 @@ import {
   patchPanelRows,
   serverFaceZones,
   switchFaceZones,
+  upsFaceZones,
 } from './faceZones';
 import { panelKindFor } from './panelKind';
 import { isFullDepth, slotOf } from './rackModel';
 import { rackPhotoSkinParts } from './rackPhotoSkins';
+import { devicePortLayout } from './portLayouts';
+import { outletGlyph } from './glyphs';
+
+// Re-exported: callers have always imported this from here.
+export { devicePortLayout };
 
 /** Shared gradient defs. Include ONCE per SVG document (root). */
 export const RACK_ART_DEFS = [
@@ -165,42 +171,6 @@ export function rackShellParts({
 }
 
 /** Shared visible port layout so drawn ports and cable endpoints stay aligned. */
-export function devicePortLayout(device: Device, panel: Rect): PortRect[] {
-  const ports = (device.interfaces ?? []).map((i) => ({ id: i.id, name: i.name }));
-  const kind = panelKindFor(device.type);
-  if (ports.length === 0) return [];
-  if (kind === 'server') {
-    // Laid out INSIDE the reserved port band, so vents/fans/drives — which derive
-    // from the same zones — cannot collide with a jack. See faceZones.ts.
-    const z = serverFaceZones(panel);
-    return portLayout(z.ports, ports, { gap: 3, nameZone: 0, rightInset: 0, maxJack: 12 });
-  }
-  if (kind === 'ups' || kind === 'psu' || kind === 'cable-mgr' || kind === 'blank') return [];
-  if (kind === 'patch') {
-    // Rows derive from PHYSICAL DENSITY (24 keystones per 19" row), so a 24-port
-    // panel is 1×24 and a 48-port panel is 2×24 — one row of 48 would need ~744mm
-    // of a ~450mm panel and does not exist as hardware. Shared opts with the photo
-    // skin so drawn ports and hit markers always align.
-    return portLayout(panel, ports, {
-      ...PATCH_PORT_OPTS,
-      rows: patchPanelRows(ports.length),
-    });
-  }
-  if (kind === 'switch' || kind === 'firewall') {
-    // Switches DO stack 24/48 ports in two staggered rows (odd top / even
-    // bottom via the column-major fill), separated into banks of 6. Laid out in
-    // the reserved band so vents and SFP cages can't sit on a jack.
-    const z = switchFaceZones(panel);
-    return portLayout(z.ports, ports, { groupEvery: 6, groupGap: 6, nameZone: 0, rightInset: 0 });
-  }
-  if (kind === 'appliance') {
-    // Router / LB / WLC: a sparse row of interface ports. Console/mgmt live in the
-    // aux zone and are drawn by the art, not modelled as interfaces.
-    const z = applianceFaceZones(panel);
-    return portLayout(z.ports, ports, { rows: 1, nameZone: 0, rightInset: 0, maxJack: 13 });
-  }
-  return portLayout(panel, ports);
-}
 
 function labelParts(device: Device, p: Rect): string[] {
   const vendorModel = [device.vendor, device.model].filter(Boolean).join(' ');
@@ -250,9 +220,10 @@ function rj45(x: number, y: number, w: number, h: number): string {
   );
 }
 
+
 /**
  * A vertical 0U PDU: a narrow tall strip with a breaker/switch at the top and a
- * column of C13 outlets down its length (one per port, capped to what fits).
+ * column of C13 outlets down its length, drawn from devicePortLayout.
  */
 function pduStripParts(device: Device, p: Rect): string[] {
   const out: string[] = [];
@@ -262,21 +233,9 @@ function pduStripParts(device: Device, p: Rect): string[] {
   // Breaker rocker + power LED at the top.
   out.push(`<rect x="${n(p.x + p.w / 2 - 3)}" y="${n(p.y + 4)}" width="6" height="8" rx="1.2" fill="${C.cage}" stroke="${C.jackBd}" stroke-width="0.6"/>`);
   out.push(`<circle cx="${n(p.x + p.w / 2)}" cy="${n(p.y + 16)}" r="1.6" fill="url(#rkLedG)"/>`);
-  // Outlet column: one C13 per interface, evenly spaced, sized to the strip width.
-  const count = Math.max(1, (device.interfaces ?? []).length || 8);
-  const top = p.y + 22;
-  const colH = Math.max(6, p.h - 28);
-  const ow = Math.min(p.w - 5, 11);
-  const oh = Math.min(9, colH / count - 1.5);
-  const ox = p.x + (p.w - ow) / 2;
-  const pitch = colH / count;
-  const drawn = Math.min(count, Math.floor(colH / (oh + 1.5)));
-  for (let i = 0; i < drawn; i++) {
-    const oy = top + i * pitch;
-    out.push(`<rect x="${n(ox)}" y="${n(oy)}" width="${n(ow)}" height="${n(oh)}" rx="1.4" fill="${C.cage}" stroke="${C.jackBd}" stroke-width="0.7"/>`);
-    // C13 ground-pin glyph.
-    out.push(`<path d="M ${n(ox + ow / 2 - 2)} ${n(oy + oh / 2 - 1)} h 4 M ${n(ox + ow / 2)} ${n(oy + oh / 2 + 0.6)} v 2" stroke="${C.notch}" stroke-width="1" stroke-linecap="round"/>`);
-  }
+  // Outlets come from devicePortLayout, so every drawn outlet is exactly a cable
+  // target. The old loop computed its own column and could drift from hit-testing.
+  for (const o of devicePortLayout(device, p)) out.push(outletGlyph(o.x, o.y, o.w, o.h));
   return out;
 }
 
@@ -463,35 +422,30 @@ export function deviceFaceParts(
     // A rack UPS: a big battery module (left), a status LCD with a charge/load
     // bar, and a row of C13 outlets (right). Distinct from a PSU's fan grilles.
     out.push(plate());
+    const zu = upsFaceZones(panel);
     const cy = panel.y + panel.h / 2;
-    // Battery module block (left of the name), with cell divider lines.
-    const battX = panel.x + 72;
-    const battW = Math.max(60, panel.w * 0.28);
-    const battY = panel.y + 6;
-    const battH = Math.max(12, panel.h - 12);
-    out.push(`<rect x="${n(battX)}" y="${n(battY)}" width="${n(battW)}" height="${n(battH)}" rx="2.5" fill="#0d1219" stroke="${C.cageBd}" stroke-width="0.8"/>`);
-    const cells = Math.max(3, Math.round(battW / 22));
-    for (let i = 1; i < cells; i++) {
-      const dx = battX + (battW / cells) * i;
-      out.push(`<path d="M ${n(dx)} ${n(battY + 2)} v ${n(battH - 4)}" stroke="${C.chassisBd}" stroke-width="0.7"/>`);
-    }
-    // Status LCD + a green charge bar (batteries full / online).
-    const lcdX = battX + battW + 12;
-    const lcdW = Math.min(52, panel.w - (lcdX - panel.x) - 90);
-    if (lcdW > 16) {
-      out.push(`<rect x="${n(lcdX)}" y="${n(cy - 9)}" width="${n(lcdW)}" height="18" rx="2" fill="url(#rkLCD)" stroke="#2dd4bf" stroke-width="0.7"/>`);
-      const segs = 5;
-      const segW = (lcdW - 8) / segs;
-      for (let i = 0; i < segs; i++) {
-        out.push(`<rect x="${n(lcdX + 4 + i * segW)}" y="${n(cy - 3)}" width="${n(segW - 1.5)}" height="6" rx="0.8" fill="url(#rkLedG)" opacity="${(0.55 + i * 0.09).toFixed(2)}"/>`);
+    // Battery module, in its reserved zone.
+    if (zu.battery.w > 12) {
+      out.push(`<rect x="${n(zu.battery.x)}" y="${n(zu.battery.y)}" width="${n(zu.battery.w)}" height="${n(zu.battery.h)}" rx="2.5" fill="#0d1219" stroke="${C.cageBd}" stroke-width="0.8"/>`);
+      const cells = Math.max(3, Math.round(zu.battery.w / 22));
+      for (let i = 1; i < cells; i++) {
+        const dx = zu.battery.x + (zu.battery.w / cells) * i;
+        out.push(`<path d="M ${n(dx)} ${n(zu.battery.y + 2)} v ${n(zu.battery.h - 4)}" stroke="${C.chassisBd}" stroke-width="0.7"/>`);
       }
     }
-    // C13 outlets on the right edge.
-    for (let i = 0; i < 4; i++) {
-      const cx = panel.x + panel.w - 16 - i * 16;
-      out.push(`<rect x="${n(cx - 5.5)}" y="${n(cy - 6)}" width="11" height="12" rx="1.5" fill="${C.cage}" stroke="${C.jackBd}" stroke-width="0.75"/>`);
-      out.push(`<path d="M ${n(cx - 2.4)} ${n(cy - 2.4)} h 4.8 M ${n(cx)} ${n(cy + 0.4)} v 3" stroke="${C.notch}" stroke-width="1.1" stroke-linecap="round"/>`);
+    // Status LCD + charge bar (batteries full / online), in its reserved zone.
+    if (zu.lcd.w > 16) {
+      const lcdH = Math.min(18, zu.lcd.h);
+      const lcdY = cy - lcdH / 2;
+      out.push(`<rect x="${n(zu.lcd.x)}" y="${n(lcdY)}" width="${n(zu.lcd.w)}" height="${n(lcdH)}" rx="2" fill="url(#rkLCD)" stroke="#2dd4bf" stroke-width="0.7"/>`);
+      const segs = 5;
+      const segW = (zu.lcd.w - 8) / segs;
+      for (let i = 0; i < segs; i++) {
+        out.push(`<rect x="${n(zu.lcd.x + 4 + i * segW)}" y="${n(cy - 3)}" width="${n(Math.max(1, segW - 1.5))}" height="6" rx="0.8" fill="url(#rkLedG)" opacity="${(0.55 + i * 0.09).toFixed(2)}"/>`);
+      }
     }
+    // Outlets, drawn from the SAME layout that hit-testing uses.
+    for (const o of devicePortLayout(device, panel)) out.push(outletGlyph(o.x, o.y, o.w, o.h));
   } else if (kind === 'psu') {
     out.push(plate());
     // fan grilles + vents (a raw PSU shelf, not a UPS)
