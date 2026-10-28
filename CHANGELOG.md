@@ -6,6 +6,34 @@ minor/patch semantics are not yet enforced.
 
 ## [Unreleased]
 
+### Added
+
+- **The NexMap Deck — a reimagined, command-first entry experience.** The plain
+  two-card chooser is now a cinematic hub: a real-time 3D "network constellation"
+  rendered on a dependency-free canvas (DPR/visibility/reduced-motion aware), a
+  bespoke animated brand mark, hand-built isometric illustrations for each
+  designer, and a ⌘K-style quick-launch you can drive from the keyboard. The
+  tested contract is unchanged (the `Choose a designer` dialog and the
+  `Network Designer` / `Rack Designer` entry points still route exactly as before).
+- **A bundled motion reel.** A rendered, seamless-looping 3D network reel ships
+  as a local VP8 `.webm` (+ poster) — no CDN, no runtime network. Reachable from
+  the Deck ("See NexMap in motion") and embedded in the About dialog; it never
+  autoplays under reduced-motion.
+- **Self-hosted type system.** Inter, Space Grotesk and JetBrains Mono ship as
+  latin-subset variable `woff2` (SIL OFL), applied to hero/overlay surfaces,
+  brand, and metrics chips. The dense editor chrome stays on the system stack so
+  its tested geometry is byte-for-byte unchanged.
+
+### Changed
+
+- **A cohesive, dark-first design system.** A greatly expanded token set
+  (layered surfaces, brand gradients, elevation, glow, radii, spacing, motion
+  curves, z-index) restyles the whole app — topbar, panels, status bar, command
+  palette, first-run, dialogs, and the device library — in both light and dark,
+  with GPU-friendly micro-interactions throughout. All 757 unit tests and 76 e2e
+  specs still pass; the local-first CSP + netguard guarantees are untouched.
+- Refreshed brand assets: new app icon, Open Graph image, and theme color.
+
 ## [0.6.2] - 2026-07-05
 
 The pointer-native canvas release: both designers' input layers were rebuilt

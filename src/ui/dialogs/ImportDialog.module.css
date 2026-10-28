@@ -1,10 +1,16 @@
+/* Shared dialog chrome (used by Import, Export, Settings, About, Shortcuts,
+   Outline, Recovery). Class names preserved; visuals upgraded to the design
+   system. Dialogs are overlays — not bound by the editor grid — so Inter is safe. */
 .overlay {
   position: fixed;
   inset: 0;
   display: grid;
   place-items: center;
-  background: rgba(0, 0, 0, 0.3);
-  z-index: 20;
+  padding: 24px;
+  background: color-mix(in srgb, var(--deck-bg, #05080e) 46%, transparent);
+  backdrop-filter: blur(6px);
+  z-index: var(--z-overlay);
+  animation: nx-fade var(--dur-2) var(--ease-out) both;
 }
 
 .dialog {
@@ -12,35 +18,43 @@
   max-height: 86vh;
   display: flex;
   flex-direction: column;
-  background: var(--chrome-bg);
-  border: 1px solid var(--chrome-border);
-  border-radius: 12px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  font-family: var(--font-ui-pre);
+  background: color-mix(in srgb, var(--chrome-bg) 96%, transparent);
+  border: 1px solid var(--chrome-border-strong);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-float);
+  overflow: hidden;
+  animation: nx-pop var(--dur-3) var(--ease-spring) both;
 }
 
 .head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 18px;
+  padding: 16px 20px;
   border-bottom: 1px solid var(--chrome-border);
 }
 
 .head h2 {
   margin: 0;
-  font-size: 15px;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .close {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   background: transparent;
-  border: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
   color: var(--chrome-fg-muted);
   padding: 0;
   cursor: pointer;
+  transition: color var(--dur-1), background var(--dur-1), border-color var(--dur-1);
 }
 
 .close svg {
@@ -49,11 +63,13 @@
 }
 
 .close:hover {
-  color: var(--chrome-fg);
+  color: var(--accent);
+  background: var(--chrome-bg-3);
+  border-color: var(--chrome-border);
 }
 
 .body {
-  padding: 16px 18px;
+  padding: 18px 20px;
   overflow: auto;
 }
 
@@ -61,6 +77,7 @@
   display: flex;
   gap: 8px;
   margin-bottom: 14px;
+  flex-wrap: wrap;
 }
 
 .kindBtn {
@@ -68,10 +85,12 @@
   align-items: center;
   gap: 6px;
   border: 1px solid var(--chrome-border);
-  background: transparent;
+  background: var(--chrome-bg-2);
   color: var(--chrome-fg);
-  border-radius: 7px;
-  padding: 6px 12px;
+  border-radius: var(--r-md);
+  padding: 7px 13px;
+  font-weight: 500;
+  transition: border-color var(--dur-1), background var(--dur-1), color var(--dur-1);
 }
 
 .kindBtn svg {
@@ -79,23 +98,31 @@
   height: 15px;
 }
 
-.kindBtn.active {
-  background: var(--accent);
-  color: var(--accent-fg);
+.kindBtn:hover {
   border-color: var(--accent);
 }
 
+.kindBtn.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
 .dropzone {
-  border: 2px dashed var(--chrome-border);
-  border-radius: 10px;
-  padding: 30px;
+  border: 2px dashed var(--chrome-border-strong);
+  border-radius: var(--r-lg);
+  padding: 32px;
   text-align: center;
   color: var(--chrome-fg-muted);
   cursor: pointer;
+  background: var(--chrome-bg-2);
+  transition: border-color var(--dur-1), background var(--dur-1), color var(--dur-1);
 }
 
 .dropzone:hover {
   border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--chrome-fg);
 }
 
 .mapGrid {
@@ -112,17 +139,17 @@
 }
 
 .mapGrid select {
-  padding: 4px 6px;
+  padding: 5px 7px;
   border: 1px solid var(--chrome-border);
-  border-radius: 5px;
-  background: var(--canvas-bg);
+  border-radius: var(--r-sm);
+  background: var(--chrome-bg-2);
   color: var(--chrome-fg);
   font: inherit;
 }
 
 .previewWrap {
   border: 1px solid var(--chrome-border);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   overflow: auto;
   max-height: 200px;
   margin-bottom: 12px;
@@ -136,7 +163,7 @@
 
 .preview th,
 .preview td {
-  padding: 4px 8px;
+  padding: 5px 9px;
   border-bottom: 1px solid var(--chrome-border);
   text-align: left;
   white-space: nowrap;
@@ -146,7 +173,10 @@
   color: var(--chrome-fg-muted);
   position: sticky;
   top: 0;
-  background: var(--chrome-bg);
+  background: var(--chrome-bg-2);
+  font-family: var(--font-mono-pre);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
 }
 
 .summary {
@@ -159,8 +189,9 @@
   overflow: auto;
   font-size: 11px;
   color: var(--sev-warn);
-  background: color-mix(in srgb, var(--sev-warn) 8%, transparent);
-  border-radius: 6px;
+  background: color-mix(in srgb, var(--sev-warn) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sev-warn) 30%, transparent);
+  border-radius: var(--r-sm);
   padding: 8px 10px;
   margin-bottom: 10px;
 }
@@ -180,8 +211,9 @@
 .error {
   font-size: 12px;
   color: var(--sev-error);
-  background: color-mix(in srgb, var(--sev-error) 9%, transparent);
-  border-radius: 6px;
+  background: color-mix(in srgb, var(--sev-error) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sev-error) 30%, transparent);
+  border-radius: var(--r-sm);
   padding: 8px 10px;
   margin-bottom: 10px;
 }
@@ -193,8 +225,8 @@
   max-height: 240px;
   overflow: hidden;
   border: 1px solid var(--chrome-border);
-  border-radius: 8px;
-  background: var(--canvas-bg);
+  border-radius: var(--r-md);
+  background: var(--chrome-bg-2);
   margin-bottom: 10px;
 }
 
@@ -208,24 +240,40 @@
   display: flex;
   gap: 8px;
   justify-content: flex-end;
-  padding: 12px 18px;
+  padding: 14px 20px;
   border-top: 1px solid var(--chrome-border);
+  background: var(--chrome-bg-2);
 }
 
 .btn {
-  border: 1px solid var(--chrome-border);
-  background: transparent;
+  border: 1px solid var(--chrome-border-strong);
+  background: var(--chrome-bg-2);
   color: var(--chrome-fg);
-  border-radius: 7px;
-  padding: 7px 14px;
+  border-radius: var(--r-md);
+  padding: 8px 16px;
+  font-weight: 600;
+  transition: border-color var(--dur-1), background var(--dur-1), transform var(--dur-1),
+    box-shadow var(--dur-1), filter var(--dur-1);
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  transform: translateY(-1px);
 }
 
 .btn.primary {
-  background: var(--accent);
-  color: var(--accent-fg);
-  border-color: var(--accent);
+  background: var(--brand-grad);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: var(--shadow-1);
+}
+
+.btn.primary:hover:not(:disabled) {
+  box-shadow: var(--glow-soft);
+  filter: brightness(1.05);
 }
 
 .btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
+  cursor: default;
 }

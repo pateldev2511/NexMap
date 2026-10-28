@@ -1,0 +1,71 @@
+.frame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  overflow: hidden;
+  background: #05080e;
+  border: 1px solid var(--chrome-border-strong);
+  box-shadow: var(--shadow-3);
+  isolation: isolate;
+}
+.rounded {
+  border-radius: var(--r-lg);
+}
+.video,
+.posterBtn {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border: 0;
+}
+.posterBtn {
+  background-size: cover;
+  background-position: center;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.playBadge {
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  color: #fff;
+  background: color-mix(in srgb, var(--accent) 85%, transparent);
+  box-shadow: var(--glow-accent);
+  padding-left: 4px;
+  transition: transform var(--dur-2) var(--ease-spring);
+}
+.posterBtn:hover .playBadge {
+  transform: scale(1.08);
+}
+/* subtle moving scanline sheen for a "live monitor" feel */
+.scan {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(
+    110deg,
+    transparent 40%,
+    rgba(255, 255, 255, 0.05) 50%,
+    transparent 60%
+  );
+  background-size: 300% 100%;
+  animation: nx-shimmer 7s linear infinite;
+  mix-blend-mode: screen;
+}
+/* thin top brand edge */
+.frame::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  z-index: 3;
+  background: var(--brand-grad);
+  opacity: 0.7;
+}

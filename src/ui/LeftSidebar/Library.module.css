@@ -6,12 +6,19 @@
 
 .search {
   margin: 8px;
-  padding: 6px 8px;
+  padding: 7px 10px;
   border: 1px solid var(--chrome-border);
-  border-radius: 6px;
-  background: var(--canvas-bg);
+  border-radius: var(--r-md);
+  background: var(--chrome-bg-2);
   color: var(--chrome-fg);
   font: inherit;
+  transition: border-color var(--dur-1), box-shadow var(--dur-1);
+}
+
+.search:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .scroll {
@@ -28,14 +35,20 @@
   text-align: left;
   background: transparent;
   border: none;
-  color: var(--chrome-fg-muted);
+  color: var(--chrome-fg-subtle);
   font-size: 11px;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 8px 12px;
+  letter-spacing: 0.06em;
+  padding: 9px 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  transition: color var(--dur-1);
+}
+
+.groupHeader:hover {
+  color: var(--chrome-fg);
 }
 
 .groupHeader svg {
@@ -57,14 +70,24 @@
   gap: 4px;
   padding: 8px 4px;
   border: 1px solid var(--chrome-border);
-  border-radius: 6px;
-  background: var(--canvas-bg);
+  border-radius: var(--r-md);
+  background: var(--chrome-bg-2);
   cursor: grab;
   user-select: none;
+  transition: border-color var(--dur-1), background var(--dur-1), transform var(--dur-1),
+    box-shadow var(--dur-1);
+}
+
+.item:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--chrome-border));
+  background: var(--chrome-bg-3);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-1);
 }
 
 .item:active {
   cursor: grabbing;
+  transform: translateY(0);
 }
 
 .swatch {
