@@ -12,6 +12,11 @@ import {
   segmentMidpoints,
   labelAnchor,
   connectorLabel,
+  signalColor,
+  bowedPath,
+  SIGNAL_DEFAULT,
+  HEALTH_RED,
+  HEALTH_AMBER,
 } from './connector';
 import { createDevice, createLink } from '@/model/schema';
 
@@ -138,5 +143,35 @@ describe('orthogonal routing + multi-label', () => {
     });
     expect(() => connectorLabelLines(link)).not.toThrow();
     expect(connectorLabelLines(link)).toEqual(['VLAN 10', 'native 1']);
+  });
+});
+
+describe('signal flow', () => {
+  const base = { dashed: false, width: 1.5 };
+
+  it('selected links flow in the live accent', () => {
+    expect(signalColor({ ...base, color: null }, true)).toBe('var(--accent)');
+    // selection wins even over a manual colour
+    expect(signalColor({ ...base, color: '#ff00ff' }, true)).toBe('var(--accent)');
+  });
+
+  it('health urgency colours drive the flow when not selected', () => {
+    expect(signalColor({ ...base, color: HEALTH_RED }, false)).toBe(HEALTH_RED);
+    expect(signalColor({ ...base, color: HEALTH_AMBER }, false)).toBe(HEALTH_AMBER);
+  });
+
+  it('a manual link colour flows in its own hue', () => {
+    expect(signalColor({ ...base, color: '#8b5cf6' }, false)).toBe('#8b5cf6');
+  });
+
+  it('an idle healthy link falls back to the cyan signal default', () => {
+    expect(signalColor({ ...base, color: null }, false)).toBe(`var(--accent-2, ${SIGNAL_DEFAULT})`);
+  });
+
+  it('bowedPath emits a quadratic with a perpendicular control point', () => {
+    // Horizontal run bowed by 10: control sits 10px below the midpoint.
+    expect(bowedPath({ x: 0, y: 0 }, { x: 100, y: 0 }, 10)).toBe('M0 0 Q50 10 100 0');
+    // Zero bow degenerates to a straight quadratic through the midpoint.
+    expect(bowedPath({ x: 0, y: 0 }, { x: 100, y: 0 }, 0)).toBe('M0 0 Q50 0 100 0');
   });
 });

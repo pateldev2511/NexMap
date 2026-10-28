@@ -412,6 +412,30 @@
     opacity: 0.4;
   }
 }
+
+/* Signal flow along a patched cable: a bright packet of light travelling from
+   the A plug to the B plug, so a wired elevation reads as a live, carrying
+   fabric rather than a static drawing. Shares the network canvas's motion
+   language. Frozen to a steady sheen under reduced-motion. */
+@keyframes rackCableFlow {
+  to {
+    stroke-dashoffset: -34;
+  }
+}
+.cableFlow {
+  stroke-dasharray: 1 16;
+  stroke-dashoffset: 0;
+  animation: rackCableFlow 1.25s linear infinite;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cableFlow {
+    animation: none;
+    opacity: 0.35 !important;
+    stroke-dasharray: 1 7;
+  }
+}
+
 .devhit {
   cursor: grab;
 }

@@ -43,6 +43,8 @@ import {
   labelAnchor,
   connectorLabelLines,
   deriveLinkStroke,
+  signalColor,
+  bowedPath,
   type StrokeHealth,
 } from './connector';
 import { ContextMenu, type MenuItem } from './ContextMenu';
@@ -1830,19 +1832,36 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
               );
             })()}
 
-          {/* Rubber-band while connecting. */}
+          {/* Rubber-band while connecting: a glowing, gently-bowed cable with
+              marching packets and a pulsing reticle at the cursor. Snaps onto a
+              valid target (linkTarget) so release feels magnetic. */}
           {linkSource &&
             linkCursor &&
             (() => {
-              const start = iconEdgePoint(linkSource, linkCursor);
+              const snap =
+                linkTarget && linkTarget !== linkSource.id
+                  ? store().getDevice(linkTarget)
+                  : undefined;
+              const end = snap ? center(snap) : linkCursor;
+              const start = iconEdgePoint(linkSource, end);
+              const finish = snap ? iconEdgePoint(snap, start) : end;
+              const dist = Math.hypot(finish.x - start.x, finish.y - start.y);
+              const d = bowedPath(start, finish, Math.min(dist * 0.12, 26));
               return (
-                <line
-                  className={styles.rubber}
-                  x1={start.x}
-                  y1={start.y}
-                  x2={linkCursor.x}
-                  y2={linkCursor.y}
-                />
+                <g pointerEvents="none">
+                  <path className={styles.rubberGlow} d={d} />
+                  <path className={styles.rubber} d={d} />
+                  <path className={styles.rubberFlow} d={d} />
+                  <circle className={styles.rubberDot} cx={start.x} cy={start.y} r={3.5} />
+                  {snap ? (
+                    <circle className={styles.rubberDot} cx={finish.x} cy={finish.y} r={4.5} />
+                  ) : (
+                    <>
+                      <circle className={styles.rubberReticle} cx={finish.x} cy={finish.y} r={9} />
+                      <circle className={styles.rubberDot} cx={finish.x} cy={finish.y} r={3} />
+                    </>
+                  )}
+                </g>
               );
             })()}
 
@@ -2366,6 +2385,14 @@ function FlatSelectionToolbar({
   );
 }
 
+/** Deterministic per-link phase offset (ms) for the signal-flow animation, so a
+ *  field of links shimmers out of lockstep instead of pulsing as one block. */
+function flowPhase(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) & 0x3ff;
+  return -(h % 1150); // negative delay → already mid-cycle on first paint
+}
+
 /**
  * The connector layer: shadow (iso), hit path, styled link path, and the three
  * label kinds, for every visible link. Memoized (W1c) — all props hold identity
@@ -2439,6 +2466,20 @@ const LinkLayer = memo(function LinkLayer({
               strokeDasharray={stroke.dashed ? '6 4' : undefined}
               markerEnd={arrow === 'end' || arrow === 'both' ? 'url(#nexmap-arrow)' : undefined}
               markerStart={arrow === 'both' ? 'url(#nexmap-arrow)' : undefined}
+            />
+            {/* Signal flow: bright packets marching source→target over the cable.
+                A second channel that makes a static topology read as live traffic
+                (frozen to a dotted accent under reduced-motion by the global kill
+                switch). Per-link phase offset keeps the field from pulsing in
+                lockstep. */}
+            <path
+              className={`${styles.linkFlow} ${sel ? styles.selected : ''}`}
+              d={d}
+              style={{
+                stroke: signalColor(stroke, sel),
+                strokeWidth: Math.min(Math.max((sel ? stroke.width + 1 : stroke.width) + 0.5, 2), 3.4),
+                animationDelay: `${flowPhase(l.id)}ms`,
+              }}
             />
             {lblAt && (
               <text

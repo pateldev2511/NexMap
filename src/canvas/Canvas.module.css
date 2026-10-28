@@ -26,20 +26,8 @@
   cursor: crosshair;
 }
 
-.rubber {
-  stroke: var(--accent);
-  stroke-width: 2;
-  stroke-dasharray: 5 3;
-  fill: none;
-  pointer-events: none;
-}
-
-.connectHandle {
-  fill: var(--accent);
-  stroke: #fff;
-  stroke-width: 1;
-  cursor: crosshair;
-}
+/* .rubber and .connectHandle are defined in the connector/signal section below
+   (upgraded with glow + marching packets for the live connect preview). */
 
 /* Leader anchor handle on a selected callout — drag it onto a device. */
 .anchorHandle {
@@ -122,6 +110,7 @@
 .node.selected .deviceTileHalo {
   fill: color-mix(in srgb, var(--accent) 10%, transparent);
   opacity: 0.9;
+  filter: drop-shadow(0 0 5px var(--accent-ring, rgba(76, 141, 255, 0.5)));
 }
 
 .node.validTarget .deviceTileHalo {
@@ -132,6 +121,31 @@
 
 .node:hover .deviceTileHalo {
   opacity: 0.65;
+}
+
+/* A valid connect target breathes while a link is in flight — a magnetic cue
+   that this node will accept the drop. Shares the accent glow so the whole
+   gesture reads as one energised act. Frozen by the global reduced-motion
+   kill switch. */
+@keyframes nxTargetBreathe {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 2px var(--accent-ring, rgba(76, 141, 255, 0.45)));
+  }
+  50% {
+    filter: drop-shadow(0 0 9px var(--accent-ring, rgba(76, 141, 255, 0.7)));
+  }
+}
+
+.node.validTarget .deviceTileHalo,
+.node.validTarget .deviceIconHalo,
+.isoNode.validTarget .deviceIconHalo {
+  animation: nxTargetBreathe 1s ease-in-out infinite;
+}
+
+.node.selected .deviceIconHalo,
+.isoNode.selected .deviceIconHalo {
+  filter: drop-shadow(0 0 5px var(--accent-ring, rgba(76, 141, 255, 0.5)));
 }
 
 .deviceIcon3d {
@@ -422,6 +436,111 @@
 .link.selected {
   stroke: var(--accent);
   stroke-width: 2.5;
+  filter: drop-shadow(0 0 3px var(--accent-ring, rgba(76, 141, 255, 0.5)));
+}
+
+/* ── Signal flow ─────────────────────────────────────────────────────────
+   A second channel layered over every link: short bright "packets" that march
+   source→target, so a static topology reads as a live, breathing network. One
+   shared keyframe (compositor-cheap dashoffset); per-link animation-delay gives
+   an organic, out-of-phase shimmer. The global reduced-motion kill switch
+   freezes the dash, leaving a tasteful dotted accent — never motion in the
+   periphery for users who opt out. */
+@keyframes nxSignalFlow {
+  to {
+    stroke-dashoffset: -32;
+  }
+}
+
+.linkFlow {
+  fill: none;
+  pointer-events: none;
+  stroke-linecap: round;
+  stroke-dasharray: 2.5 13.5;
+  stroke-dashoffset: 0;
+  opacity: 0.92;
+  animation: nxSignalFlow 1.15s linear infinite;
+}
+
+.link.selected ~ .linkFlow,
+.linkFlow.selected {
+  opacity: 1;
+}
+
+/* ── Live connect preview ────────────────────────────────────────────────
+   Dragging a new link paints a glowing, gently-bowed cable with marching
+   packets and a pulsing reticle at the cursor — the "awesome, smooth" connect
+   experience. All three share the accent so the gesture feels energised. */
+@keyframes nxRubberFlow {
+  to {
+    stroke-dashoffset: -28;
+  }
+}
+
+@keyframes nxReticlePulse {
+  0% {
+    opacity: 0.9;
+    transform: scale(0.6);
+  }
+  70% {
+    opacity: 0;
+    transform: scale(1.9);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.9);
+  }
+}
+
+.rubberGlow {
+  fill: none;
+  pointer-events: none;
+  stroke: var(--accent);
+  stroke-width: 7;
+  stroke-linecap: round;
+  opacity: 0.18;
+  filter: blur(2px);
+}
+
+.rubber {
+  stroke: var(--accent);
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  fill: none;
+  pointer-events: none;
+}
+
+.rubberFlow {
+  fill: none;
+  pointer-events: none;
+  stroke: #fff;
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-dasharray: 1 13;
+  animation: nxRubberFlow 0.9s linear infinite;
+}
+
+.rubberReticle {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: nxReticlePulse 1.3s var(--ease-out, ease-out) infinite;
+}
+
+.rubberDot {
+  fill: var(--accent);
+  stroke: var(--chrome-bg, #fff);
+  stroke-width: 1.5;
+}
+
+.connectHandle {
+  fill: var(--accent);
+  stroke: var(--chrome-bg, #fff);
+  stroke-width: 1.25;
+  cursor: crosshair;
+  filter: drop-shadow(0 0 4px var(--accent-ring, rgba(76, 141, 255, 0.5)));
 }
 
 .linkLabel {
