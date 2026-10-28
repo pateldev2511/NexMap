@@ -1,4 +1,7 @@
-/* Canvas-primary editor shell. Grid: topbar / [left | canvas | right] / statusbar. */
+/* Canvas-primary editor shell. Grid: topbar / [left | canvas | right] / statusbar.
+   Visuals upgraded to the NexMap design system; structure, class names and the
+   CI-regression guards (topbarActions overflow containment, portaled menuPanel,
+   span-collapse, fixed mobile panels) are preserved verbatim. */
 .shell {
   display: grid;
   grid-template-rows: var(--topbar-h) 1fr auto var(--statusbar-h);
@@ -34,20 +37,41 @@
   grid-area: topbar;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 0 12px;
-  background: var(--chrome-bg);
+  gap: 10px;
+  padding: 0 14px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--chrome-bg) 100%, #fff 0%), var(--chrome-bg));
   border-bottom: 1px solid var(--chrome-border);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--chrome-border) 50%, transparent);
   min-width: 0;
+  position: relative;
+  z-index: var(--z-chrome);
+}
+/* hairline brand accent along the very top */
+.topbar::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: var(--brand-grad);
+  opacity: 0.8;
 }
 
 .brand {
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+  flex: none;
 }
 
 .brand span {
-  color: var(--accent);
+  background: var(--brand-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 .projectName {
@@ -64,23 +88,27 @@
 .titleInput {
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: var(--r-sm);
   color: var(--chrome-fg);
   font: inherit;
   font-size: 13px;
-  padding: 2px 6px;
+  font-weight: 500;
+  padding: 3px 8px;
   width: 220px;
   max-width: 26vw;
+  transition: border-color var(--dur-1), background var(--dur-1);
 }
 
 .titleInput:hover {
   border-color: var(--chrome-border);
+  background: var(--chrome-bg-2);
 }
 
 .titleInput:focus {
   border-color: var(--accent);
-  background: var(--canvas-bg);
+  background: var(--chrome-bg-2);
   outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .dirtyDot {
@@ -88,6 +116,7 @@
   height: 7px;
   border-radius: 50%;
   background: var(--sev-warn);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--sev-warn) 70%, transparent);
   flex: none;
 }
 
@@ -97,9 +126,10 @@
 
 .topbarActions {
   display: flex;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
   justify-content: flex-end;
+  align-items: center;
   /* This child SHRINKS (min-width 0) while its buttons don't (flex 0 0 auto),
      so it must contain its own overflow at EVERY width — not just below the
      breakpoints. Without this, wider font metrics (Linux) made the buttons
@@ -127,29 +157,50 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 7px;
   /* Never shrink below content — shrinking made labels overlap and click targets
      collide. Buttons keep their size; labels collapse to icons when space is tight. */
   flex: 0 0 auto;
   background: transparent;
-  border: 1px solid var(--chrome-border);
+  border: 1px solid transparent;
   color: var(--chrome-fg);
-  border-radius: 6px;
-  padding: 4px 10px;
-  min-height: 28px;
+  border-radius: var(--r-md);
+  padding: 5px 11px;
+  min-height: 30px;
+  font-weight: 500;
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1),
+    border-color var(--dur-1), transform var(--dur-1), box-shadow var(--dur-1);
 }
 
 .topbarBtn svg {
-  flex: 0 0 15px;
-  width: 15px;
-  height: 15px;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  color: var(--chrome-fg-muted);
+  transition: color var(--dur-1);
 }
 
 .topbarBtn:hover:not(:disabled) {
-  background: var(--canvas-bg);
+  background: var(--chrome-bg-3);
+  color: var(--chrome-fg);
+}
+.topbarBtn:hover:not(:disabled) svg {
+  color: var(--accent);
+}
+.topbarBtn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.topbarBtn[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.topbarBtn[aria-pressed='true'] svg {
+  color: var(--accent);
 }
 
 .topbarBtn:focus-visible {
@@ -158,18 +209,28 @@
 }
 
 .topbarBtn:disabled {
-  opacity: 0.35;
+  opacity: 0.3;
   cursor: default;
 }
 
 select.topbarBtn {
   display: block;
+  background: var(--chrome-bg-2);
+  border-color: var(--chrome-border);
 }
 
 .topbarBtn.primary {
-  background: var(--accent);
-  color: var(--accent-fg);
-  border-color: var(--accent);
+  background: var(--brand-grad);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: var(--shadow-1);
+}
+.topbarBtn.primary svg {
+  color: #fff;
+}
+.topbarBtn.primary:hover:not(:disabled) {
+  box-shadow: var(--glow-soft);
+  filter: brightness(1.05);
 }
 
 /* .menuPanel is portaled to <body> by MoreMenu.tsx and positioned `fixed`
@@ -177,40 +238,48 @@ select.topbarBtn {
    container can no longer clip it (the v0.6.2 CI regression). The old
    .moreMenu / <details> wrapper rules are gone with it. */
 .menuPanel {
-  width: 190px;
-  z-index: 40;
+  width: 208px;
+  z-index: var(--z-menu);
   display: grid;
-  gap: 4px;
-  padding: 6px;
-  background: var(--chrome-bg);
-  border: 1px solid var(--chrome-border);
-  border-radius: 8px;
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.16);
+  gap: 2px;
+  padding: 7px;
+  background: color-mix(in srgb, var(--chrome-bg) 96%, transparent);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--chrome-border-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-float);
+  animation: nx-pop var(--dur-2) var(--ease-spring) both;
 }
 
 .menuItem {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--chrome-fg);
-  padding: 7px 8px;
+  padding: 8px 9px;
+  font-weight: 500;
   text-align: left;
   cursor: pointer;
+  transition: background var(--dur-1);
 }
 
 .menuItem svg {
-  flex: 0 0 15px;
-  width: 15px;
-  height: 15px;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
   color: var(--chrome-fg-muted);
 }
 
 .menuItem:hover,
 .menuItem[aria-pressed='true'] {
-  background: var(--canvas-bg);
+  background: var(--chrome-bg-3);
+}
+.menuItem:hover svg,
+.menuItem[aria-pressed='true'] svg {
+  color: var(--accent);
 }
 
 /* Side panels recede: muted background, thin separators. */
@@ -259,8 +328,10 @@ select.topbarBtn {
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 0 12px;
+  padding: 0 14px;
   font-size: 11px;
+  font-family: var(--font-mono-pre);
+  letter-spacing: 0.01em;
   color: var(--chrome-fg-muted);
   background: var(--chrome-bg);
   border-top: 1px solid var(--chrome-border);
@@ -270,16 +341,17 @@ select.topbarBtn {
 
 .panelToggles {
   display: flex;
-  gap: 6px;
-  margin-left: 4px;
+  gap: 5px;
+  margin-left: 2px;
 }
 
 .panelHeader {
   font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--chrome-fg-muted);
-  padding: 8px 12px;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  color: var(--chrome-fg-subtle);
+  padding: 10px 14px;
   border-bottom: 1px solid var(--chrome-border);
 }
 
@@ -293,7 +365,7 @@ select.topbarBtn {
 @media (max-width: 1180px) {
   .topbar {
     gap: 8px;
-    padding-inline: 8px;
+    padding-inline: 10px;
   }
 
   /* (overflow containment on .topbarActions is unconditional now — see above) */
@@ -320,8 +392,8 @@ select.topbarBtn {
     bottom: var(--statusbar-h);
     width: min(var(--left-w), 82vw);
     max-width: 82vw;
-    z-index: 25;
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
+    z-index: var(--z-panel);
+    box-shadow: var(--shadow-3);
   }
 
   .left {
@@ -354,7 +426,7 @@ select.topbarBtn {
 
 @media (max-width: 640px) {
   .brand {
-    font-size: 12px;
+    font-size: 13px;
   }
 
   .titleInput {
@@ -363,11 +435,11 @@ select.topbarBtn {
   }
 
   .panelToggles .topbarBtn {
-    padding-inline: 7px;
+    padding-inline: 8px;
   }
 
   .topbarBtn {
-    padding-inline: 8px;
+    padding-inline: 9px;
   }
 
   .status {

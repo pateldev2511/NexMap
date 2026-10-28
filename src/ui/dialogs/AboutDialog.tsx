@@ -1,4 +1,5 @@
 import { NexIcon } from '@/ui/icons/NexIcon';
+import { VideoReel } from '@/ui/deck/VideoReel';
 import styles from './ImportDialog.module.css';
 
 /**
@@ -17,6 +18,9 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
           </button>
         </div>
         <div className={styles.body}>
+          <div style={{ marginBottom: 16 }}>
+            <VideoReel />
+          </div>
           <p style={{ margin: '0 0 12px', lineHeight: 1.5 }}>
             NexMap is a local-first network infrastructure designer that validates your
             diagram while you draw it. It runs entirely in your browser.

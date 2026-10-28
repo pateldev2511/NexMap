@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { NexIcon } from './icons/NexIcon';
 
 export interface PaletteCommand {
   id: string;
@@ -75,11 +76,14 @@ export function CommandPalette({
         position: 'fixed',
         inset: 0,
         zIndex: 80,
-        background: 'rgba(2,6,23,0.32)',
+        background: 'color-mix(in srgb, var(--deck-bg, #05080e) 42%, transparent)',
+        backdropFilter: 'blur(6px)',
+        WebkitBackdropFilter: 'blur(6px)',
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'flex-start',
-        paddingTop: '12vh',
+        paddingTop: '13vh',
+        animation: 'nx-fade var(--dur-2) var(--ease-out) both',
       }}
     >
       <div
@@ -87,39 +91,65 @@ export function CommandPalette({
         role="dialog"
         aria-label="Command palette"
         style={{
-          width: 'min(560px, 92vw)',
-          background: 'var(--chrome-bg)',
-          border: '1px solid var(--chrome-border)',
-          borderRadius: 12,
-          boxShadow: '0 12px 40px rgba(0,0,0,0.28)',
+          width: 'min(580px, 92vw)',
+          fontFamily: 'var(--font-ui-pre)',
+          background: 'color-mix(in srgb, var(--chrome-bg) 94%, transparent)',
+          border: '1px solid var(--chrome-border-strong)',
+          borderRadius: 'var(--r-lg)',
+          boxShadow: 'var(--shadow-float)',
           overflow: 'hidden',
+          animation: 'nx-pop var(--dur-3) var(--ease-spring) both',
         }}
       >
-        <input
-          ref={inputRef}
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder="Type a command…"
-          aria-label="Command"
+        <div
           style={{
-            width: '100%',
-            boxSizing: 'border-box',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
             padding: '14px 16px',
-            border: 'none',
             borderBottom: '1px solid var(--chrome-border)',
-            background: 'transparent',
-            color: 'var(--chrome-fg)',
-            fontSize: 15,
-            outline: 'none',
           }}
-        />
+        >
+          <NexIcon name="search" style={{ width: 18, height: 18, color: 'var(--accent)', flex: 'none' }} />
+          <input
+            ref={inputRef}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder="Type a command…"
+            aria-label="Command"
+            style={{
+              flex: 1,
+              boxSizing: 'border-box',
+              padding: 0,
+              border: 'none',
+              background: 'transparent',
+              color: 'var(--chrome-fg)',
+              fontSize: 15,
+              outline: 'none',
+            }}
+          />
+          <kbd
+            style={{
+              fontFamily: 'var(--font-mono-pre)',
+              fontSize: 10.5,
+              fontWeight: 600,
+              padding: '3px 7px',
+              borderRadius: 'var(--r-sm)',
+              border: '1px solid var(--chrome-border)',
+              background: 'var(--chrome-bg-2)',
+              color: 'var(--chrome-fg-muted)',
+            }}
+          >
+            ESC
+          </kbd>
+        </div>
         <ul
           role="listbox"
-          style={{ listStyle: 'none', margin: 0, padding: 6, maxHeight: 360, overflowY: 'auto' }}
+          style={{ listStyle: 'none', margin: 0, padding: 6, maxHeight: 376, overflowY: 'auto' }}
         >
           {filtered.length === 0 && (
-            <li style={{ padding: '10px 12px', color: 'var(--chrome-fg-muted)', fontSize: 13 }}>
+            <li style={{ padding: '16px 12px', color: 'var(--chrome-fg-subtle)', fontSize: 13, textAlign: 'center' }}>
               No matching command.
             </li>
           )}
@@ -134,22 +164,50 @@ export function CommandPalette({
                 run(c);
               }}
               style={{
+                position: 'relative',
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
                 gap: 12,
-                padding: '9px 12px',
-                borderRadius: 8,
+                padding: '10px 12px 10px 16px',
+                borderRadius: 'var(--r-md)',
                 cursor: 'pointer',
-                background:
-                  i === active ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent',
+                background: i === active ? 'var(--accent-soft)' : 'transparent',
                 color: 'var(--chrome-fg)',
-                fontSize: 13,
+                fontSize: 13.5,
+                fontWeight: 500,
+                transition: 'background var(--dur-1)',
               }}
             >
+              {i === active && (
+                <span
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute',
+                    left: 5,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    width: 3,
+                    height: 16,
+                    borderRadius: 2,
+                    background: 'var(--accent)',
+                  }}
+                />
+              )}
               <span>{c.label}</span>
               {c.hint && (
-                <kbd style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--chrome-fg-muted)' }}>
+                <kbd
+                  style={{
+                    fontFamily: 'var(--font-mono-pre)',
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    padding: '2px 6px',
+                    borderRadius: 'var(--r-sm)',
+                    border: '1px solid var(--chrome-border)',
+                    background: 'var(--chrome-bg-2)',
+                    color: 'var(--chrome-fg-muted)',
+                  }}
+                >
                   {c.hint}
                 </kbd>
               )}

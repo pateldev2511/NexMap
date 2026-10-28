@@ -1,13 +1,28 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#161a1f"/>
-  <g stroke="#2563eb" stroke-width="14" fill="#1e242b">
-    <line x1="256" y1="150" x2="140" y2="330" stroke="#64748b"/>
-    <line x1="256" y1="150" x2="372" y2="330" stroke="#64748b"/>
-    <rect x="208" y="110" width="96" height="72" rx="12"/>
-    <rect x="92" y="300" width="96" height="72" rx="12"/>
-    <rect x="324" y="300" width="96" height="72" rx="12"/>
+  <defs>
+    <linearGradient id="t" x1="48" y1="48" x2="464" y2="464" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7a5cff"/>
+      <stop offset="0.5" stop-color="#2f6bff"/>
+      <stop offset="1" stop-color="#0bb4d4"/>
+    </linearGradient>
+    <radialGradient id="core" cx="0.5" cy="0.4" r="0.7">
+      <stop stop-color="#ffffff"/>
+      <stop offset="0.5" stop-color="#2fe3f0"/>
+      <stop offset="1" stop-color="#2f6bff"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#t)"/>
+  <rect x="12" y="12" width="488" height="488" rx="100" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="14"/>
+  <g stroke="#ffffff" stroke-width="20" stroke-linecap="round" opacity="0.92">
+    <line x1="256" y1="256" x2="150" y2="156"/>
+    <line x1="256" y1="256" x2="368" y2="172"/>
+    <line x1="256" y1="256" x2="256" y2="380"/>
   </g>
-  <rect x="216" y="120" width="22" height="52" rx="5" fill="#2563eb" stroke="none"/>
-  <rect x="100" y="310" width="22" height="52" rx="5" fill="#0891b2" stroke="none"/>
-  <rect x="332" y="310" width="22" height="52" rx="5" fill="#059669" stroke="none"/>
+  <g fill="#ffffff">
+    <circle cx="150" cy="156" r="30"/>
+    <circle cx="368" cy="172" r="30"/>
+    <circle cx="256" cy="380" r="30"/>
+  </g>
+  <circle cx="256" cy="256" r="66" fill="url(#core)"/>
+  <circle cx="256" cy="256" r="66" fill="none" stroke="rgba(255,255,255,0.65)" stroke-width="14"/>
 </svg>
