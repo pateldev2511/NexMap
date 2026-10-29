@@ -13,6 +13,11 @@ the cables down to the hardware, with a user control to dial the motion.
 
 ### Added
 
+- **Summon devices by name (Conductor).** Open the command palette (⌘K) and type
+  a device name — "firewall", "switch", "router" — and it appears on the canvas,
+  selected, with the view jumped to it. The first slice of a faster, declarative
+  way to build: create by intent, from the one palette, without hunting the
+  library. (More Conductor to come: summon-at-cursor, templates, lasso-to-fabric.)
 - **Stress-test your design (Flow lens).** A read-only "Flow" mode (toolbar TEST
   toggle, Esc to exit) turns the network canvas into a what-if instrument: click
   any device to pull it and watch the blast radius cascade red along the links to
