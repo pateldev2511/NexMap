@@ -32,6 +32,8 @@ import { useProjectStore } from './store/projectStore';
 import { usePersistence } from './persistence/usePersistence';
 import { canOpenPicker } from './persistence/fsaccess';
 import { severityRank } from './model/validate';
+import { defaultDeviceName } from './model/schema';
+import { QUICK_CREATE_TYPES } from './canvas/QuickCreateMenu';
 import shell from './ui/shell/AppShell.module.css';
 
 type Theme = 'light' | 'dark';
@@ -509,8 +511,28 @@ export function App() {
                 { id: 'shortcuts', label: 'Keyboard shortcuts', hint: '?', run: () => setShowHelp(true) },
                 { id: 'about', label: 'About & privacy', run: () => setShowAbout(true) },
               ];
+              // Conductor (slice 1): summon a device by name. Type its name in the
+              // palette and it appears, selected, with the view jumped to it — the
+              // declarative "type to create" flow, unified with the one Cmd+K surface
+              // (no second type-driven modal, per the design review).
+              const deviceSummon: PaletteCommand[] = QUICK_CREATE_TYPES.map((t) => ({
+                id: `add-${t}`,
+                label: `Add ${defaultDeviceName(t)}`,
+                hint: 'device',
+                run: () => {
+                  const s = st();
+                  const b = s.contentBounds();
+                  const x = b.width > 0 ? Math.round(b.x + b.width / 2 - 28) : 0;
+                  const y = b.width > 0 ? Math.round(b.y + b.height + 56) : 0;
+                  const id = s.addDeviceAt(t, x, y);
+                  s.select([id]);
+                  s.focusObject(id);
+                  s.runValidation();
+                },
+              }));
               // Topology-only commands — hidden in the Rack designer.
               const networkOnly: PaletteCommand[] = [
+                ...deviceSummon,
                 { id: 'export', label: 'Export…', hint: '⌘E', run: () => setExporting(true) },
                 { id: 'import', label: 'Import…', run: () => setImporting(true) },
                 { id: 'nextext', label: 'NexText (describe in text)…', run: () => setNexText(true) },
