@@ -17,10 +17,13 @@ the cables down to the hardware, with a user control to dial the motion.
   toggle, Esc to exit) turns the network canvas into a what-if instrument: click
   any device to pull it and watch the blast radius cascade red along the links to
   everything that loses its path to the network, while a one-line verdict reads
-  "N devices isolated" or the green "Holding — 0 devices lost." Click again to
-  restore. Honest reachability over the drawn graph (not routing), reusing the
-  SPOF/bridge health engine; pure, O(V+E), 9 new unit tests. The first time the
-  motion answers a question instead of decorating one.
+  "N devices isolated" or the green "Holding — 0 devices lost." And survivors
+  **reroute**: the full backup path that now carries their traffic to the egress
+  lights up cyan against the red death, with the verdict naming it ("rerouted
+  over N backup links"). Click again to restore. Honest reachability over the
+  drawn graph (not routing), reusing the SPOF/bridge health engine; pure, O(V+E),
+  unit-tested. The first time the motion answers a question instead of
+  decorating one.
 - **The NexMap Deck — a reimagined, command-first entry experience.** The plain
   two-card chooser is now a cinematic hub: a real-time 3D "network constellation"
   rendered on a dependency-free canvas (DPR/visibility/reduced-motion aware), a
