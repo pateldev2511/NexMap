@@ -13,6 +13,9 @@ interface Props {
   projection: Projection;
   onToggleProjection: () => void;
   onAutoLayout: () => void;
+  /** Flow lens ("stress-test your design") — read-only blast-radius mode. */
+  flowMode: boolean;
+  onToggleFlow: () => void;
 }
 
 /**
@@ -30,6 +33,8 @@ export function CanvasToolbar({
   projection,
   onToggleProjection,
   onAutoLayout,
+  flowMode,
+  onToggleFlow,
 }: Props) {
   const iso = projection === 'iso';
   const tool = (m: CanvasMode, icon: NexIconName, key: string, title: string) => (
@@ -73,6 +78,18 @@ export function CanvasToolbar({
         aria-label="Auto-layout"
       >
         <NexIcon name="auto-layout" />
+      </button>
+      <span className={styles.divider} />
+      <button
+        className={`${styles.tool} ${flowMode ? styles.active : ''}`}
+        data-demote={flowMode ? undefined : 'chrome-item'}
+        onClick={onToggleFlow}
+        title={flowMode ? 'Exit stress-test (Esc)' : 'Stress-test your design — click a device to see what fails'}
+        aria-pressed={flowMode}
+        aria-label="Stress-test (Flow)"
+      >
+        <NexIcon name="flow" className={styles.toolIcon} />
+        <span className={styles.key}>{flowMode ? 'EXIT' : 'TEST'}</span>
       </button>
       <span className={styles.divider} />
       <button

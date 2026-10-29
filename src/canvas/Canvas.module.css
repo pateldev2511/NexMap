@@ -845,3 +845,159 @@
   min-width: 42px;
   text-align: center;
 }
+
+/* ── Flow lens: "stress-test your design" (blast radius) ───────────────────
+   A read-only overlay (FlowOverlay.tsx) on top of a dimmed scene. Click a device
+   to pull it; the red wave propagates hop-by-hop (per-element animation-delay) to
+   everything that loses its path to the network. Pure math (sim/blastRadius);
+   only opacity/transform animate; the global reduced-motion switch freezes it. */
+.flowDimmed .node,
+.flowDimmed .link,
+.flowDimmed .linkFlow,
+.flowDimmed .linkLabel,
+.flowDimmed .ifaceLabel,
+.flowDimmed .infoCardBox {
+  opacity: 0.3;
+  transition: opacity 160ms var(--ease-out, ease-out);
+}
+
+.flowLayer {
+  pointer-events: none;
+}
+
+/* Transparent hover/click targets over every node, above the dimmed scene. */
+.flowHit {
+  fill: transparent;
+  pointer-events: all;
+  cursor: crosshair;
+}
+
+/* A pulled (failed) device: marked with an X, its links die. */
+.flowFailedRing {
+  fill: color-mix(in srgb, var(--sev-error) 16%, transparent);
+  stroke: var(--sev-error);
+  pointer-events: none;
+}
+.flowFailedMark {
+  stroke: var(--sev-error);
+  stroke-linecap: round;
+  fill: none;
+  pointer-events: none;
+}
+
+/* Isolated: lost its path to the network. Blooms in as the wave reaches it. */
+@keyframes nxBlastBloom {
+  0% {
+    opacity: 0;
+    transform: scale(0.55);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.14);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.flowIsolatedRing {
+  fill: color-mix(in srgb, var(--sev-error) 13%, transparent);
+  stroke: var(--sev-error);
+  pointer-events: none;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: nxBlastBloom 300ms var(--ease-out, ease-out) both;
+}
+
+/* Hover pre-highlight: what WOULD drop if you pulled this one (intent telegraph). */
+.flowPreviewRing {
+  fill: none;
+  stroke: var(--sev-warn);
+  stroke-dasharray: 3 3;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+/* Dead links: the red wave racing out from the failure. */
+@keyframes nxBlastWave {
+  0% {
+    opacity: 0;
+    stroke-dashoffset: 16;
+  }
+  100% {
+    opacity: 0.95;
+    stroke-dashoffset: 0;
+  }
+}
+.flowDeadLink {
+  stroke: var(--sev-error);
+  fill: none;
+  stroke-linecap: round;
+  stroke-dasharray: 6 4;
+  opacity: 0.95;
+  animation: nxBlastWave 240ms var(--ease-out, ease-out) both;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--sev-error) 55%, transparent));
+}
+
+/* Screen-space verdict HUD (bottom-center, clear of the toolbar + zoom bar). */
+.flowHud {
+  position: absolute;
+  bottom: 54px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  pointer-events: none;
+  font-family: var(--font-ui);
+  max-width: min(92%, 640px);
+}
+.flowHudRow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 999px;
+  padding: 6px 15px 6px 7px;
+  box-shadow: 0 6px 22px rgba(2, 6, 23, 0.22);
+  pointer-events: all;
+}
+.flowHudBadge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  color: var(--accent-fg, #fff);
+  background: var(--accent);
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+.flowHudVerdict {
+  font-size: 13px;
+  font-weight: 600;
+}
+.flowTone_idle {
+  color: var(--chrome-fg-muted);
+}
+.flowTone_safe {
+  color: #10b981;
+}
+.flowTone_danger {
+  color: var(--sev-error);
+}
+.flowHudHint {
+  font-size: 11px;
+  color: var(--chrome-fg-muted);
+  pointer-events: all;
+}
+.flowHudLink {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+}

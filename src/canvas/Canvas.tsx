@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Device, DeviceType, Link, TextObject } from '@/model/types';
 import { bodyText, setBody } from '@/model/callout';
 import { DEFAULT_LEADER } from '@/model/leader';
@@ -30,6 +30,7 @@ import { ObjectNode } from './ObjectNode';
 import { CalloutLeaderLayer } from './CalloutLeaderLayer';
 import { CalloutFormatControls } from './CalloutFormatControls';
 import { CanvasToolbar } from './CanvasToolbar';
+import { FlowSceneOverlay, FlowHud } from './FlowOverlay';
 import {
   connectorIconPoints,
   parallelIconPoints,
@@ -230,6 +231,8 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   const selection = useProjectStore((s) => s.selection);
   const mode = useProjectStore((s) => s.mode);
   const projection = useProjectStore((s) => s.projection);
+  const flowMode = useProjectStore((s) => s.flowMode);
+  const flowFailed = useProjectStore((s) => s.flowFailed);
   const issues = useProjectStore((s) => s.issues);
   const focusTick = useProjectStore((s) => s.focusTick);
   const canUndo = useProjectStore((s) => s.canUndo);
@@ -237,6 +240,14 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   const cameraTick = useProjectStore((s) => s.cameraTick);
   const health = useProjectStore((s) => s.health);
   const store = useProjectStore.getState;
+  // Flow lens reads the FULL graph (never the viewport-culled arrays) so a blast
+  // that crosses off-screen is not clipped. `rev` bumps on every model change, which
+  // is exactly when devicesAll()/linksAll() must re-run (eslint can't see through the
+  // getState() call that they depend on it).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const flowDevices = useMemo(() => store().devicesAll(), [rev]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const flowLinks = useMemo(() => store().linksAll(), [rev]);
 
   // Point a callout's leader at `targetId` (or clear it when null). One undo entry.
   const attachCalloutTo = useCallback(
@@ -1526,7 +1537,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         : mode === 'connect' || mode === 'lasso'
           ? styles.connectMode
           : ''
-  }${flipping ? ' ' + styles.flip : ''}`;
+  }${flipping ? ' ' + styles.flip : ''}${flowMode ? ' ' + styles.flowDimmed : ''}`;
   const gridStep = 16 * viewport.scale;
 
   return (
@@ -1880,6 +1891,18 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
               />
             ))}
 
+          {/* Flow lens: click-to-fail blast radius. Reads the full graph, renders on
+              top of the (dimmed) scene, and projects for free inside this group. */}
+          {flowMode && (
+            <FlowSceneOverlay
+              devices={flowDevices}
+              links={flowLinks}
+              failed={flowFailed}
+              scale={viewport.scale}
+              onToggle={(id) => store().toggleFlowFailed(id)}
+            />
+          )}
+
           {/* Callout leaders render in BOTH projections: they're scene-space lines,
               so the enclosing ISO_MATRIX group projects them for free in iso (W5). */}
           <CalloutLeaderLayer texts={texts} lookup={leaderLookup} scale={viewport.scale} />
@@ -2087,6 +2110,18 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
             store().setProjection(projection === 'iso' ? 'flat' : 'iso')
           }
           onAutoLayout={() => store().autoLayout()}
+          flowMode={flowMode}
+          onToggleFlow={() => store().setFlowMode(!flowMode)}
+        />
+      )}
+
+      {!readOnly && flowMode && (
+        <FlowHud
+          devices={flowDevices}
+          links={flowLinks}
+          failed={flowFailed}
+          onExit={() => store().setFlowMode(false)}
+          onReset={() => store().clearFlowFailed()}
         />
       )}
 
