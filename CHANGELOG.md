@@ -6,6 +6,39 @@ minor/patch semantics are not yet enforced.
 
 ## [Unreleased]
 
+The living-canvas release: a static topology now reads as a live, breathing
+network, from the cables down to the hardware, with a user control to dial the
+motion. Suite at 768 unit tests.
+
+### Added
+
+- **Living signal flow.** Every network link carries bright "packets" that
+  march source→target, health-colored (cyan when healthy, amber/red on a
+  critical bridge or conflict, accent when selected) and phase-offset per link
+  so the field shimmers out of phase instead of in lockstep. The rack editor's
+  patched cables carry matching light-packets. Compositor-cheap (animated
+  `stroke-dashoffset`, no per-frame JS, no filters in the hot path).
+- **Magnetic connect gesture.** Dragging a new link paints a glowing, gently
+  bowed cable with flowing packets, a start dot, and a pulsing reticle that
+  snaps onto valid targets; drop-target nodes breathe with an accent glow and
+  selected nodes glow.
+- **Living hardware.** Device icons, flat and isometric, now read as powered
+  gear: status lights are real activity LEDs that pulse (health-hued, staggered
+  out of phase, amber/red blinking faster and deeper), every device carries a
+  faint device-family "powered" under-glow, and the displays on monitors, VMs
+  and printer panels glow with a sweeping scanline.
+- **Living motion control** (Settings → Living motion): `full` (the designed
+  experience), `subtle` (gentle breathing only, no traveling packets or
+  scanlines), or `off` (static diagram, ordinary UI transitions unaffected).
+  Persists locally and applies via `<html data-motion>`; the Reduced motion /
+  `prefers-reduced-motion` accessibility switch still overrides everything.
+
+### Fixed
+
+- **E2E CI.** Pinned the Playwright E2E job to `ubuntu-24.04`. `ubuntu-latest`
+  had rolled to 26.04, where Playwright can't install Chromium
+  (`does not support chromium on ubuntu26.04-x64`), reddening every run.
+
 ## [0.6.2] - 2026-07-05
 
 The pointer-native canvas release: both designers' input layers were rebuilt
