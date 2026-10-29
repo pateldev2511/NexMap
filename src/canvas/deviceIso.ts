@@ -63,6 +63,19 @@ function ellipse(c: P2, rx: number, ry: number, fill: string, edge?: string, sw 
 function line(a: P2, b: P2, stroke: string, sw: number): string {
   return `<path d="M${a[0]},${a[1]} L${b[0]},${b[1]}" stroke="${stroke}" stroke-width="${sw}" stroke-linecap="round" fill="none"/>`;
 }
+/**
+ * A live status LED on a 3-D device: a soft baked bloom under a classed core
+ * that pulses. CSS animates only the core's opacity, staggered per-LED via a
+ * negative `animation-delay` so a bank blinks out of phase like real gear; the
+ * global reduced-motion kill switch freezes every LED fully lit. `warn` is the
+ * faster, higher-contrast blink for amber/red lights.
+ */
+function led(c: P2, r: number, fill: string, delayMs = 0, warn = false): string {
+  return (
+    `<circle cx="${c[0]}" cy="${c[1]}" r="${rnd(r * 2)}" fill="${fill}" opacity="0.22"/>` +
+    `<circle class="nxLed${warn ? ' nxLedWarn' : ''}" cx="${c[0]}" cy="${c[1]}" r="${rnd(r)}" fill="${fill}" style="animation-delay:${delayMs}ms"/>`
+  );
+}
 
 /** A solid isometric box. Footprint gx∈[x0,x0+W], gy∈[y0,y0+D], height H. */
 function box(
@@ -172,7 +185,7 @@ function buildIso(type: DeviceType): string {
       p += antenna(W / 2 - 6, -D / 2 + 1.5, H, 11, dark);
       // LED strip on top-front
       for (let i = 0; i < 4; i++)
-        p += circle(pt(-W / 2 + 2.5 + i * 1.8, D / 2 - 1.5, H), 0.55, i === 0 ? '#4ade80' : LED);
+        p += led(pt(-W / 2 + 2.5 + i * 1.8, D / 2 - 1.5, H), 0.55, i === 0 ? '#4ade80' : LED, -i * 210, i !== 0);
       // vent slots on right face
       for (let i = 0; i < 3; i++)
         p += rightSlot(W / 2, -D / 2 + 2, D / 2 - 2, H * (0.3 + i * 0.22), dark, 0.5);
@@ -190,13 +203,13 @@ function buildIso(type: DeviceType): string {
       for (let i = 0; i < ports; i++) {
         const gy = -D / 2 + 1.4 + (i * (D - 2.8)) / (ports - 1);
         p += rightPad(W / 2, gy, H * 0.4, 0.42, cavity); // recessed jack
-        p += circle(pt(W / 2, gy, H * 0.82), 0.25, i % 2 ? '#fbbf24' : '#4ade80'); // link LED
+        p += led(pt(W / 2, gy, H * 0.82), 0.25, i % 2 ? '#fbbf24' : '#4ade80', -i * 130, i % 2 === 1); // link LED
       }
       // Two SFP uplink cages near the front edge.
       p += rightPad(W / 2, D / 2 - 1.4, H * 0.5, 0.7, DETAIL);
       // Status LEDs on the top-front.
-      p += circle(pt(-W / 2 + 1.6, -D / 2 + 1.4, H), 0.5, '#4ade80');
-      p += circle(pt(-W / 2 + 3.1, -D / 2 + 1.4, H), 0.45, '#fbbf24');
+      p += led(pt(-W / 2 + 1.6, -D / 2 + 1.4, H), 0.5, '#4ade80', -200);
+      p += led(pt(-W / 2 + 3.1, -D / 2 + 1.4, H), 0.45, '#fbbf24', -560, true);
       return p;
     }
     case 'patch-panel': {
@@ -235,7 +248,7 @@ function buildIso(type: DeviceType): string {
         p += rightSlot(W / 2, -D / 2 + 1.4, D / 2 - 1.4, z, dark, 0.7);
         // Drive-bay handle (small light pad) on the left of each bay.
         p += rightPad(W / 2, -D / 2 + 2.2, z, 0.45, DETAIL);
-        p += circle(pt(W / 2, D / 2 - 1.2, z), 0.45, i % 2 ? LED : '#4ade80');
+        p += led(pt(W / 2, D / 2 - 1.2, z), 0.45, i % 2 ? LED : '#4ade80', -i * 260, i % 2 === 1);
       }
       return p;
     }
@@ -397,7 +410,7 @@ function buildIso(type: DeviceType): string {
         ],
         mixHex(c, '#020617', 0.5),
       );
-      p += circle(pt(-W / 2 + 7, D / 2 - 2, H), 0.4, '#4ade80');
+      p += led(pt(-W / 2 + 7, D / 2 - 2, H), 0.4, '#4ade80', -300);
       // Output slot on the front (right) face + the sheet coming out.
       p += rightSlot(W / 2, -W * 0.28, W * 0.28, H * 0.5, mixHex(c, '#000000', 0.4), 1.4);
       p += poly(
@@ -433,7 +446,7 @@ function buildIso(type: DeviceType): string {
         p += line(pt(1.5, -1.5, H), pt(3, 0, H), em, 0.9);
         p += line(pt(1.5, 1.5, H), pt(3, 0, H), em, 0.9);
       }
-      for (let i = 0; i < 3; i++) p += circle(pt(-W / 2 + 2 + i * 1.6, D / 2 - 1.3, H), 0.5, LED);
+      for (let i = 0; i < 3; i++) p += led(pt(-W / 2 + 2 + i * 1.6, D / 2 - 1.3, H), 0.5, LED, -i * 220, true);
       return p;
     }
     case 'container': {
@@ -471,7 +484,7 @@ function buildIso(type: DeviceType): string {
       const zc = lift + gh * 0.52;
       p += rightPad(gw / 2, 0, zc, 1.9, mixHex(c, '#020617', 0.5));
       p += rightSlot(gw / 2, -1.5, 1.5, zc + 1.3, DETAIL, 0.6);
-      p += circle(pt(gw / 2, 1.2, zc + 1.3), 0.32, '#4ade80');
+      p += led(pt(gw / 2, 1.2, zc + 1.3), 0.32, '#4ade80', -240);
       return p;
     }
     case 'camera': {
@@ -486,7 +499,7 @@ function buildIso(type: DeviceType): string {
       // Recessed lens with a blue glint, and a recording LED.
       p += circle([rnd(b[0] + 1.4), rnd(b[1] - 1.8)], 1.7, '#020617');
       p += circle([rnd(b[0] + 0.9), rnd(b[1] - 2.4)], 0.6, '#bae6fd');
-      p += circle([rnd(b[0] + 4.4), rnd(b[1] - 0.8)], 0.5, '#f87171');
+      p += led([rnd(b[0] + 4.4), rnd(b[1] - 0.8)], 0.5, '#f87171', -100, true);
       return p;
     }
     case 'isp': {

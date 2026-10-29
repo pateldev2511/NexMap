@@ -94,9 +94,15 @@
   cursor: crosshair;
 }
 
-/* Flat 2D icon (FlatIcon) + its rounded-rect selection halo framing the tile. */
+/* Flat 2D icon (FlatIcon) + its rounded-rect selection halo framing the tile.
+   A soft elevation shadow lifts the chip off the canvas, and a faint device-
+   family glow (--dev-accent, set per node) makes every device read as powered —
+   the same "alive" language as the flowing links. Static, so it rasterises once;
+   hover/selection intensify the separate tile halo below. */
 .deviceFlat {
   pointer-events: none;
+  filter: drop-shadow(0 1.5px 2px rgba(2, 6, 23, 0.32))
+    drop-shadow(0 0 5px color-mix(in srgb, var(--dev-accent, var(--accent)) 30%, transparent));
 }
 
 .deviceTileHalo {
@@ -192,9 +198,12 @@
   pointer-events: none;
 }
 
-/* Isometric 3D device model (deviceIso engine). */
+/* Isometric 3D device model (deviceIso engine). Volumetric shading + the baked
+   ground shadow already give depth, so iso just adds the faint device-family
+   "powered" glow (--dev-accent) for parity with the flat chips. */
 .deviceIso {
   pointer-events: none;
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--dev-accent, var(--accent)) 24%, transparent));
 }
 
 .deviceIsoShadow {
@@ -465,6 +474,44 @@
 .link.selected ~ .linkFlow,
 .linkFlow.selected {
   opacity: 1;
+}
+
+/* ── Living status LEDs ────────────────────────────────────────────────────
+   Device icons (flat + iso) carry real activity lights that now breathe like
+   powered hardware instead of sitting as dead decals. The icon markup is
+   injected, so the core LED circles are tagged with a plain (:global) class and
+   desynced per-LED via an inline negative animation-delay — a bank blinks out of
+   phase. Only opacity animates (compositor-cheap); the global reduced-motion
+   kill switch freezes every LED fully lit. `nxLedWarn` (amber/red) blinks faster
+   and deeper — the same health urgency the link flow uses. */
+@keyframes nxLedPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes nxLedWarn {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.24;
+  }
+}
+
+.deviceFlat :global(.nxLed),
+.deviceIso :global(.nxLed) {
+  animation: nxLedPulse 2s ease-in-out infinite;
+}
+
+.deviceFlat :global(.nxLedWarn),
+.deviceIso :global(.nxLedWarn) {
+  animation: nxLedWarn 1.05s ease-in-out infinite;
 }
 
 /* ── Live connect preview ────────────────────────────────────────────────
