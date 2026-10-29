@@ -1,50 +1,193 @@
 /*
- * NexMap design tokens + base layout.
- * Hierarchy (per design review §5): canvas is the primary surface (high contrast),
- * chrome recedes (muted), bottom panel collapses to zero by default.
+ * ─────────────────────────────────────────────────────────────────────────
+ *  NexMap design system — tokens, base layout, motion primitives.
+ * ─────────────────────────────────────────────────────────────────────────
+ *  Hierarchy (design review §5): the canvas is the primary surface (high
+ *  contrast); chrome recedes (muted); the bottom panel collapses by default.
+ *
+ *  This file is the single source of truth for design tokens. Legacy token
+ *  names (--canvas-bg, --chrome-*, --accent, --sev-*, layout vars) are kept
+ *  verbatim so every existing component keeps working; the system below layers
+ *  a richer, premium, dark-first language on top (elevation, glow, radii,
+ *  spacing, motion, z-index, brand gradients, self-hosted type).
+ *
+ *  Motion note: the reduced-motion kill switch at the bottom neutralises CSS
+ *  animation/transition. JS-driven motion (WebGL deck, canvas media) must check
+ *  prefs.getReduceMotion() / prefers-reduced-motion itself.
  */
 
-:root {
-  /* Surfaces — light theme */
-  --canvas-bg: #f4f6f8;
-  --canvas-grid: #dbe1e8;
-  --chrome-bg: #ffffff;
-  --chrome-border: #e2e6ea;
-  --chrome-fg: #1c2733;
-  --chrome-fg-muted: #6b7785;
-  --accent: #2563eb;
-  --accent-fg: #ffffff;
+@import './fonts.css';
 
-  /* Validation severity — each pairs with a glyph (non-color indicator) */
-  --sev-info: #2563eb;
+:root {
+  /* ── Type ──────────────────────────────────────────────────────────────
+     --font-ui stays the baseline SYSTEM stack so the dense, height-sensitive
+     editor chrome keeps its exact tested geometry (bundled fonts have taller
+     line boxes). The premium bundled faces are opt-in: --font-ui-pre (Inter)
+     for hero/overlay surfaces, --font-display (Space Grotesk) for brand &
+     headings, --font-mono-pre (JetBrains Mono) for code/metrics chips on
+     non-height-sensitive surfaces. --font-mono stays system to keep the
+     editor chrome's mono readouts at their tested heights. */
+  --font-ui:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-ui-pre:
+    'Inter var', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica,
+    Arial, sans-serif;
+  --font-display:
+    'Space Grotesk var', 'Inter var', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --font-mono-pre: 'JetBrains Mono var', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* ── Surfaces — light theme ────────────────────────────────────────── */
+  --canvas-bg: #eef1f6;
+  --canvas-grid: #dce2ec;
+  --chrome-bg: #ffffff;
+  --chrome-bg-2: #f5f7fb; /* secondary / inset surface */
+  --chrome-bg-3: #eceff5; /* tertiary / hover fill */
+  --chrome-border: #e4e8ef;
+  --chrome-border-strong: #d2d9e3;
+  --chrome-fg: #131822;
+  --chrome-fg-muted: #586475;
+  --chrome-fg-subtle: #8a95a6;
+
+  /* ── Brand / accent ────────────────────────────────────────────────── */
+  --accent: #2f6bff;
+  --accent-strong: #1f54e6;
+  --accent-fg: #ffffff;
+  --accent-2: #0bb4d4; /* cyan companion (rack / signal) */
+  --accent-3: #7a5cff; /* violet (depth / tertiary) */
+  --accent-soft: rgba(47, 107, 255, 0.1);
+  --accent-ring: rgba(47, 107, 255, 0.4);
+
+  --brand-grad: linear-gradient(135deg, #2f6bff 0%, #0bb4d4 100%);
+  --brand-grad-ext: linear-gradient(120deg, #7a5cff 0%, #2f6bff 44%, #0bb4d4 100%);
+  --brand-grad-net: linear-gradient(135deg, #4c8dff 0%, #2f6bff 100%);
+  --brand-grad-rack: linear-gradient(135deg, #22d3ee 0%, #0891b2 100%);
+
+  /* ── Validation severity (each pairs with a glyph) ─────────────────── */
+  --sev-info: #2f6bff;
   --sev-warn: #d97706;
   --sev-error: #dc2626;
-  --sev-critical: #7c1d6f;
+  --sev-critical: #a21d6f;
 
-  /* Layout */
+  /* ── Elevation & glow ──────────────────────────────────────────────── */
+  --shadow-1: 0 1px 2px rgba(18, 28, 45, 0.06), 0 1px 1px rgba(18, 28, 45, 0.04);
+  --shadow-2: 0 6px 16px rgba(18, 28, 45, 0.1), 0 2px 6px rgba(18, 28, 45, 0.06);
+  --shadow-3: 0 18px 44px rgba(18, 28, 45, 0.16), 0 6px 14px rgba(18, 28, 45, 0.08);
+  --shadow-float: 0 24px 60px rgba(18, 28, 45, 0.2);
+  --glow-accent: 0 0 0 1px var(--accent-ring), 0 8px 30px rgba(47, 107, 255, 0.28);
+  --glow-soft: 0 10px 40px rgba(47, 107, 255, 0.14);
+  --inner-hair: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+
+  /* ── Deck (hub) backdrop ───────────────────────────────────────────── */
+  --deck-bg: #eef2f8;
+  --deck-fg: #131822;
+  --deck-grid: rgba(47, 107, 255, 0.07);
+  --deck-glow-a: rgba(47, 107, 255, 0.16);
+  --deck-glow-b: rgba(11, 180, 212, 0.14);
+  --deck-vignette: rgba(210, 220, 236, 0.5);
+
+  /* ── Radii ─────────────────────────────────────────────────────────── */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+  --r-2xl: 28px;
+  --r-pill: 999px;
+
+  /* ── Spacing scale ─────────────────────────────────────────────────── */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+
+  /* ── Motion ────────────────────────────────────────────────────────── */
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.5, 1);
+  --ease-in-out: cubic-bezier(0.65, 0.05, 0.36, 1);
+  --dur-1: 120ms;
+  --dur-2: 220ms;
+  --dur-3: 360ms;
+  --dur-4: 600ms;
+
+  /* ── Z-index scale ─────────────────────────────────────────────────── */
+  --z-canvas: 0;
+  --z-chrome: 10;
+  --z-panel: 20;
+  --z-float: 30;
+  --z-menu: 40;
+  --z-overlay: 60;
+  --z-toast: 80;
+  --z-tooltip: 100;
+
+  /* ── Layout (kept at baseline values: editor geometry is height/width
+        sensitive and some e2e tests assume these exact dimensions) ─────── */
   --topbar-h: 44px;
   --left-w: 240px;
   --right-w: 300px;
   --statusbar-h: 26px;
 
-  --font-ui:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-
   color-scheme: light;
 }
 
 :root[data-theme='dark'] {
-  --canvas-bg: #161a1f;
-  --canvas-grid: #262c33;
-  --chrome-bg: #1e242b;
-  --chrome-border: #2c333b;
-  --chrome-fg: #e6eaef;
-  --chrome-fg-muted: #8b96a3;
-  --accent: #3b82f6;
+  /* Surfaces */
+  --canvas-bg: #0d1117;
+  --canvas-grid: #1b2430;
+  --chrome-bg: #11161f;
+  --chrome-bg-2: #0b0f16;
+  --chrome-bg-3: #1a212c;
+  --chrome-border: #222c39;
+  --chrome-border-strong: #324255;
+  --chrome-fg: #e9eef6;
+  --chrome-fg-muted: #9aa7ba;
+  --chrome-fg-subtle: #697688;
+
+  /* Brand / accent */
+  --accent: #4c8dff;
+  --accent-strong: #76a6ff;
+  --accent-2: #2fe3f0;
+  --accent-3: #9a7cff;
+  --accent-soft: rgba(76, 141, 255, 0.16);
+  --accent-ring: rgba(76, 141, 255, 0.5);
+
+  --brand-grad: linear-gradient(135deg, #4c8dff 0%, #2fe3f0 100%);
+  --brand-grad-ext: linear-gradient(120deg, #9a7cff 0%, #4c8dff 44%, #2fe3f0 100%);
+  --brand-grad-net: linear-gradient(135deg, #6aa0ff 0%, #3b82f6 100%);
+  --brand-grad-rack: linear-gradient(135deg, #2fe3f0 0%, #0891b2 100%);
+
+  --sev-info: #4c8dff;
+  --sev-warn: #f59e0b;
+  --sev-error: #f87171;
+  --sev-critical: #e879c9;
+
+  /* Elevation & glow (deeper, with light rims) */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 8px 22px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.35);
+  --shadow-3: 0 22px 54px rgba(0, 0, 0, 0.55), 0 8px 18px rgba(0, 0, 0, 0.4);
+  --shadow-float: 0 28px 70px rgba(0, 0, 0, 0.6);
+  --glow-accent: 0 0 0 1px var(--accent-ring), 0 10px 40px rgba(76, 141, 255, 0.4);
+  --glow-soft: 0 12px 48px rgba(76, 141, 255, 0.22);
+  --inner-hair: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+
+  /* Deck backdrop — deep space with a cool nebula */
+  --deck-bg: #05080e;
+  --deck-fg: #e9eef6;
+  --deck-grid: rgba(90, 140, 255, 0.08);
+  --deck-glow-a: rgba(76, 141, 255, 0.3);
+  --deck-glow-b: rgba(47, 227, 240, 0.2);
+  --deck-vignette: rgba(3, 5, 10, 0.75);
+
   color-scheme: dark;
 }
 
+/* ── Reset & base ────────────────────────────────────────────────────── */
 * {
   box-sizing: border-box;
 }
@@ -61,21 +204,15 @@ body,
 body {
   font-family: var(--font-ui);
   font-size: 13px;
+  /* No global line-height: the editor chrome is dense and height-sensitive
+     (some e2e geometry assumes compact metrics). Prose surfaces (deck, dialogs,
+     first-run) set their own line-height. */
   color: var(--chrome-fg);
   background: var(--canvas-bg);
   -webkit-font-smoothing: antialiased;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  * {
-    animation-duration: 0.001ms !important;
-    transition-duration: 0.001ms !important;
-  }
-}
-
-:root[data-reduce-motion='true'] * {
-  animation-duration: 0.001ms !important;
-  transition-duration: 0.001ms !important;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: 'cv05' 1, 'ss01' 1;
 }
 
 button {
@@ -83,9 +220,132 @@ button {
   cursor: pointer;
 }
 
+::selection {
+  background: var(--accent-soft);
+  color: var(--chrome-fg);
+}
+
+/* ── Themed scrollbars (thin, recessive) ─────────────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--chrome-border-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--chrome-border-strong);
+  border-radius: var(--r-pill);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--chrome-fg-subtle);
+  background-clip: content-box;
+}
+
+/* ── Focus ───────────────────────────────────────────────────────────── */
 :focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+
+/* ── Motion primitives (reusable keyframes) ──────────────────────────── */
+@keyframes nx-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes nx-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes nx-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes nx-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+@keyframes nx-shimmer {
+  0% {
+    background-position: -140% 0;
+  }
+  100% {
+    background-position: 240% 0;
+  }
+}
+@keyframes nx-glow-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes nx-grid-pan {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: var(--nx-grid-step, 48px) var(--nx-grid-step, 48px);
+  }
+}
+@keyframes nx-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes nx-dash {
+  to {
+    stroke-dashoffset: -1000;
+  }
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+:root[data-reduce-motion='true'] * {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
 }
 
 /* ── M3c: earned-quiet chrome demotion ──────────────────────────────────

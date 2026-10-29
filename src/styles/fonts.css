@@ -1,0 +1,33 @@
+/*
+ * Self-hosted variable fonts — bundled locally to honor NexMap's local-first
+ * promise (CSP font-src 'self'; no runtime network). Latin subset, variable-weight
+ * woff2 (one file covers every weight). All three are SIL Open Font License 1.1:
+ *   • Inter          — Rasmus Andersson       (github.com/rsms/inter)
+ *   • Space Grotesk  — Florian Karsten        (github.com/floriankarsten/space-grotesk)
+ *   • JetBrains Mono — JetBrains               (github.com/JetBrains/JetBrainsMono)
+ * See src/assets/fonts/LICENSES.md.
+ */
+
+@font-face {
+  font-family: 'Inter var';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('../assets/fonts/inter-latin.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Space Grotesk var';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url('../assets/fonts/spacegrotesk-latin.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono var';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url('../assets/fonts/jetbrainsmono-latin.woff2') format('woff2');
+}

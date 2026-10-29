@@ -259,6 +259,15 @@ export function App() {
         <NexIcon name={mode === 'rack' ? 'rack' : 'connect'} />
         <span>{mode === 'rack' ? 'Rack designer' : 'Network designer'}</span>
       </button>
+      <button
+        className={shell.topbarBtn}
+        onClick={() => setShowPalette(true)}
+        title="Command menu (⌘K)"
+        aria-label="Open command menu"
+      >
+        <NexIcon name="search" />
+        <span>Command</span>
+      </button>
       <MoreMenu>
         {(close) => (
           <>
@@ -426,7 +435,14 @@ export function App() {
   // mode===null state; the recovery prompt appears inside whichever designer
   // is then chosen.
   if (mode === null) {
-    return <DesignerChooser onPick={pickMode} onOpen={() => void handleOpen()} />;
+    return (
+      <DesignerChooser
+        onPick={pickMode}
+        onOpen={() => void handleOpen()}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+      />
+    );
   }
   const isRack = mode === 'rack';
 

@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { NexIcon } from '@/ui/icons/NexIcon';
+import { NexMapLogo } from '@/ui/deck/NexMapLogo';
 import { getPanelOpen, setPanelOpen } from '@/lib/prefs';
 import { ErrorBoundary } from './ErrorBoundary';
 import styles from './AppShell.module.css';
@@ -87,7 +88,7 @@ export function AppShell({
     >
       <header className={styles.topbar}>
         <div className={styles.brand}>
-          Nex<span>Map</span>
+          <NexMapLogo size={26} />
         </div>
         {titleNode ?? <div className={styles.projectName}>{projectName}</div>}
         {!fullBleed && (

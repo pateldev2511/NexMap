@@ -3,57 +3,69 @@
   inset: 0;
   display: grid;
   place-items: center;
-  background: color-mix(in srgb, var(--canvas-bg) 86%, transparent);
-  backdrop-filter: blur(1px);
+  background: color-mix(in srgb, var(--canvas-bg) 72%, transparent);
+  backdrop-filter: blur(5px);
   z-index: 5;
+  animation: nx-fade var(--dur-2) var(--ease-out) both;
 }
 
 .card {
-  width: min(560px, 92%);
+  width: min(620px, 92%);
   max-height: 88vh;
+  font-family: var(--font-ui-pre);
   display: flex;
   flex-direction: column;
-  background: var(--chrome-bg);
-  border: 1px solid var(--chrome-border);
-  border-radius: 14px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.14);
-  padding: 22px;
+  background: color-mix(in srgb, var(--chrome-bg) 96%, transparent);
+  border: 1px solid var(--chrome-border-strong);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-float);
+  padding: 24px;
+  animation: nx-pop var(--dur-3) var(--ease-spring) both;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.kicker {
+  font-family: var(--font-mono-pre);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: var(--accent);
+  padding: 4px 9px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--accent-soft);
+  background: var(--accent-soft);
 }
 
 /* Scroll the template gallery when there are many; header + footer stay put. */
 .templates {
   overflow-y: auto;
   margin: 0 -6px;
-  padding: 0 6px;
+  padding: 2px 6px;
 }
 
 .section {
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 
 .sectionTitle {
   font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--chrome-fg-muted);
-  margin: 0 0 8px;
-}
-
-.title {
-  font-size: 18px;
   font-weight: 700;
-  margin: 0 0 2px;
-}
-
-.title span {
-  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--chrome-fg-subtle);
+  margin: 0 0 9px;
 }
 
 .tagline {
   color: var(--chrome-fg-muted);
-  font-size: 12px;
-  margin: 0 0 16px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin: 0 0 18px;
 }
 
 .grid {
@@ -63,56 +75,99 @@
 }
 
 .template {
+  position: relative;
   text-align: left;
-  background: var(--canvas-bg);
+  background: var(--chrome-bg-2);
   border: 1px solid var(--chrome-border);
-  border-radius: 9px;
-  padding: 12px;
+  border-radius: var(--r-md);
+  padding: 13px 14px;
   cursor: pointer;
+  overflow: hidden;
+  transition: border-color var(--dur-1), transform var(--dur-2) var(--ease-out),
+    box-shadow var(--dur-2), background var(--dur-1);
 }
-
-.template:hover {
-  border-color: var(--accent);
+/* left accent rail reveals on hover */
+.template::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--brand-grad);
+  transform: scaleY(0);
+  transform-origin: top;
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.template:hover,
+.template:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--chrome-border));
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-2);
+  background: var(--chrome-bg-3);
+  outline: none;
+}
+.template:hover::before,
+.template:focus-visible::before {
+  transform: scaleY(1);
 }
 
 .template strong {
   display: block;
-  margin-bottom: 3px;
+  margin-bottom: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--chrome-fg);
 }
 
 .template span {
   color: var(--chrome-fg-muted);
-  font-size: 11px;
-  line-height: 1.4;
+  font-size: 11.5px;
+  line-height: 1.45;
 }
 
 .row {
   display: flex;
   gap: 10px;
   align-items: center;
-  margin-top: 14px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--chrome-border);
 }
 
 .openBtn {
-  border: 1px solid var(--chrome-border);
-  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--chrome-border-strong);
+  background: var(--chrome-bg-2);
   color: var(--chrome-fg);
-  border-radius: 7px;
-  padding: 8px 12px;
+  font-weight: 600;
+  border-radius: var(--r-md);
+  padding: 9px 14px;
+  transition: border-color var(--dur-1), color var(--dur-1), transform var(--dur-1);
 }
 
 .openBtn:hover {
   border-color: var(--accent);
+  color: var(--accent);
+  transform: translateY(-1px);
 }
 
 .localNote {
   margin-left: auto;
-  color: var(--chrome-fg-muted);
+  color: var(--chrome-fg-subtle);
   font-size: 11px;
 }
 
 .error {
   color: var(--sev-error);
-  font-size: 11px;
-  margin-top: 8px;
+  font-size: 11.5px;
+  margin-top: 10px;
+}
+
+@media (max-width: 560px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
 }

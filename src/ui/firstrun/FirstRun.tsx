@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { NexMapLogo } from '@/ui/deck/NexMapLogo';
 import { useProjectStore } from '@/store/projectStore';
 import {
   TEMPLATES,
@@ -52,11 +53,13 @@ export function FirstRun({
   return (
     <div className={styles.overlay}>
       <div className={styles.card}>
-        <h1 className={styles.title}>
-          Nex<span>Map</span>
-        </h1>
+        <div className={styles.head}>
+          <NexMapLogo size={30} />
+          <span className={styles.kicker}>NEW PROJECT</span>
+        </div>
         <p className={styles.tagline}>
-          Design network diagrams that validate themselves. Local, no login.
+          Design network diagrams that validate themselves. Local, no login — start
+          from a blank canvas or a ready-made topology.
         </p>
 
         <div className={styles.templates}>

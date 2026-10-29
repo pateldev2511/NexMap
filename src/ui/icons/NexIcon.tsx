@@ -52,7 +52,8 @@ export type NexIconName =
   | 'ungroup'
   | 'bring-forward'
   | 'send-backward'
-  | 'trash';
+  | 'trash'
+  | 'search';
 
 interface NexIconProps extends Omit<SVGProps<SVGSVGElement>, 'name'> {
   name: NexIconName;
@@ -91,6 +92,12 @@ const ICONS: Record<NexIconName, ReactNode> = {
       <path d="M9 7V5h6v2" />
       <path d="M7 7l1 13h8l1-13" />
       <path d="M10 11v5M14 11v5" />
+    </>
+  ),
+  search: (
+    <>
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="M20 20l-4.3-4.3" />
     </>
   ),
   'new-file': (
