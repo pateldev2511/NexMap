@@ -76,6 +76,17 @@ function led(c: P2, r: number, fill: string, delayMs = 0, warn = false): string 
     `<circle class="nxLed${warn ? ' nxLedWarn' : ''}" cx="${c[0]}" cy="${c[1]}" r="${rnd(r)}" fill="${fill}" style="animation-delay:${delayMs}ms"/>`
   );
 }
+/**
+ * A powered display on a 3-D device: a faint tint over the screen face (a RIGHT-
+ * face square, like {@link rightPad}) that breathes via CSS. The inline base
+ * opacity keeps static exports tasteful; the global reduced-motion switch freezes
+ * it. Iso screens are sheared parallelograms, so there's no scanline here — just
+ * the glow, matching the flat displays' "powered" read.
+ */
+function isoScreenGlow(xR: number, gy: number, z: number, s: number, tint: string): string {
+  const pts = [pt(xR, gy - s, z + s), pt(xR, gy + s, z + s), pt(xR, gy + s, z - s), pt(xR, gy - s, z - s)];
+  return `<polygon class="nxScreen" points="${join(pts)}" fill="${tint}" opacity="0.18"/>`;
+}
 
 /** A solid isometric box. Footprint gx∈[x0,x0+W], gy∈[y0,y0+D], height H. */
 function box(
@@ -376,6 +387,7 @@ function buildIso(type: DeviceType): string {
         H = 9;
       let p = box(-W / 2, -D / 2, W, D, H, c);
       p += rightPad(W / 2, 0, H * 0.5, 2.4, mixHex(c, '#020617', 0.55)); // screen
+      p += isoScreenGlow(W / 2, 0, H * 0.5, 2.4, '#bfe3ff'); // live display glow
       p += box(-2, -1, 4, 2, -3.2, mixHex(c, '#000', 0.15)); // stand
       return p;
     }
@@ -401,15 +413,14 @@ function buildIso(type: DeviceType): string {
         0.4,
       );
       // Control panel screen on the top-front + status LED.
-      p += poly(
-        [
-          pt(-W / 2 + 2, D / 2 - 3, H),
-          pt(-W / 2 + 5.5, D / 2 - 3, H),
-          pt(-W / 2 + 5.5, D / 2 - 1.2, H),
-          pt(-W / 2 + 2, D / 2 - 1.2, H),
-        ],
-        mixHex(c, '#020617', 0.5),
-      );
+      const panelPts = [
+        pt(-W / 2 + 2, D / 2 - 3, H),
+        pt(-W / 2 + 5.5, D / 2 - 3, H),
+        pt(-W / 2 + 5.5, D / 2 - 1.2, H),
+        pt(-W / 2 + 2, D / 2 - 1.2, H),
+      ];
+      p += poly(panelPts, mixHex(c, '#020617', 0.5));
+      p += `<polygon class="nxScreen" points="${join(panelPts)}" fill="#bfe3ff" opacity="0.18"/>`; // lit panel
       p += led(pt(-W / 2 + 7, D / 2 - 2, H), 0.4, '#4ade80', -300);
       // Output slot on the front (right) face + the sheet coming out.
       p += rightSlot(W / 2, -W * 0.28, W * 0.28, H * 0.5, mixHex(c, '#000000', 0.4), 1.4);
@@ -483,6 +494,7 @@ function buildIso(type: DeviceType): string {
       // OS window on the guest's front face (title bar + running LED).
       const zc = lift + gh * 0.52;
       p += rightPad(gw / 2, 0, zc, 1.9, mixHex(c, '#020617', 0.5));
+      p += isoScreenGlow(gw / 2, 0, zc, 1.9, '#bbf7d0'); // live OS window glow
       p += rightSlot(gw / 2, -1.5, 1.5, zc + 1.3, DETAIL, 0.6);
       p += led(pt(gw / 2, 1.2, zc + 1.3), 0.32, '#4ade80', -240);
       return p;

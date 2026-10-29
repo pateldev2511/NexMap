@@ -34,6 +34,17 @@ const ports = (x0: number, y: number, n: number, gap: number, w: number, h: numb
 const led = (cx: number, cy: number, rad: number, fill: string, delayMs = 0, warn = false) =>
   `<circle cx="${cx}" cy="${cy}" r="${rad * 2.2}" fill="${fill}" opacity="0.2"/>` +
   `<circle class="nxLed${warn ? ' nxLedWarn' : ''}" cx="${cx}" cy="${cy}" r="${rad}" fill="${fill}" style="animation-delay:${delayMs}ms"/>`;
+/**
+ * A powered display. `screenGlow` lays a faint tint over a screen that breathes
+ * (CSS opacity); `screenScan` is a thin highlight that sweeps top→bottom, its
+ * travel (screen height minus the line) passed as `--scanH`. Both carry an inline
+ * base opacity so static exports render a tasteful still glow and no stray
+ * scanline. Animation is frozen by the global reduced-motion switch.
+ */
+const screenGlow = (x: number, y: number, w: number, h: number, rad: number, tint = '#dbf4ff') =>
+  `<rect class="nxScreen" x="${x}" y="${y}" width="${w}" height="${h}" rx="${rad}" ry="${rad}" fill="${tint}" opacity="0.16"/>`;
+const screenScan = (x: number, y: number, w: number, h: number, tint = '#ffffff') =>
+  `<rect class="nxScan" x="${x}" y="${y}" width="${w}" height="0.9" rx="0.4" fill="${tint}" opacity="0" style="--scanH:${Math.max(h - 1.1, 0)}"/>`;
 
 const GREEN = '#4ade80';
 const AMBER = '#fbbf24';
@@ -116,6 +127,8 @@ const ART: Record<DeviceType, string> = {
     r(2.5, 3.5, 19, 12.5, 1.8, '#1e293b') +
     r(3.9, 4.9, 16.2, 9.1, 1, '#38bdf8') +
     p('M3.9 4.9h16.2v4.4 l-16.2 2.6z', '#7dd3fc') + // screen reflection
+    screenGlow(3.9, 4.9, 16.2, 9.1, 1) + // live display glow
+    screenScan(3.9, 4.9, 16.2, 9.1) + // scanline sweep
     led(19, 14.6, 0.45, GREEN, -180) + // power LED
     r(9.3, 16, 5.4, 3, 0.6, '#334155') + // neck
     r(6.8, 19, 10.4, 1.8, 0.9, '#475569'), // base
@@ -126,6 +139,7 @@ const ART: Record<DeviceType, string> = {
     r(3.5, 8, 17, 2.6, 1.6, '#a8a29e') +
     r(3.5, 14.4, 17, 2.6, 1.6, '#57534e') +
     r(5, 9.4, 4.6, 1.9, 0.4, '#292524') + // control panel
+    screenGlow(5, 9.4, 4.6, 1.9, 0.4, '#bfe3ff') + // lit control panel
     led(11.1, 10.35, 0.5, GREEN, -420) +
     r(6.5, 15.2, 11, 4.4, 0.6, '#f8fafc') + // output sheet
     sp('M7.8 16.6h8.4M7.8 18.2h6.6', '#cbd5e1', 0.7),
@@ -152,6 +166,8 @@ const ART: Record<DeviceType, string> = {
     c(4.6, 5.4, 0.55, '#bbf7d0') +
     c(6.2, 5.4, 0.55, '#bbf7d0') +
     r(5.5, 8.4, 13, 6.6, 1, '#052e16') + // inner window
+    screenGlow(5.5, 8.4, 13, 6.6, 1, '#8ef0b8') + // live terminal glow
+    screenScan(5.5, 8.4, 13, 6.6, '#bbf7d0') + // scanline sweep
     sp('M7.5 11h9M7.5 13h6.4', '#34d399', 0.9) +
     p('M14.6 9.6l3 1.9-3 1.9z', '#bbf7d0') + // play
     r(6.5, 18.6, 11, 1.8, 0.9, '#15803d'), // base

@@ -514,6 +514,51 @@
   animation: nxLedWarn 1.05s ease-in-out infinite;
 }
 
+/* ── Live displays ─────────────────────────────────────────────────────────
+   Monitors, VM windows and printer panels read as powered-on: a faint tint
+   breathes over the screen, and (flat only, where screens are axis-aligned) a
+   thin highlight sweeps top→bottom like a refresh scanline. The scanline's
+   travel is the screen height, passed per-instance as `--scanH` (unitless art
+   units → px). Both carry an inline base opacity so static exports stay tasteful
+   without a stylesheet; the global reduced-motion kill switch freezes them. */
+@keyframes nxScreenGlow {
+  0%,
+  100% {
+    opacity: 0.1;
+  }
+  50% {
+    opacity: 0.26;
+  }
+}
+
+@keyframes nxScanSweep {
+  0% {
+    transform: translateY(0);
+    opacity: 0;
+  }
+  14% {
+    opacity: 0.55;
+  }
+  86% {
+    opacity: 0.55;
+  }
+  100% {
+    transform: translateY(calc(var(--scanH, 6) * 1px));
+    opacity: 0;
+  }
+}
+
+.deviceFlat :global(.nxScreen),
+.deviceIso :global(.nxScreen) {
+  pointer-events: none;
+  animation: nxScreenGlow 2.6s ease-in-out infinite;
+}
+
+.deviceFlat :global(.nxScan) {
+  pointer-events: none;
+  animation: nxScanSweep 3.4s linear infinite;
+}
+
 /* ── Live connect preview ────────────────────────────────────────────────
    Dragging a new link paints a glowing, gently-bowed cable with marching
    packets and a pulsing reticle at the cursor — the "awesome, smooth" connect
