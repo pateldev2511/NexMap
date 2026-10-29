@@ -260,6 +260,10 @@ export interface ProjectStore {
   mode: CanvasMode;
   /** Active render projection (flat or isometric). View-level, not undoable. */
   projection: Projection;
+  /** Flow lens: read-only "stress-test your design" mode. View-level, not undoable. */
+  flowMode: boolean;
+  /** Device ids currently "pulled" (failed) in Flow mode. Cleared on exit. */
+  flowFailed: string[];
   projectName: string;
   activeLayerId: string;
   activeViewId: string | null;
@@ -370,6 +374,12 @@ export interface ProjectStore {
   setMode(mode: CanvasMode): void;
   /** Switch the active render projection (flat ↔ isometric). */
   setProjection(p: Projection): void;
+  /** Enter/leave the Flow (stress-test) lens; leaving clears the failed set. */
+  setFlowMode(on: boolean): void;
+  /** Pull or restore a device in Flow mode. */
+  toggleFlowFailed(id: string): void;
+  /** Restore every pulled device (stay in Flow). */
+  clearFlowFailed(): void;
   endEdit(): void;
   /** Mark the model as saved to a file (clears the unsaved-changes dot). */
   markSaved(): void;
@@ -577,6 +587,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     dirty: false,
     mode: 'select',
     projection: 'flat',
+    flowMode: false,
+    flowFailed: [],
     projectName: model.project.name,
     activeLayerId: firstLayerId(),
     activeViewId: null,
@@ -1714,6 +1726,17 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     setProjection(p) {
       set({ projection: p });
+    },
+
+    setFlowMode(on) {
+      set(on ? { flowMode: true } : { flowMode: false, flowFailed: [] });
+    },
+    toggleFlowFailed(id) {
+      const cur = get().flowFailed;
+      set({ flowFailed: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] });
+    },
+    clearFlowFailed() {
+      set({ flowFailed: [] });
     },
 
     endEdit() {

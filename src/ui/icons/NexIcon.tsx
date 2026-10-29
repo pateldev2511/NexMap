@@ -13,6 +13,7 @@ export type NexIconName =
   | 'text'
   | 'shape'
   | 'iso'
+  | 'flow'
   | 'auto-layout'
   | 'zoom-in'
   | 'zoom-out'
@@ -189,6 +190,13 @@ const ICONS: Record<NexIconName, ReactNode> = {
       <path d="M12 3.5 20 8l-8 4.5L4 8z" />
       <path d="M4 8v8l8 4.5 8-4.5V8" />
       <path d="M12 12.5v8" />
+    </>
+  ),
+  // Stress-test / blast radius: an impact burst radiating from a node.
+  flow: (
+    <>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2v3.2M12 18.8V22M2 12h3.2M18.8 12H22M5.1 5.1l2.3 2.3M16.6 16.6l2.3 2.3M18.9 5.1l-2.3 2.3M7.4 16.6l-2.3 2.3" />
     </>
   ),
   'auto-layout': (
