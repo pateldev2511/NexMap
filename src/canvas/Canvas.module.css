@@ -1001,3 +1001,31 @@
   padding: 0;
   text-decoration: underline;
 }
+
+/* Reroute: backups that light up as survivors find a detour. Cyan (the signal
+   channel), marching toward the network, so "held via a backup" reads as relief
+   against the red death. Staggered by the same wave distance. */
+@keyframes nxRerouteBloom {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 0.95;
+  }
+}
+@keyframes nxRerouteMarch {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+.flowRerouteLink {
+  stroke: var(--accent-2, #22d3ee);
+  fill: none;
+  stroke-linecap: round;
+  stroke-dasharray: 5 7;
+  opacity: 0.95;
+  animation:
+    nxRerouteBloom 280ms var(--ease-out, ease-out) both,
+    nxRerouteMarch 0.9s linear infinite;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent-2, #22d3ee) 55%, transparent));
+}

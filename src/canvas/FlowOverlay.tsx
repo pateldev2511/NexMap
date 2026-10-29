@@ -95,6 +95,30 @@ function FlowSceneOverlayImpl({ devices, links, failed, scale, onToggle }: Scene
         );
       })}
 
+      {/* Reroute: the backups that light up — survivors' traffic finding the detour.
+          Cyan (the signal channel), not red, so "held via a backup" reads as relief. */}
+      {links.map((l) => {
+        if (!result.rerouted.has(l.id)) return null;
+        const a = byId.get(l.sourceId);
+        const b = byId.get(l.targetId);
+        if (!a || !b) return null;
+        const pa = center(a);
+        const pb = center(b);
+        const hop = Math.min(dist.get(l.sourceId) ?? 0, dist.get(l.targetId) ?? 0);
+        return (
+          <line
+            key={`reroute-${l.id}`}
+            className={styles.flowRerouteLink}
+            x1={pa.x}
+            y1={pa.y}
+            x2={pb.x}
+            y2={pb.y}
+            strokeWidth={sw(2.5)}
+            style={{ animationDelay: `${hop * 70}ms` }}
+          />
+        );
+      })}
+
       {/* Per-device status rings + the (always-present) hit targets. */}
       {devices.map((d) => {
         const c = center(d);
@@ -172,16 +196,22 @@ export function FlowHud({ devices, links, failed, onExit, onReset }: HudProps) {
   }, [onExit]);
 
   const lost = result.isolated.size;
+  const rr = result.rerouted.size;
   let verdict: string;
   let tone: 'idle' | 'safe' | 'danger';
   if (failed.length === 0) {
     verdict = 'Click any device to pull it — watch what loses its connection.';
     tone = 'idle';
   } else if (lost === 0) {
-    verdict = `Holding — 0 devices lost${failed.length > 1 ? ` after ${failed.length} failures` : ''}.`;
+    verdict =
+      rr > 0
+        ? `Holding — traffic rerouted over ${rr} backup link${rr === 1 ? '' : 's'}, 0 lost.`
+        : `Holding — 0 devices lost${failed.length > 1 ? ` after ${failed.length} failures` : ''}.`;
     tone = 'safe';
   } else {
-    verdict = `${lost} device${lost === 1 ? '' : 's'} isolated — no path to the network.`;
+    verdict =
+      `${lost} device${lost === 1 ? '' : 's'} isolated — no path to the network` +
+      (rr > 0 ? `; ${rr} rerouted.` : '.');
     tone = 'danger';
   }
 

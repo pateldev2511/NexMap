@@ -75,6 +75,37 @@ describe('blastRadius', () => {
     expect(blastRadius(devices, links, [a.id]).isolated.size).toBe(0);
   });
 
+  it('lights up a longer backup path as rerouted when the primary fails', () => {
+    const r0 = dev('router', 'R');
+    const a = dev('switch', 'A');
+    const c = dev('server', 'C');
+    const x = dev('switch', 'X');
+    const y = dev('switch', 'Y');
+    const devices = [r0, a, c, x, y];
+    const primary2 = link(a, c);
+    const rx = link(r0, x);
+    const xy = link(x, y);
+    const yc = link(y, c); // Y–C: not on a shortest path until A fails
+    const links = [link(r0, a), primary2, rx, xy, yc];
+    const res = blastRadius(devices, links, [a.id]);
+    expect(res.isolated.size).toBe(0); // C survives via R–X–Y–C
+    expect(res.survived.has(c.id)).toBe(true);
+    // the WHOLE backup path lights up, so you watch the full detour
+    expect(res.rerouted).toEqual(new Set([rx.id, xy.id, yc.id]));
+    expect(res.rerouted.has(primary2.id)).toBe(false); // the dead primary is not a reroute
+  });
+
+  it('no new backup lights up when redundant paths were already primary (ECMP)', () => {
+    const isp1 = dev('isp', 'ISP1');
+    const isp2 = dev('isp', 'ISP2');
+    const core = dev('switch', 'CORE');
+    const srv = dev('server', 'SRV');
+    const links = [link(isp1, core), link(isp2, core), link(core, srv)];
+    const r = blastRadius([isp1, isp2, core, srv], links, [isp1.id]);
+    expect(r.isolated.size).toBe(0);
+    expect(r.rerouted.size).toBe(0);
+  });
+
   it('no failure means no casualties', () => {
     const isp = dev('isp', 'ISP');
     const sw = dev('switch', 'SW');

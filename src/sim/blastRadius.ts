@@ -26,6 +26,12 @@ export interface BlastResult {
   anchor: string | null;
   /** Link ids with at least one failed-or-isolated endpoint (the "dead" wave). */
   deadLinks: Set<string>;
+  /**
+   * Link ids that carry traffic toward egress ONLY after the failure — the backup
+   * paths that "light up" as survivors find a detour. Computed as edges newly on a
+   * shortest path to egress (BFS layers) that weren't before, excluding dead links.
+   */
+  rerouted: Set<string>;
 }
 
 /** Devices nearer the edge/egress make the most honest reference for "reachable". */
@@ -58,26 +64,52 @@ function buildAdjacency(
   return adj;
 }
 
-/** Multi-source flood fill: everything reachable from ANY of `sources`. */
-function reachableFrom(adj: Map<string, Set<string>>, sources: Iterable<string>): Set<string> {
-  const seen = new Set<string>();
-  const stack: string[] = [];
+/**
+ * Multi-source BFS. Returns the hop distance (0 at the sources) of every reachable
+ * node — `.has(id)` doubles as the reachable set, and the layers let us tell which
+ * edges lie on a shortest path toward egress.
+ */
+function bfsLayers(adj: Map<string, Set<string>>, sources: Iterable<string>): Map<string, number> {
+  const dist = new Map<string, number>();
+  let frontier: string[] = [];
   for (const s of sources) {
-    if (adj.has(s) && !seen.has(s)) {
-      seen.add(s);
-      stack.push(s);
+    if (adj.has(s) && !dist.has(s)) {
+      dist.set(s, 0);
+      frontier.push(s);
     }
   }
-  while (stack.length) {
-    const cur = stack.pop()!;
-    for (const n of adj.get(cur) ?? []) {
-      if (!seen.has(n)) {
-        seen.add(n);
-        stack.push(n);
+  let depth = 0;
+  while (frontier.length) {
+    depth++;
+    const next: string[] = [];
+    for (const u of frontier) {
+      for (const v of adj.get(u) ?? []) {
+        if (!dist.has(v)) {
+          dist.set(v, depth);
+          next.push(v);
+        }
       }
     }
+    frontier = next;
   }
-  return seen;
+  return dist;
+}
+
+/**
+ * Link ids that lie on a shortest path toward egress given BFS layer distances:
+ * both endpoints reachable and exactly one hop apart. These are the edges that
+ * could carry traffic toward the egress set.
+ */
+function activeLinks(links: Link[], dist: Map<string, number>): Set<string> {
+  const active = new Set<string>();
+  for (const l of links) {
+    if (l.sourceId === l.targetId) continue;
+    const a = dist.get(l.sourceId);
+    const b = dist.get(l.targetId);
+    if (a === undefined || b === undefined) continue;
+    if (Math.abs(a - b) === 1) active.add(l.id);
+  }
+  return active;
 }
 
 /**
@@ -124,14 +156,15 @@ export function blastRadius(
   const egress = egressNodes(devices, links);
   const anchor = egress[0] ?? null;
 
-  const before = reachableFrom(buildAdjacency(devices, links, new Set()), egress);
+  const distBefore = bfsLayers(buildAdjacency(devices, links, new Set()), egress);
   const survivingEgress = egress.filter((id) => !failedSet.has(id));
-  const after = reachableFrom(buildAdjacency(devices, links, failedSet), survivingEgress);
+  const distAfter = bfsLayers(buildAdjacency(devices, links, failedSet), survivingEgress);
 
   const isolated = new Set<string>();
-  for (const id of before) {
-    if (!failedSet.has(id) && !after.has(id)) isolated.add(id);
+  for (const id of distBefore.keys()) {
+    if (!failedSet.has(id) && !distAfter.has(id)) isolated.add(id);
   }
+  const survived = new Set(distAfter.keys());
 
   const deadLinks = new Set<string>();
   for (const l of links) {
@@ -145,5 +178,42 @@ export function blastRadius(
     }
   }
 
-  return { failed: failedSet, isolated, survived: after, anchor, deadLinks };
+  // Backups that light up as traffic finds a detour: any edge newly on a shortest
+  // path (equal-length alternates), PLUS the full new path every survivor whose
+  // route got longer now takes — so you watch the whole detour, not one lone hop.
+  const activeBefore = activeLinks(links, distBefore);
+  const afterActive = activeLinks(links, distAfter);
+  const rerouted = new Set<string>();
+  for (const id of afterActive) {
+    if (!activeBefore.has(id) && !deadLinks.has(id)) rerouted.add(id);
+  }
+
+  const afterAdj = buildAdjacency(devices, links, failedSet);
+  const pairLink = new Map<string, string>();
+  for (const l of links) {
+    if (l.sourceId === l.targetId || deadLinks.has(l.id)) continue;
+    pairLink.set(`${l.sourceId}|${l.targetId}`, l.id);
+    pairLink.set(`${l.targetId}|${l.sourceId}`, l.id);
+  }
+  for (const [id, dAfter] of distAfter) {
+    const dBefore = distBefore.get(id);
+    if (dBefore === undefined || dAfter <= dBefore) continue; // route didn't get longer
+    let cur = id;
+    for (let guard = 0; (distAfter.get(cur) ?? 0) > 0 && guard <= devices.length; guard++) {
+      const dc = distAfter.get(cur)!;
+      let stepped = false;
+      for (const nb of afterAdj.get(cur) ?? []) {
+        if (distAfter.get(nb) === dc - 1) {
+          const lid = pairLink.get(`${cur}|${nb}`);
+          if (lid) rerouted.add(lid);
+          cur = nb;
+          stepped = true;
+          break;
+        }
+      }
+      if (!stepped) break;
+    }
+  }
+
+  return { failed: failedSet, isolated, survived, anchor, deadLinks, rerouted };
 }
