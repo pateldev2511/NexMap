@@ -559,6 +559,29 @@
   animation: nxScanSweep 3.4s linear infinite;
 }
 
+/* ── Living-motion dial (Settings → Living motion) ─────────────────────────
+   A taste control on top of the accessibility kill switch. `off` freezes the
+   whole living layer (flow packets, LEDs, screens, target breathe) while leaving
+   ordinary UI transitions alone; `subtle` keeps the gentle breathing but drops
+   the traveling packets and the scanline sweep. `full` (default / no attribute)
+   leaves everything as authored. Reduced motion still overrides all of this. */
+:root[data-motion='off'] .linkFlow,
+:root[data-motion='off'] .rubberFlow,
+:root[data-motion='off'] .rubberReticle,
+:root[data-motion='off'] :global(.nxLed),
+:root[data-motion='off'] :global(.nxScreen),
+:root[data-motion='off'] :global(.nxScan),
+:root[data-motion='off'] .node.validTarget .deviceTileHalo,
+:root[data-motion='off'] .node.validTarget .deviceIconHalo,
+:root[data-motion='off'] .isoNode.validTarget .deviceIconHalo {
+  animation: none;
+}
+
+:root[data-motion='subtle'] .linkFlow,
+:root[data-motion='subtle'] :global(.nxScan) {
+  animation: none;
+}
+
 /* ── Live connect preview ────────────────────────────────────────────────
    Dragging a new link paints a glowing, gently-bowed cable with marching
    packets and a pulsing reticle at the cursor — the "awesome, smooth" connect

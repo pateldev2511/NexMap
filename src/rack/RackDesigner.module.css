@@ -436,6 +436,13 @@
   }
 }
 
+/* Living-motion dial (Settings): the rack cable light-packets are traveling
+   motion, so both 'subtle' and 'off' freeze them. See Canvas.module.css. */
+:root[data-motion='off'] .cableFlow,
+:root[data-motion='subtle'] .cableFlow {
+  animation: none;
+}
+
 .devhit {
   cursor: grab;
 }
