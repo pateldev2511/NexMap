@@ -61,3 +61,30 @@ export function setReduceMotion(on: boolean): void {
 export function applyReduceMotion(on: boolean): void {
   document.documentElement.dataset.reduceMotion = on ? 'true' : 'false';
 }
+
+/**
+ * How lively the canvas feels: `full` is the designed experience (flowing link
+ * packets, pulsing LEDs, live screens); `subtle` keeps only the gentle breathing
+ * and drops the traveling packets/sweeps; `off` freezes the whole living layer
+ * while leaving ordinary UI transitions alone. This is a taste dial — the master
+ * accessibility switch is still Reduced motion / prefers-reduced-motion, which
+ * freezes everything regardless of this setting.
+ */
+export type MotionLevel = 'off' | 'subtle' | 'full';
+
+const MOTION_KEY = 'nexmap.motionLevel';
+
+export function getMotionLevel(): MotionLevel {
+  const v = localStorage.getItem(MOTION_KEY);
+  return v === 'off' || v === 'subtle' ? v : 'full';
+}
+
+export function setMotionLevel(level: MotionLevel): void {
+  localStorage.setItem(MOTION_KEY, level);
+  applyMotionLevel(level);
+}
+
+/** Reflect the living-motion level onto <html data-motion> for the CSS gates. */
+export function applyMotionLevel(level: MotionLevel): void {
+  document.documentElement.dataset.motion = level;
+}

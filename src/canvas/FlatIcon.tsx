@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import type { DeviceType } from '@/model/types';
 import { deviceIconFlatGroup } from './deviceVisuals';
 import styles from './Canvas.module.css';
@@ -17,10 +18,13 @@ interface FlatIconProps {
  * uses the 3D {@link IsoIcon} instead. The markup is a trusted compile-time
  * constant, so dangerouslySetInnerHTML is injection-safe.
  */
-export function FlatIcon({ type, cx, cy, size }: FlatIconProps) {
+export function FlatIcon({ type, cx, cy, size, accent }: FlatIconProps) {
+  // Feed the device-family accent to the at-rest "powered" under-glow (Canvas.module.css).
+  const style = accent ? ({ '--dev-accent': accent } as CSSProperties) : undefined;
   return (
     <g
       className={styles.deviceFlat}
+      style={style}
       dangerouslySetInnerHTML={{ __html: deviceIconFlatGroup(type, cx, cy, size) }}
     />
   );

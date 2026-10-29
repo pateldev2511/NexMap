@@ -187,16 +187,42 @@ export function devicePortLayout(device: Device, panel: Rect): PortRect[] {
   return portLayout(panel, ports);
 }
 
-function labelParts(device: Device, p: Rect): string[] {
+/**
+ * Usable width (px) for the brand/model silkscreen on a device face. Dense-jack
+ * faceplates (switch/firewall) draw their port field from ~x+98, so the label is
+ * confined to the strip before it and shrunk to fit; roomier layouts (servers,
+ * patch) keep near-full width and never shrink.
+ */
+function labelZoneFor(device: Device, panel: Rect): number {
+  const kind = panelKindFor(device.type);
+  if (kind === 'switch' || kind === 'firewall') return 98;
+  return panel.w - 18;
+}
+
+/**
+ * Scale a monospace label's font DOWN so the full string fits `availW` px — never
+ * truncate (the model number is the useful part). Floors at a still-legible size;
+ * pathologically long names just spill a little, same as before. `~0.6em`/glyph.
+ */
+function fitLabel(text: string, maxFont: number, availW: number): { text: string; fontSize: number } {
+  const t = text.trim();
+  const fontSize = Math.max(6, Math.min(maxFont, availW / Math.max(1, t.length * 0.6)));
+  return { text: t, fontSize };
+}
+
+function labelParts(device: Device, p: Rect, maxW?: number): string[] {
   const vendorModel = [device.vendor, device.model].filter(Boolean).join(' ');
   const primary = vendorModel || device.name;
   const secondary = vendorModel ? device.name : '';
-  const max = Math.max(10, Math.min(12, p.h * 0.23));
+  const base = Math.max(10, Math.min(12, p.h * 0.23));
+  const avail = (maxW ?? p.w - 18) - 8; // 8px left inset
+  const fit = fitLabel(primary, base, avail);
   const out = [
-    `<text data-facelabel="1" x="${n(p.x + 8)}" y="${n(p.y + Math.min(p.h / 2 + 4, 18))}" font-family="ui-monospace,Menlo,monospace" font-size="${n(max)}" font-weight="800" fill="${C.text}">${escapeXml(primary)}</text>`,
+    `<text data-facelabel="1" x="${n(p.x + 8)}" y="${n(p.y + Math.min(p.h / 2 + 4, 18))}" font-family="ui-monospace,Menlo,monospace" font-size="${n(fit.fontSize)}" font-weight="800" fill="${C.text}">${escapeXml(fit.text)}</text>`,
   ];
   if (secondary && p.h >= 44) {
-    out.push(`<text x="${n(p.x + 8)}" y="${n(p.y + Math.min(p.h - 9, 34))}" font-family="ui-monospace,Menlo,monospace" font-size="8.5" fill="${C.textMut}">${escapeXml(secondary)}</text>`);
+    const sec = fitLabel(secondary, 8.5, avail);
+    out.push(`<text x="${n(p.x + 8)}" y="${n(p.y + Math.min(p.h - 9, 34))}" font-family="ui-monospace,Menlo,monospace" font-size="${n(sec.fontSize)}" fill="${C.textMut}">${escapeXml(sec.text)}</text>`);
   }
   return out;
 }
@@ -265,7 +291,7 @@ function pduStripParts(device: Device, p: Rect): string[] {
 function chassis(
   device: Device,
   p: Rect,
-  opts: { faceplate?: string; led?: string; hideLabel?: boolean } = {},
+  opts: { faceplate?: string; led?: string; hideLabel?: boolean; labelMaxW?: number } = {},
 ): string {
   const fill = opts.faceplate ?? 'url(#rkMetal)';
   const led = opts.led ?? 'url(#rkLedG)';
@@ -274,7 +300,7 @@ function chassis(
     `<rect x="${n(p.x)}" y="${n(p.y)}" width="${n(p.w)}" height="${n(p.h)}" rx="3" fill="${fill}" stroke="${C.chassisBd}" stroke-width="1" filter="url(#rkDeviceShadow)"/>` +
     `<rect x="${n(p.x + 1.3)}" y="${n(p.y + 1.2)}" width="${n(p.w - 2.6)}" height="${n(Math.min(p.h * 0.34, 13))}" rx="2.5" fill="url(#rkSheen)"/>` +
     `<rect x="${n(p.x + 0.8)}" y="${n(p.y + p.h - 2.2)}" width="${n(p.w - 1.6)}" height="1.2" fill="#64748b" fill-opacity="0.28"/>` +
-    (opts.hideLabel ? '' : labelParts(device, p).join('')) +
+    (opts.hideLabel ? '' : labelParts(device, p, opts.labelMaxW).join('')) +
     `<circle cx="${n(p.x + p.w - 6)}" cy="${n(p.y + 6)}" r="2.5" fill="${led}"/>`
   );
 }
@@ -349,18 +375,21 @@ export function deviceFaceParts(
     return [...rearFaceParts(device, panel, hideLabel), ...statusOverlay(device, panel)];
   }
   const kind = panelKindFor(device.type);
-  // Faceplate drawer that folds in the hide-name flag for every kind branch.
+  // Faceplate drawer that folds in the hide-name flag + the shared label zone
+  // (so the silkscreen is truncated to fit and never lands under the jacks).
+  const labelMaxW = labelZoneFor(device, panel);
   const plate = (opts: { faceplate?: string; led?: string } = {}) =>
-    chassis(device, panel, { ...opts, hideLabel });
+    chassis(device, panel, { ...opts, hideLabel, labelMaxW });
   const out: string[] = [];
 
   if (kind === 'switch' || kind === 'firewall') {
     out.push(plate());
-    out.push(...ventSlats(panel.x + 62, panel.y + Math.max(4, panel.h * 0.22), 24, Math.max(8, panel.h * 0.5), 6));
     for (const j of devicePortLayout(device, panel)) out.push(rj45(j.x, j.y, j.w, j.h));
     // SFP+ uplink cages on the right edge
     const cageW = Math.min(44, panel.w * 0.09);
     const cageX = panel.x + panel.w - cageW - 6;
+    // Vent block sits just left of the uplink cages — off the brand-label strip.
+    out.push(...ventSlats(cageX - 30, panel.y + Math.max(4, panel.h * 0.22), 24, Math.max(8, panel.h * 0.5), 6));
     for (let i = 0; i < 2; i++) {
       const cy = panel.y + panel.h / 2 - 9 + i * 11;
       out.push(`<rect x="${n(cageX)}" y="${n(cy)}" width="${cageW}" height="9" rx="1.5" fill="${C.cage}" stroke="${C.cageBd}" stroke-width="0.75"/>`);

@@ -6,7 +6,10 @@ import {
   setWheelAction,
   getReduceMotion,
   setReduceMotion,
+  getMotionLevel,
+  setMotionLevel,
   type ConnectMode,
+  type MotionLevel,
 } from '@/lib/prefs';
 import type { WheelAction } from '@/input/wheel';
 import { canWriteBack, canOpenPicker } from '@/persistence/fsaccess';
@@ -30,6 +33,7 @@ export function SettingsDialog({
   const [connect, setConnect] = useState<ConnectMode>(() => getConnectMode());
   const [wheel, setWheel] = useState<WheelAction>(() => getWheelAction());
   const [reduceMotion, setRM] = useState(() => getReduceMotion());
+  const [motion, setMotion] = useState<MotionLevel>(() => getMotionLevel());
   const [usage, setUsage] = useState<string>('…');
   const fsAvailable = canWriteBack || canOpenPicker;
   const idbAvailable = typeof indexedDB !== 'undefined';
@@ -146,6 +150,27 @@ export function SettingsDialog({
               />
               Minimize animations
             </label>
+
+            <label>Living motion</label>
+            <select
+              value={motion}
+              disabled={reduceMotion}
+              onChange={(e) => {
+                const m = e.target.value as MotionLevel;
+                setMotion(m);
+                setMotionLevel(m);
+              }}
+              aria-label="Living motion level"
+              title={
+                reduceMotion
+                  ? 'Reduced motion is on, which freezes all animation regardless of this setting.'
+                  : undefined
+              }
+            >
+              <option value="full">Full — flowing links, pulsing LEDs, live screens</option>
+              <option value="subtle">Subtle — gentle breathing only, no flow</option>
+              <option value="off">Off — static diagram</option>
+            </select>
           </div>
 
           <div

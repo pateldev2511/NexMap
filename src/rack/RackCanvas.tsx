@@ -58,6 +58,14 @@ function cableColorName(hex: string): string {
   return CABLE_COLOR_NAMES[hex.toLowerCase()] ?? hex;
 }
 
+/** Deterministic per-cable phase (ms) so signal packets on parallel runs travel
+ *  out of lockstep rather than pulsing as one bar of light. */
+function cableFlowPhase(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) & 0x3ff;
+  return -(h % 1250);
+}
+
 /** Cancel/inspect handle the keyboard router uses for in-flight rack gestures. */
 export interface RackGestureApi {
   cancel: () => void;
@@ -236,6 +244,17 @@ const RackFocusScene = memo(function RackFocusScene({
             <path d={dPath} fill="none" stroke="#f8fafc" strokeWidth={w + 2.4} strokeLinecap="round" opacity={op * 0.86} />
             <path d={dPath} fill="none" stroke={c.color} strokeWidth={w} strokeLinecap="round" opacity={op} />
             <path d={dPath} fill="none" stroke="#ffffff" strokeWidth={0.9} strokeLinecap="round" opacity={op * 0.5} />
+            {/* light packet travelling A→B — the cable "carries signal" */}
+            <path
+              className={styles.cableFlow}
+              d={dPath}
+              fill="none"
+              stroke="#ffffff"
+              strokeWidth={Math.min(w, 2.8)}
+              strokeLinecap="round"
+              opacity={op * 0.95}
+              style={{ animationDelay: `${cableFlowPhase(c.id)}ms` }}
+            />
             <circle cx={a.x} cy={a.y} r={sel ? 4.8 : 3.9} fill="#0f172a" opacity={op} stroke="#f8fafc" strokeWidth={1.1} />
             <circle cx={b.x} cy={b.y} r={sel ? 4.8 : 3.9} fill="#0f172a" opacity={op} stroke="#f8fafc" strokeWidth={1.1} />
             <circle cx={a.x} cy={a.y} r={sel ? 2.6 : 2.1} fill={c.color} opacity={op} />

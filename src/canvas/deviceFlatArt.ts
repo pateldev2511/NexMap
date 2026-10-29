@@ -23,6 +23,28 @@ const sp = (d: string, stroke: string, w = 1, dash?: string) =>
 /** A row of n ports/jacks. */
 const ports = (x0: number, y: number, n: number, gap: number, w: number, h: number, fill: string) =>
   Array.from({ length: n }, (_, i) => r(x0 + i * gap, y, w, h, 0.3, fill)).join('');
+/**
+ * A live status LED: a soft baked bloom (static) under a classed core that
+ * pulses — so a device reads as powered, not a dead decal. CSS animates only
+ * the core's opacity (compositor-cheap), staggered per-LED via a negative
+ * `animation-delay` so a bank of lights blinks out of phase like real gear.
+ * `warn` gives the faster, higher-contrast "attention" blink used for amber/red.
+ * The global reduced-motion kill switch freezes every LED fully lit.
+ */
+const led = (cx: number, cy: number, rad: number, fill: string, delayMs = 0, warn = false) =>
+  `<circle cx="${cx}" cy="${cy}" r="${rad * 2.2}" fill="${fill}" opacity="0.2"/>` +
+  `<circle class="nxLed${warn ? ' nxLedWarn' : ''}" cx="${cx}" cy="${cy}" r="${rad}" fill="${fill}" style="animation-delay:${delayMs}ms"/>`;
+/**
+ * A powered display. `screenGlow` lays a faint tint over a screen that breathes
+ * (CSS opacity); `screenScan` is a thin highlight that sweeps top→bottom, its
+ * travel (screen height minus the line) passed as `--scanH`. Both carry an inline
+ * base opacity so static exports render a tasteful still glow and no stray
+ * scanline. Animation is frozen by the global reduced-motion switch.
+ */
+const screenGlow = (x: number, y: number, w: number, h: number, rad: number, tint = '#dbf4ff') =>
+  `<rect class="nxScreen" x="${x}" y="${y}" width="${w}" height="${h}" rx="${rad}" ry="${rad}" fill="${tint}" opacity="0.16"/>`;
+const screenScan = (x: number, y: number, w: number, h: number, tint = '#ffffff') =>
+  `<rect class="nxScan" x="${x}" y="${y}" width="${w}" height="0.9" rx="0.4" fill="${tint}" opacity="0" style="--scanH:${Math.max(h - 1.1, 0)}"/>`;
 
 const GREEN = '#4ade80';
 const AMBER = '#fbbf24';
@@ -41,14 +63,16 @@ const ART: Record<DeviceType, string> = {
     r(2, 10, 20, 3.1, 2.4, '#3b82f6') +
     r(2, 16.4, 20, 2.6, 2.4, '#1d4ed8') +
     r(11.5, 13.4, 8, 2, 1, '#bfdbfe') + // signal bar
-    c(5.6, 14.4, 1, GREEN) +
-    c(8.2, 14.4, 1, AMBER),
+    led(5.6, 14.4, 1, GREEN, -300) +
+    led(8.2, 14.4, 1, AMBER, -720, true),
   switch:
     r(2, 9, 20, 8, 1.8, '#0d9488') +
     r(2, 9, 20, 2.5, 1.8, '#14b8a6') +
     r(2, 14.6, 20, 2.4, 1.8, '#0f766e') +
     ports(4, 11.9, 6, 2.7, 1.9, 2.2, '#0f3f3a') +
-    Array.from({ length: 6 }, (_, i) => c(4.95 + i * 2.7, 11, 0.36, i % 2 ? AMBER : GREEN)).join(''),
+    Array.from({ length: 6 }, (_, i) =>
+      led(4.95 + i * 2.7, 11, 0.36, i % 2 ? AMBER : GREEN, -i * 170, i % 2 === 1),
+    ).join(''),
   firewall:
     p('M12 2.4l8.2 3v6.4c0 5.1-3.5 8.6-8.2 10-4.7-1.4-8.2-4.9-8.2-10V5.4z', '#dc2626') +
     p('M12 2.4l8.2 3v6.4c0 5.1-3.5 8.6-8.2 10V2.4z', '#b91c1c') +
@@ -69,8 +93,8 @@ const ART: Record<DeviceType, string> = {
     r(3.5, 13.5, 17, 6.5, 1.6, '#6d28d9') +
     r(3.5, 13.5, 17, 2.2, 1.6, '#7c3aed') +
     r(3.5, 17.6, 17, 2.4, 1.6, '#5b21b6') +
-    c(6.5, 16.4, 0.9, GREEN) +
-    c(9.2, 16.4, 0.9, AMBER),
+    led(6.5, 16.4, 0.9, GREEN, -260) +
+    led(9.2, 16.4, 0.9, AMBER, -640, true),
   server:
     r(5, 2.5, 14, 19, 2, '#059669') +
     r(5, 2.5, 14, 3, 2, '#10b981') +
@@ -80,7 +104,7 @@ const ART: Record<DeviceType, string> = {
       return (
         r(6.4, y, 11.2, 3.2, 0.7, '#067a55') +
         r(7.2, y + 0.9, 2.4, 1.4, 0.3, '#a7f3d0') + // drive handle
-        c(15.6, y + 1.6, 0.65, i === 1 ? AMBER : GREEN)
+        led(15.6, y + 1.6, 0.65, i === 1 ? AMBER : GREEN, -i * 300, i === 1)
       );
     }).join(''),
   storage:
@@ -103,7 +127,9 @@ const ART: Record<DeviceType, string> = {
     r(2.5, 3.5, 19, 12.5, 1.8, '#1e293b') +
     r(3.9, 4.9, 16.2, 9.1, 1, '#38bdf8') +
     p('M3.9 4.9h16.2v4.4 l-16.2 2.6z', '#7dd3fc') + // screen reflection
-    c(19, 14.6, 0.45, GREEN) + // power LED
+    screenGlow(3.9, 4.9, 16.2, 9.1, 1) + // live display glow
+    screenScan(3.9, 4.9, 16.2, 9.1) + // scanline sweep
+    led(19, 14.6, 0.45, GREEN, -180) + // power LED
     r(9.3, 16, 5.4, 3, 0.6, '#334155') + // neck
     r(6.8, 19, 10.4, 1.8, 0.9, '#475569'), // base
   printer:
@@ -113,7 +139,8 @@ const ART: Record<DeviceType, string> = {
     r(3.5, 8, 17, 2.6, 1.6, '#a8a29e') +
     r(3.5, 14.4, 17, 2.6, 1.6, '#57534e') +
     r(5, 9.4, 4.6, 1.9, 0.4, '#292524') + // control panel
-    c(11.1, 10.35, 0.5, GREEN) +
+    screenGlow(5, 9.4, 4.6, 1.9, 0.4, '#bfe3ff') + // lit control panel
+    led(11.1, 10.35, 0.5, GREEN, -420) +
     r(6.5, 15.2, 11, 4.4, 0.6, '#f8fafc') + // output sheet
     sp('M7.8 16.6h8.4M7.8 18.2h6.6', '#cbd5e1', 0.7),
   iot:
@@ -121,7 +148,7 @@ const ART: Record<DeviceType, string> = {
     r(7.5, 7.5, 9, 2.6, 1.6, '#84cc16') +
     r(9.8, 9.8, 4.4, 4.4, 0.8, '#bef264') +
     sp('M10 7.5V4.6M14 7.5V4.6M10 19.4v-2.9M14 19.4v-2.9M7.5 10H4.6M7.5 14H4.6M19.4 10h-2.9M19.4 14h-2.9', '#3f6212', 1) +
-    c(15, 9, 0.5, GREEN),
+    led(15, 9, 0.5, GREEN, -540),
   isp:
     c(12, 12, 9, '#0ea5e9') +
     p('M12 3a9 9 0 0 1 0 18 9 9 0 0 1 0-18z', '#0284c7') +
@@ -139,6 +166,8 @@ const ART: Record<DeviceType, string> = {
     c(4.6, 5.4, 0.55, '#bbf7d0') +
     c(6.2, 5.4, 0.55, '#bbf7d0') +
     r(5.5, 8.4, 13, 6.6, 1, '#052e16') + // inner window
+    screenGlow(5.5, 8.4, 13, 6.6, 1, '#8ef0b8') + // live terminal glow
+    screenScan(5.5, 8.4, 13, 6.6, '#bbf7d0') + // scanline sweep
     sp('M7.5 11h9M7.5 13h6.4', '#34d399', 0.9) +
     p('M14.6 9.6l3 1.9-3 1.9z', '#bbf7d0') + // play
     r(6.5, 18.6, 11, 1.8, 0.9, '#15803d'), // base
@@ -153,7 +182,10 @@ const ART: Record<DeviceType, string> = {
     r(4.5, 2.5, 15, 2, 1.6, '#64748b') +
     Array.from({ length: 4 }, (_, i) => {
       const y = 5 + i * 4;
-      return r(6, y, 12, 3.2, 0.5, i === 2 ? '#334155' : '#5b6b80') + c(8, y + 1.6, 0.6, i % 2 ? AMBER : GREEN);
+      return (
+        r(6, y, 12, 3.2, 0.5, i === 2 ? '#334155' : '#5b6b80') +
+        led(8, y + 1.6, 0.6, i % 2 ? AMBER : GREEN, -i * 240, i % 2 === 1)
+      );
     }).join(''),
   'patch-panel':
     r(2.5, 7.5, 19, 9, 1.6, '#52525b') +
@@ -168,14 +200,14 @@ const ART: Record<DeviceType, string> = {
     r(5, 3, 14, 3, 1.8, '#f59e0b') +
     r(5, 18, 14, 3, 1.8, '#b45309') +
     p('M13 7.5l-3.6 5.5h3.1l-2 5 6.2-7h-3.2z', '#fde68a') + // bolt
-    c(8, 5.5, 0.7, GREEN),
+    led(8, 5.5, 0.7, GREEN, -360),
   camera:
     r(7, 18, 10, 2.8, 1.3, '#6b21a8') + // mount
     p('M4.5 18a7.5 7.5 0 0 1 15 0z', '#581c87') + // dome
     p('M6.6 15.6a5.4 5.4 0 0 1 7.4 -2.6 5.4 5.4 0 0 0 -7.4 2.6z', '#a855f7') + // sheen
     c(12.2, 14.6, 2.5, '#1a1033') + // lens
     c(11.3, 13.7, 0.95, '#c4b5fd') + // glint
-    c(16.7, 15.4, 0.7, RED), // rec LED
+    led(16.7, 15.4, 0.7, RED, -100, true), // rec LED
   vpc:
     r(2.5, 4, 19, 16, 2.4, '#0c4a6e') +
     sp('M3.6 5.1h17.8v13.8h-17.8z', '#7dd3fc', 1, '2.4 1.8') + // dashed region

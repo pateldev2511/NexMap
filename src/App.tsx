@@ -22,7 +22,7 @@ import { CommandPalette, type PaletteCommand } from './ui/CommandPalette';
 import { keyboardRouter } from './input/router';
 import { useQuietChrome } from './ui/useQuietChrome';
 import { ValidationAnnouncer } from './ui/ValidationAnnouncer';
-import { applyReduceMotion, getReduceMotion } from './lib/prefs';
+import { applyReduceMotion, getReduceMotion, applyMotionLevel, getMotionLevel } from './lib/prefs';
 import { installTooltips } from './ui/tooltip';
 import { ReadOnlyBanner, ErrorToast, NoticeToast } from './ui/dialogs/ReadOnlyBanner';
 import { NexIcon } from './ui/icons/NexIcon';
@@ -114,9 +114,10 @@ export function App() {
   // Paste-to-canvas: clipboard image → underlay, clipboard CSV → model objects.
   usePasteToCanvas();
 
-  // Apply the saved reduced-motion preference on launch.
+  // Apply the saved motion preferences on launch.
   useEffect(() => {
     applyReduceMotion(getReduceMotion());
+    applyMotionLevel(getMotionLevel());
   }, []);
 
   // Hover/focus tooltips: one body-level singleton that auto-covers every control

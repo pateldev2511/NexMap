@@ -26,20 +26,8 @@
   cursor: crosshair;
 }
 
-.rubber {
-  stroke: var(--accent);
-  stroke-width: 2;
-  stroke-dasharray: 5 3;
-  fill: none;
-  pointer-events: none;
-}
-
-.connectHandle {
-  fill: var(--accent);
-  stroke: #fff;
-  stroke-width: 1;
-  cursor: crosshair;
-}
+/* .rubber and .connectHandle are defined in the connector/signal section below
+   (upgraded with glow + marching packets for the live connect preview). */
 
 /* Leader anchor handle on a selected callout — drag it onto a device. */
 .anchorHandle {
@@ -106,9 +94,15 @@
   cursor: crosshair;
 }
 
-/* Flat 2D icon (FlatIcon) + its rounded-rect selection halo framing the tile. */
+/* Flat 2D icon (FlatIcon) + its rounded-rect selection halo framing the tile.
+   A soft elevation shadow lifts the chip off the canvas, and a faint device-
+   family glow (--dev-accent, set per node) makes every device read as powered —
+   the same "alive" language as the flowing links. Static, so it rasterises once;
+   hover/selection intensify the separate tile halo below. */
 .deviceFlat {
   pointer-events: none;
+  filter: drop-shadow(0 1.5px 2px rgba(2, 6, 23, 0.32))
+    drop-shadow(0 0 5px color-mix(in srgb, var(--dev-accent, var(--accent)) 30%, transparent));
 }
 
 .deviceTileHalo {
@@ -122,6 +116,7 @@
 .node.selected .deviceTileHalo {
   fill: color-mix(in srgb, var(--accent) 10%, transparent);
   opacity: 0.9;
+  filter: drop-shadow(0 0 5px var(--accent-ring, rgba(76, 141, 255, 0.5)));
 }
 
 .node.validTarget .deviceTileHalo {
@@ -132,6 +127,31 @@
 
 .node:hover .deviceTileHalo {
   opacity: 0.65;
+}
+
+/* A valid connect target breathes while a link is in flight — a magnetic cue
+   that this node will accept the drop. Shares the accent glow so the whole
+   gesture reads as one energised act. Frozen by the global reduced-motion
+   kill switch. */
+@keyframes nxTargetBreathe {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 2px var(--accent-ring, rgba(76, 141, 255, 0.45)));
+  }
+  50% {
+    filter: drop-shadow(0 0 9px var(--accent-ring, rgba(76, 141, 255, 0.7)));
+  }
+}
+
+.node.validTarget .deviceTileHalo,
+.node.validTarget .deviceIconHalo,
+.isoNode.validTarget .deviceIconHalo {
+  animation: nxTargetBreathe 1s ease-in-out infinite;
+}
+
+.node.selected .deviceIconHalo,
+.isoNode.selected .deviceIconHalo {
+  filter: drop-shadow(0 0 5px var(--accent-ring, rgba(76, 141, 255, 0.5)));
 }
 
 .deviceIcon3d {
@@ -178,9 +198,12 @@
   pointer-events: none;
 }
 
-/* Isometric 3D device model (deviceIso engine). */
+/* Isometric 3D device model (deviceIso engine). Volumetric shading + the baked
+   ground shadow already give depth, so iso just adds the faint device-family
+   "powered" glow (--dev-accent) for parity with the flat chips. */
 .deviceIso {
   pointer-events: none;
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--dev-accent, var(--accent)) 24%, transparent));
 }
 
 .deviceIsoShadow {
@@ -422,6 +445,217 @@
 .link.selected {
   stroke: var(--accent);
   stroke-width: 2.5;
+  filter: drop-shadow(0 0 3px var(--accent-ring, rgba(76, 141, 255, 0.5)));
+}
+
+/* ── Signal flow ─────────────────────────────────────────────────────────
+   A second channel layered over every link: short bright "packets" that march
+   source→target, so a static topology reads as a live, breathing network. One
+   shared keyframe (compositor-cheap dashoffset); per-link animation-delay gives
+   an organic, out-of-phase shimmer. The global reduced-motion kill switch
+   freezes the dash, leaving a tasteful dotted accent — never motion in the
+   periphery for users who opt out. */
+@keyframes nxSignalFlow {
+  to {
+    stroke-dashoffset: -32;
+  }
+}
+
+.linkFlow {
+  fill: none;
+  pointer-events: none;
+  stroke-linecap: round;
+  stroke-dasharray: 2.5 13.5;
+  stroke-dashoffset: 0;
+  opacity: 0.92;
+  animation: nxSignalFlow 1.15s linear infinite;
+}
+
+.link.selected ~ .linkFlow,
+.linkFlow.selected {
+  opacity: 1;
+}
+
+/* ── Living status LEDs ────────────────────────────────────────────────────
+   Device icons (flat + iso) carry real activity lights that now breathe like
+   powered hardware instead of sitting as dead decals. The icon markup is
+   injected, so the core LED circles are tagged with a plain (:global) class and
+   desynced per-LED via an inline negative animation-delay — a bank blinks out of
+   phase. Only opacity animates (compositor-cheap); the global reduced-motion
+   kill switch freezes every LED fully lit. `nxLedWarn` (amber/red) blinks faster
+   and deeper — the same health urgency the link flow uses. */
+@keyframes nxLedPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes nxLedWarn {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.24;
+  }
+}
+
+.deviceFlat :global(.nxLed),
+.deviceIso :global(.nxLed) {
+  animation: nxLedPulse 2s ease-in-out infinite;
+}
+
+.deviceFlat :global(.nxLedWarn),
+.deviceIso :global(.nxLedWarn) {
+  animation: nxLedWarn 1.05s ease-in-out infinite;
+}
+
+/* ── Live displays ─────────────────────────────────────────────────────────
+   Monitors, VM windows and printer panels read as powered-on: a faint tint
+   breathes over the screen, and (flat only, where screens are axis-aligned) a
+   thin highlight sweeps top→bottom like a refresh scanline. The scanline's
+   travel is the screen height, passed per-instance as `--scanH` (unitless art
+   units → px). Both carry an inline base opacity so static exports stay tasteful
+   without a stylesheet; the global reduced-motion kill switch freezes them. */
+@keyframes nxScreenGlow {
+  0%,
+  100% {
+    opacity: 0.1;
+  }
+  50% {
+    opacity: 0.26;
+  }
+}
+
+@keyframes nxScanSweep {
+  0% {
+    transform: translateY(0);
+    opacity: 0;
+  }
+  14% {
+    opacity: 0.55;
+  }
+  86% {
+    opacity: 0.55;
+  }
+  100% {
+    transform: translateY(calc(var(--scanH, 6) * 1px));
+    opacity: 0;
+  }
+}
+
+.deviceFlat :global(.nxScreen),
+.deviceIso :global(.nxScreen) {
+  pointer-events: none;
+  animation: nxScreenGlow 2.6s ease-in-out infinite;
+}
+
+.deviceFlat :global(.nxScan) {
+  pointer-events: none;
+  animation: nxScanSweep 3.4s linear infinite;
+}
+
+/* ── Living-motion dial (Settings → Living motion) ─────────────────────────
+   A taste control on top of the accessibility kill switch. `off` freezes the
+   whole living layer (flow packets, LEDs, screens, target breathe) while leaving
+   ordinary UI transitions alone; `subtle` keeps the gentle breathing but drops
+   the traveling packets and the scanline sweep. `full` (default / no attribute)
+   leaves everything as authored. Reduced motion still overrides all of this. */
+:root[data-motion='off'] .linkFlow,
+:root[data-motion='off'] .rubberFlow,
+:root[data-motion='off'] .rubberReticle,
+:root[data-motion='off'] :global(.nxLed),
+:root[data-motion='off'] :global(.nxScreen),
+:root[data-motion='off'] :global(.nxScan),
+:root[data-motion='off'] .node.validTarget .deviceTileHalo,
+:root[data-motion='off'] .node.validTarget .deviceIconHalo,
+:root[data-motion='off'] .isoNode.validTarget .deviceIconHalo {
+  animation: none;
+}
+
+:root[data-motion='subtle'] .linkFlow,
+:root[data-motion='subtle'] :global(.nxScan) {
+  animation: none;
+}
+
+/* ── Live connect preview ────────────────────────────────────────────────
+   Dragging a new link paints a glowing, gently-bowed cable with marching
+   packets and a pulsing reticle at the cursor — the "awesome, smooth" connect
+   experience. All three share the accent so the gesture feels energised. */
+@keyframes nxRubberFlow {
+  to {
+    stroke-dashoffset: -28;
+  }
+}
+
+@keyframes nxReticlePulse {
+  0% {
+    opacity: 0.9;
+    transform: scale(0.6);
+  }
+  70% {
+    opacity: 0;
+    transform: scale(1.9);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.9);
+  }
+}
+
+.rubberGlow {
+  fill: none;
+  pointer-events: none;
+  stroke: var(--accent);
+  stroke-width: 7;
+  stroke-linecap: round;
+  opacity: 0.18;
+  filter: blur(2px);
+}
+
+.rubber {
+  stroke: var(--accent);
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  fill: none;
+  pointer-events: none;
+}
+
+.rubberFlow {
+  fill: none;
+  pointer-events: none;
+  stroke: #fff;
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-dasharray: 1 13;
+  animation: nxRubberFlow 0.9s linear infinite;
+}
+
+.rubberReticle {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: nxReticlePulse 1.3s var(--ease-out, ease-out) infinite;
+}
+
+.rubberDot {
+  fill: var(--accent);
+  stroke: var(--chrome-bg, #fff);
+  stroke-width: 1.5;
+}
+
+.connectHandle {
+  fill: var(--accent);
+  stroke: var(--chrome-bg, #fff);
+  stroke-width: 1.25;
+  cursor: crosshair;
+  filter: drop-shadow(0 0 4px var(--accent-ring, rgba(76, 141, 255, 0.5)));
 }
 
 .linkLabel {

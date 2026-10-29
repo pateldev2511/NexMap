@@ -76,6 +76,37 @@ export const HEALTH_RED = '#dc2626';
 /** Concrete default used where CSS vars don't resolve (SVG/PNG/HTML export). */
 export const EXPORT_DEFAULT_STROKE = '#94a3b8';
 
+/** Default "signal" hue for the animated packet flow on an idle, healthy link.
+ *  Matches the design system's --accent-2 (cyan companion / signal channel). */
+export const SIGNAL_DEFAULT = '#22d3ee';
+
+/**
+ * The hue of the animated signal packets that travel along a link. The flow is a
+ * second visual channel layered over {@link deriveLinkStroke}: it should read as
+ * "traffic", so it leans brighter than the static cable. Precedence:
+ *   selected → live accent · health (red/amber) → that urgency colour ·
+ *   manual link colour → its own hue · otherwise → the cyan signal default.
+ * Returns a CSS value (may be a var()); callers paint it onto the flow overlay.
+ */
+export function signalColor(stroke: LinkStroke, selected: boolean): string {
+  if (selected) return 'var(--accent)';
+  if (stroke.color === HEALTH_RED || stroke.color === HEALTH_AMBER) return stroke.color;
+  if (stroke.color) return stroke.color;
+  return `var(--accent-2, ${SIGNAL_DEFAULT})`;
+}
+
+/** A gentle quadratic "cable sag" path between two points, bowing perpendicular
+ *  to the run by `bow` px (sign picks the side). Used by the live connect
+ *  preview so a new link reads as a physical cable, not a taut schematic line. */
+export function bowedPath(a: Pt, b: Pt, bow: number): string {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const mx = (a.x + b.x) / 2 + (-dy / len) * bow;
+  const my = (a.y + b.y) / 2 + (dx / len) * bow;
+  return `M${a.x} ${a.y} Q${mx} ${my} ${b.x} ${b.y}`;
+}
+
 /**
  * Resolve a link's stroke from manual overrides + topology health. ONE source of truth
  * shared by flat render, iso render, and SVG export so they never drift.

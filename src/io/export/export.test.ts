@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildSvg, escapeXml } from './buildSvg';
 import { csvCell, exportInventoryCsv, exportLinksCsv } from './csvExport';
-import { createDevice, createLink, createTextObject } from '@/model/schema';
+import { createDevice, createLink, createShapeObject, createTextObject } from '@/model/schema';
 import type { CanvasObject } from '@/model/types';
 
 const L = 'layer';
@@ -95,6 +95,34 @@ describe('buildSvg — connectors + annotation cards', () => {
     expect(svg).toContain('site A');
     expect(svg).toContain('rack 1');
     expect(svg).toContain('font-weight="700"'); // heading styled bold
+  });
+
+  it('modern theme adds soft shadows + dot grid; plain export stays unchanged', () => {
+    const a = createDevice('switch', 0, 0, L, { name: 'SW1' });
+    const zone = createShapeObject(0, 0, 200, 150, L, { label: 'Zone A' }) as CanvasObject;
+    const plain = buildSvg([a], [], { background: '#fff', includeLabels: true, objects: [zone] });
+    expect(plain).not.toContain('nexmap-dots');
+    expect(plain).not.toContain('nexmap-shadow');
+    const modern = buildSvg([a], [], { background: '#fff', includeLabels: true, objects: [zone], modern: true });
+    expect(modern).toContain('nexmap-dots'); // dot-grid background
+    expect(modern).toContain('url(#nexmap-shadow)'); // device card shadow
+    expect(modern).toContain('rx="18"'); // rounded zone
+    // iso modern also carries the grid
+    const isoModern = buildSvg([a], [], { projection: 'iso', background: '#fff', includeLabels: true, objects: [zone], modern: true });
+    expect(isoModern).toContain('nexmap-dots');
+  });
+
+  it('renders link endpoint interface labels (canvas/export parity)', () => {
+    const a = createDevice('switch', 0, 0, L, { name: 'SW1' });
+    const b = createDevice('server', 300, 0, L, { name: 'SRV1' });
+    const link = createLink(a.id, b.id, L, { sourceInterface: 'Gbe04', targetInterface: 'Gbe02' });
+    const flat = buildSvg([a, b], [link], { background: '#fff', includeLabels: true });
+    expect(flat).toContain('>Gbe04<');
+    expect(flat).toContain('>Gbe02<');
+    // present in iso export too
+    const iso = buildSvg([a, b], [link], { projection: 'iso', background: '#fff', includeLabels: true });
+    expect(iso).toContain('>Gbe04<');
+    expect(iso).toContain('>Gbe02<');
   });
 
   it('draws a dotted leader from an anchored callout to its target device', () => {

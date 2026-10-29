@@ -45,6 +45,8 @@ export interface ExportOptions {
   projection?: 'flat' | 'iso';
   /** Topology-health context to tint risky links in exports (null = no tint). */
   health?: import('@/canvas/connector').StrokeHealth | null;
+  /** Modern styling (dot-grid, rounded zone cards, node chips, callout cards). */
+  modern?: boolean;
 }
 
 function safeName(name: string, ext: string): string {
@@ -105,6 +107,7 @@ export async function runExport(
     objects: scene.objects,
     projection: opts.projection,
     health: opts.health,
+    modern: opts.modern,
   });
 
   if (opts.format === 'svg') {

@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import type { DeviceType } from '@/model/types';
 import { deviceIso } from './deviceIso';
 import styles from './Canvas.module.css';
@@ -17,10 +18,12 @@ interface IsoIconProps {
  * constant, so dangerouslySetInnerHTML is injection-safe; SVG-namespace parsing
  * places the children correctly.
  */
-export function IsoIcon({ type, cx, cy, size }: IsoIconProps) {
+export function IsoIcon({ type, cx, cy, size, accent }: IsoIconProps) {
   const s = size / 22;
+  // Feed the device-family accent to the at-rest "powered" under-glow (Canvas.module.css).
+  const style = accent ? ({ '--dev-accent': accent } as CSSProperties) : undefined;
   return (
-    <g className={styles.deviceIso}>
+    <g className={styles.deviceIso} style={style}>
       {/* Grounded contact shadow — the key depth cue that separates iso from flat. */}
       <ellipse
         className={styles.deviceIsoShadowSoft}
