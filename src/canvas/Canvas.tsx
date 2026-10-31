@@ -3,6 +3,7 @@ import type { Device, DeviceType, Link, TextObject } from '@/model/types';
 import { bodyText, setBody } from '@/model/callout';
 import { DEFAULT_LEADER } from '@/model/leader';
 import { NexIcon } from '@/ui/icons/NexIcon';
+import { pickHub } from '@/sim/hub';
 import { useProjectStore, type AlignEdge, type ProjectStore } from '@/store/projectStore';
 import { CanvasSearch } from './CanvasSearch';
 import { MiniMap } from './MiniMap';
@@ -269,6 +270,18 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   useEffect(() => {
     store().reportCamera(viewport);
   }, [viewport, store]);
+  // Report the flat canvas point under the viewport center so Conductor can summon
+  // devices / insert templates where the user is actually looking. In iso mode the
+  // screen center maps through the inverse projection back to a flat coordinate.
+  useEffect(() => {
+    if (size.w === 0) {
+      store().reportViewCenter(null);
+      return;
+    }
+    const c = screenToCanvas(viewport, size.w / 2, size.h / 2);
+    const flat = projection === 'iso' ? isoUnprojectPx(c.x, c.y, GRID_SIZE, ISO_TILE) : c;
+    store().reportViewCenter(flat);
+  }, [viewport, size, projection, store]);
   useEffect(() => {
     if (cameraTick === 0) return;
     const c = store().cameraRequest();
@@ -1502,6 +1515,17 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   const movableSelCount = [...selection].filter(
     (id) => store().getDevice(id) || store().getObject(id),
   ).length;
+  const deviceSelCount = [...selection].filter((id) => store().getDevice(id)).length;
+  // Hub-and-spoke is only offered when the selection has exactly one infrastructure
+  // node to be the hub — otherwise the intent is ambiguous (mirrors pickHub).
+  const hubEligible =
+    deviceSelCount >= 2 &&
+    pickHub(
+      [...selection]
+        .map((id) => store().getDevice(id))
+        .filter((d): d is Device => !!d)
+        .map((d) => ({ id: d.id, type: d.type })),
+    ) !== null;
   const handleDevice = hoveredId ? store().getDevice(hoveredId) : undefined;
   // Link/relink live on the machine now; every band update sets linkCursor
   // state, so this render always sees the machine's current gesture.
@@ -2076,9 +2100,11 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
               bbox={{ x: tl.x, y: tl.y, width: br.x - tl.x, height: br.y - tl.y }}
               vw={size.w}
               vh={size.h}
+              hubEligible={hubEligible}
               cardAbove={selection.size === 1 && !!store().getDevice(first)}
               selCount={selection.size}
               movableCount={movableSelCount}
+              deviceCount={deviceSelCount}
               canUngroup={[...selection].some((id) => store().groupMembers(id).length > 1)}
               calloutId={calloutId}
               anchoring={!!calloutId && anchorPickId === calloutId}
@@ -2336,6 +2362,8 @@ function FlatSelectionToolbar({
   cardAbove,
   selCount,
   movableCount,
+  deviceCount,
+  hubEligible,
   canUngroup,
   calloutId,
   anchoring,
@@ -2348,6 +2376,8 @@ function FlatSelectionToolbar({
   cardAbove: boolean;
   selCount: number;
   movableCount: number;
+  deviceCount: number;
+  hubEligible: boolean;
   canUngroup: boolean;
   calloutId: string | null;
   anchoring: boolean;
@@ -2406,6 +2436,18 @@ function FlatSelectionToolbar({
           <ToolbarSep />
           {icon('Group', 'group', () => store().groupSelection(), selCount < 2)}
           {icon('Ungroup', 'ungroup', () => store().ungroupSelection(), !canUngroup)}
+          {icon(
+            'Weave into a fabric (auto-connect)',
+            'fabric',
+            () => store().weaveFabric(),
+            deviceCount < 2,
+          )}
+          {icon(
+            'Wire to hub (star) — select spokes + one switch/router',
+            'hub',
+            () => store().wireToHub(),
+            !hubEligible,
+          )}
         </>
       )}
       <ToolbarSep />

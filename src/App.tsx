@@ -34,6 +34,7 @@ import { canOpenPicker } from './persistence/fsaccess';
 import { severityRank } from './model/validate';
 import { defaultDeviceName } from './model/schema';
 import { QUICK_CREATE_TYPES } from './canvas/QuickCreateMenu';
+import { TEMPLATES } from './model/templates';
 import shell from './ui/shell/AppShell.module.css';
 
 type Theme = 'light' | 'dark';
@@ -109,6 +110,7 @@ export function App() {
   const runValidation = useProjectStore((s) => s.runValidation);
   const newProject = useProjectStore((s) => s.newProject);
   const dirty = useProjectStore((s) => s.dirty);
+  const flash = useProjectStore((s) => s.flash);
 
   const persistence = usePersistence();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -125,6 +127,13 @@ export function App() {
   // Hover/focus tooltips: one body-level singleton that auto-covers every control
   // carrying a title (migrated to data-tip on first hover). Immune to overflow clip.
   useEffect(() => installTooltips(), []);
+
+  // Auto-dismiss the transient Conductor result banner after a few seconds.
+  useEffect(() => {
+    if (!flash) return;
+    const t = setTimeout(() => useProjectStore.getState().setFlash(null), 6000);
+    return () => clearTimeout(t);
+  }, [flash]);
 
   // Live validation: re-run debounced on any model change (the wedge — DA-DES-2.5).
   useEffect(() => {
@@ -481,6 +490,9 @@ export function App() {
           {persistence.notice && (
             <NoticeToast message={persistence.notice} onDismiss={persistence.dismissNotice} />
           )}
+          {flash && (
+            <NoticeToast message={flash} onDismiss={() => useProjectStore.getState().setFlash(null)} />
+          )}
           {nexText && <NexTextDialog onClose={() => setNexText(false)} />}
           {importing && <ImportDialog onClose={() => setImporting(false)} />}
           {exporting && <ExportDialog onClose={() => setExporting(false)} />}
@@ -519,20 +531,103 @@ export function App() {
                 id: `add-${t}`,
                 label: `Add ${defaultDeviceName(t)}`,
                 hint: 'device',
-                run: () => {
-                  const s = st();
-                  const b = s.contentBounds();
-                  const x = b.width > 0 ? Math.round(b.x + b.width / 2 - 28) : 0;
-                  const y = b.width > 0 ? Math.round(b.y + b.height + 56) : 0;
-                  const id = s.addDeviceAt(t, x, y);
-                  s.select([id]);
-                  s.focusObject(id);
-                  s.runValidation();
-                },
+                // Summon-at-cursor: lands where you're looking and auto-wires to the
+                // nearest node — the store owns placement + wiring (one undo).
+                run: () => st().summonDevice(t),
+              }));
+              // Conductor: scaffold a whole topology into the current diagram, at the
+              // viewport, reusing the curated starter registry (blank is just "new").
+              const templateInserts: PaletteCommand[] = TEMPLATES.filter(
+                (tpl) => tpl.key !== 'blank',
+              ).map((tpl) => ({
+                id: `template-${tpl.key}`,
+                label: `Insert: ${tpl.name}`,
+                hint: 'template',
+                run: () => st().insertTemplate(tpl.key),
               }));
               // Topology-only commands — hidden in the Rack designer.
+              const selCount = st().selection.size;
               const networkOnly: PaletteCommand[] = [
                 ...deviceSummon,
+                ...templateInserts,
+                {
+                  id: 'weave',
+                  label: 'Weave selection into a fabric (auto-connect)',
+                  hint: selCount >= 2 ? `${selCount} selected` : 'select 2+',
+                  run: () => st().weaveFabric(),
+                },
+                {
+                  id: 'hub',
+                  label: 'Wire selection to its hub (star)',
+                  hint: 'select spokes + 1 switch/router',
+                  run: () => st().wireToHub(),
+                },
+                {
+                  id: 'auto-ip',
+                  label: 'Auto-assign IP addresses',
+                  hint: 'IPAM',
+                  run: () => st().autoAddressDevices(),
+                },
+                {
+                  id: 'segment',
+                  label: 'Segment selection into a subnet',
+                  hint: selCount >= 1 ? `${selCount} selected` : 'select devices',
+                  run: () => st().segmentSelection(),
+                },
+                {
+                  id: 'uplink',
+                  label: 'Connect to the internet (uplink)',
+                  hint: 'wires your firewall/router to an ISP',
+                  run: () => st().connectToInternet(),
+                },
+                {
+                  id: 'redundant',
+                  label: 'Add a redundant twin (fix a single point of failure)',
+                  hint: selCount === 1 ? 'clones the selected device' : 'select one device',
+                  run: () => st().addRedundantTwin(),
+                },
+                {
+                  id: 'scan-spof',
+                  label: 'Scan for single points of failure',
+                  hint: 'selects every weak device',
+                  run: () => st().scanWeakPoints(),
+                },
+                {
+                  id: 'harden',
+                  label: 'Harden the design (twin every single point of failure)',
+                  hint: 'adds a redundant twin to each weak device',
+                  run: () => st().hardenDesign(),
+                },
+                {
+                  id: 'assign-gateways',
+                  label: 'Assign gateways to subnets',
+                  hint: 'adopts an in-range router/firewall per subnet',
+                  run: () => st().assignGateways(),
+                },
+                {
+                  id: 'dedupe-ips',
+                  label: 'Resolve duplicate IP addresses',
+                  hint: 're-addresses devices that share an address',
+                  run: () => st().deduplicateIps(),
+                },
+                {
+                  id: 'dedupe-names',
+                  label: 'Resolve duplicate device names',
+                  hint: 'renames devices that share a name',
+                  run: () => st().deduplicateNames(),
+                },
+                {
+                  id: 'name-unnamed',
+                  label: 'Name unnamed devices',
+                  hint: 'labels blank devices from their type',
+                  run: () => st().nameUnnamedDevices(),
+                },
+                {
+                  id: 'prune-links',
+                  label: 'Prune dangling links',
+                  hint: 'removes links that point at a missing device',
+                  run: () => st().pruneDanglingLinks(),
+                },
                 { id: 'export', label: 'Export…', hint: '⌘E', run: () => setExporting(true) },
                 { id: 'import', label: 'Import…', run: () => setImporting(true) },
                 { id: 'nextext', label: 'NexText (describe in text)…', run: () => setNexText(true) },

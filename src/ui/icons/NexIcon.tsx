@@ -14,6 +14,8 @@ export type NexIconName =
   | 'shape'
   | 'iso'
   | 'flow'
+  | 'fabric'
+  | 'hub'
   | 'auto-layout'
   | 'zoom-in'
   | 'zoom-out'
@@ -66,6 +68,26 @@ const ICONS: Record<NexIconName, ReactNode> = {
     <>
       <rect x="4" y="4" width="9" height="9" rx="1" />
       <rect x="11" y="11" width="9" height="9" rx="1" />
+    </>
+  ),
+  // Lasso-to-fabric: scattered nodes woven into one connected mesh.
+  fabric: (
+    <>
+      <path d="M6 6l12 4M6 6l5 12M18 10l-7 8M6 6l5 12" />
+      <circle cx="6" cy="6" r="2" />
+      <circle cx="18" cy="10" r="2" />
+      <circle cx="11" cy="18" r="2" />
+    </>
+  ),
+  // Wire-to-hub: spokes radiating from one central hub node.
+  hub: (
+    <>
+      <path d="M12 12L5 5M12 12l7-7M12 12l-7 7M12 12l7 7" />
+      <circle cx="12" cy="12" r="2.5" />
+      <circle cx="5" cy="5" r="1.6" />
+      <circle cx="19" cy="5" r="1.6" />
+      <circle cx="5" cy="19" r="1.6" />
+      <circle cx="19" cy="19" r="1.6" />
     </>
   ),
   ungroup: (

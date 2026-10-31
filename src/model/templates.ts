@@ -7,8 +7,8 @@
  * (placed devices + edges), so the start-screen list and `buildTemplate` can never
  * drift apart. Grouped into Home & small office vs Enterprise & data center.
  */
-import { createDevice, createEmptyDocument, createLink } from './schema';
-import type { DeviceType, NexMapDocument } from './types';
+import { createDevice, createEmptyDocument, createLink, DEFAULT_DEVICE_SIZE } from './schema';
+import type { Device, DeviceType, Link, NexMapDocument } from './types';
 
 export type TemplateCategory = 'general' | 'home' | 'enterprise';
 
@@ -463,12 +463,81 @@ const DEFS: FullTemplate[] = [
       [4, 7],
     ],
   },
+  {
+    key: 'app-tier',
+    name: 'App tier (3-tier)',
+    description: 'Load balancer → web → app → database, HA-meshed — the classic application stack.',
+    category: 'enterprise',
+    placed: [
+      { type: 'isp', name: 'Internet', x: 340, y: 60 },
+      { type: 'load-balancer', name: 'Load Balancer', x: 340, y: 170, ip: '10.0.0.10' },
+      { type: 'server', name: 'Web 1', x: 220, y: 290, ip: '10.0.0.21' },
+      { type: 'server', name: 'Web 2', x: 460, y: 290, ip: '10.0.0.22' },
+      { type: 'server', name: 'App 1', x: 220, y: 410, ip: '10.0.0.31' },
+      { type: 'server', name: 'App 2', x: 460, y: 410, ip: '10.0.0.32' },
+      { type: 'managed-db', name: 'Database', x: 340, y: 530, ip: '10.0.0.40' },
+    ],
+    // LB fans out to both web nodes; web and app tiers are fully meshed so losing
+    // one node on either tier still reaches the database — a built-in blast-radius
+    // demo. Both app nodes converge on the single database.
+    edges: [
+      [0, 1],
+      [1, 2],
+      [1, 3],
+      [2, 4],
+      [2, 5],
+      [3, 4],
+      [3, 5],
+      [4, 6],
+      [5, 6],
+    ],
+  },
 ];
 
 /** Start-screen metadata, in registry order. */
 export const TEMPLATES: TemplateDef[] = DEFS.map(
   ({ key, name, description, category }) => ({ key, name, description, category }),
 );
+
+/**
+ * Build a template's devices + links to INSERT into the current diagram, centered
+ * on `center` (canvas coords) and grid-snapped — the Conductor "scaffold a whole
+ * topology where I'm looking" path, as opposed to {@link buildTemplate} which
+ * replaces the document on first run. Management IPs are intentionally dropped so
+ * dropping a template beside existing devices never collides with their addresses
+ * (the user assigns IPs for the merged network). Returns null for blank/unknown.
+ */
+export function buildTemplateObjects(
+  key: string,
+  center: { x: number; y: number },
+  layerId: string,
+): { devices: Device[]; links: Link[] } | null {
+  const def = DEFS.find((d) => d.key === key);
+  if (!def || def.placed.length === 0) return null;
+
+  const { width: W, height: H } = DEFAULT_DEVICE_SIZE;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of def.placed) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x + W);
+    maxY = Math.max(maxY, p.y + H);
+  }
+  const dx = center.x - (minX + maxX) / 2;
+  const dy = center.y - (minY + maxY) / 2;
+  const snap = (v: number) => Math.round(v / 16) * 16;
+
+  const devices = def.placed.map((p) =>
+    createDevice(p.type, snap(p.x + dx), snap(p.y + dy), layerId, { name: p.name }),
+  );
+  const links = def.edges.map(([a, b]) =>
+    createLink(devices[a]!.id, devices[b]!.id, layerId),
+  );
+  return { devices, links };
+}
 
 /** Build a fresh document for a template key (unknown key → blank). */
 export function buildTemplate(key: string, now: string): NexMapDocument {
