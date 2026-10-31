@@ -164,6 +164,117 @@ describe('migration v1 → v2 (first-class interfaces)', () => {
   });
 });
 
+describe('migration v4 → v5 (per-port IPs)', () => {
+  // A v4 doc with a device carrying an interface — but no `ip` field yet.
+  const v4Doc = () => ({
+    schemaVersion: 4,
+    appVersion: '0.1.0',
+    project: { id: 'p', name: 'Ports', createdAt: NOW, updatedAt: NOW, description: '', units: 'px' },
+    layers: [{ id: 'L', name: 'Default', visible: true, locked: false, order: 0 }],
+    devices: [
+      {
+        id: 'd1', kind: 'device', type: 'switch', name: 'SW1', x: 0, y: 0, width: 56, height: 40,
+        layerId: 'L', interfaces: [{ id: 'i1', name: 'Gi0/1' }],
+      },
+    ],
+    links: [],
+    objects: [],
+    vlans: [],
+    subnets: [],
+    racks: [],
+    rackCables: [],
+    views: [],
+    assets: [],
+    customFields: [],
+  });
+
+  it('stamps v5 and preserves interfaces unchanged (purely additive)', () => {
+    const result = loadDocument(JSON.stringify(v4Doc()));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.doc.schemaVersion).toBe(SCHEMA_VERSION);
+      expect(result.doc.devices[0]!.interfaces).toEqual([{ id: 'i1', name: 'Gi0/1' }]);
+    }
+  });
+
+  it('reports migratedFrom: 4 for a v4 file', () => {
+    const result = loadDocument(JSON.stringify(v4Doc()));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.migratedFrom).toBe(4);
+  });
+
+  it('preserves a port IP that is already present (forward-compat)', () => {
+    const doc = v4Doc() as Record<string, unknown>;
+    (doc.devices as Record<string, unknown>[])[0]!.interfaces = [{ id: 'i1', name: 'Gi0/1', ip: '10.0.0.2' }];
+    const result = loadDocument(JSON.stringify(doc));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.doc.devices[0]!.interfaces![0]!.ip).toBe('10.0.0.2');
+    }
+  });
+});
+
+describe('migration v5 → v6 (declarative invariants)', () => {
+  const v5Doc = () => ({
+    schemaVersion: 5,
+    appVersion: '0.1.0',
+    project: { id: 'p', name: 'Rules', createdAt: NOW, updatedAt: NOW, description: '', units: 'px' },
+    layers: [{ id: 'L', name: 'Default', visible: true, locked: false, order: 0 }],
+    devices: [],
+    links: [],
+    objects: [],
+    vlans: [],
+    subnets: [],
+    racks: [],
+    rackCables: [],
+    views: [],
+    assets: [],
+    customFields: [],
+  });
+
+  it('stamps v6 and adds an empty invariants list (purely additive)', () => {
+    const result = loadDocument(JSON.stringify(v5Doc()));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.doc.schemaVersion).toBe(SCHEMA_VERSION);
+      expect(result.doc.invariants).toEqual([]);
+    }
+  });
+
+  it('reports migratedFrom: 5 for a v5 file', () => {
+    const result = loadDocument(JSON.stringify(v5Doc()));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.migratedFrom).toBe(5);
+  });
+
+  it('preserves declared invariants already present, unknown ids included (forward-compat)', () => {
+    const doc = { ...v5Doc(), schemaVersion: 6, invariants: ['no-single-point-of-failure', 'future-rule'] };
+    const result = loadDocument(JSON.stringify(doc));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.doc.invariants).toEqual(['no-single-point-of-failure', 'future-rule']);
+    }
+  });
+
+  it('migrates v5 all the way to current, adding both invariants and customRules', () => {
+    const result = loadDocument(JSON.stringify(v5Doc()));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.doc.schemaVersion).toBe(SCHEMA_VERSION);
+      expect(result.doc.invariants).toEqual([]);
+      expect(result.doc.customRules).toEqual([]);
+    }
+  });
+
+  it('preserves authored custom rules already present (forward-compat)', () => {
+    const rule = { id: 'r1', kind: 'connectivity', fromRole: 'access', toRole: 'core', min: 2 };
+    const doc = { ...v5Doc(), schemaVersion: 7, invariants: [], customRules: [rule] };
+    const result = loadDocument(JSON.stringify(doc));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.doc.customRules).toEqual([rule]);
+  });
+});
+
 // CRITICAL: v3→v4 folds the flat text/heading/subheading fields of a text object
 // into an ordered `blocks` array and DELETES the old fields. One-way door on user
 // annotations — these guard the conversion end-to-end.

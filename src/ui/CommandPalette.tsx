@@ -1,22 +1,32 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { NexIcon } from './icons/NexIcon';
+import { firstSelectable, nextSelectable } from './commandPaletteNav';
+import { rankCommands } from './commandPaletteSearch';
 
 export interface PaletteCommand {
   id: string;
   label: string;
   hint?: string;
   run: () => void;
+  /**
+   * When true the command still shows (so it stays discoverable) but can't be
+   * run — its `hint` carries the reason ("select 2+"). Keeps Conductor moves
+   * that need a selection from firing into a no-op flash.
+   */
+  disabled?: boolean;
+  /**
+   * Section label for the empty-query view ("Build", "Address", …). Commands
+   * cluster under their group so the palette reads as a menu, not a wall; while
+   * the user is searching, groups fall away and the list is a flat ranked match.
+   */
+  group?: string;
 }
 
-/** Subsequence fuzzy match: every char of `q` appears in order within `text`. */
-function fuzzy(text: string, q: string): boolean {
-  let i = 0;
-  for (const ch of text) {
-    if (ch === q[i]) i++;
-    if (i === q.length) return true;
-  }
-  return q.length === 0;
-}
+/**
+ * Section order for the grouped (empty-query) view. Groups not listed here, and
+ * ungrouped commands, fall to the end in first-appearance order.
+ */
+const GROUP_ORDER = ['Suggested', 'Build', 'Connect', 'Address', 'Resilience', 'Repair', 'Rules', 'Edit', 'View', 'File'];
 
 /**
  * Command palette (Cmd/Ctrl+K) — fuzzy access to every app action without
@@ -37,18 +47,46 @@ export function CommandPalette({
     inputRef.current?.focus();
   }, []);
 
-  const filtered = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    if (!s) return commands;
-    return commands.filter(
-      (c) => fuzzy(c.label.toLowerCase(), s) || c.hint?.toLowerCase().includes(s),
-    );
-  }, [q, commands]);
+  // Ranked: literal matches (prefix, word-start, substring) beat loose ones.
+  const filtered = useMemo(() => (q.trim() ? rankCommands(commands, q) : commands), [q, commands]);
 
-  useEffect(() => setActive(0), [q]);
+  // For the empty query, re-order commands by group so the list reads as a menu,
+  // and expose the section boundaries. `ordered` drives BOTH render and keyboard
+  // nav, so the highlight always walks the list top-to-bottom as drawn. While the
+  // user is searching, `ordered` is just `filtered` and there are no sections.
+  const { ordered, sections } = useMemo(() => {
+    if (q.trim()) return { ordered: filtered, sections: null };
+    const byGroup = new Map<string, PaletteCommand[]>();
+    for (const c of filtered) {
+      const g = c.group ?? '';
+      const arr = byGroup.get(g);
+      if (arr) arr.push(c);
+      else byGroup.set(g, [c]);
+    }
+    if (byGroup.size <= 1) return { ordered: filtered, sections: null }; // nothing to label
+    const seen = [...byGroup.keys()];
+    const rank = (g: string) => {
+      const k = GROUP_ORDER.indexOf(g);
+      return k === -1 ? GROUP_ORDER.length + seen.indexOf(g) : k;
+    };
+    const groups = [...seen].sort((a, b) => rank(a) - rank(b));
+    const ord: PaletteCommand[] = [];
+    const secs: { group: string; items: { c: PaletteCommand; i: number }[] }[] = [];
+    for (const g of groups) {
+      const items = byGroup.get(g)!.map((c) => {
+        const i = ord.length;
+        ord.push(c);
+        return { c, i };
+      });
+      secs.push({ group: g, items });
+    }
+    return { ordered: ord, sections: secs };
+  }, [q, filtered]);
+
+  useEffect(() => setActive(firstSelectable(ordered)), [ordered]);
 
   function run(c?: PaletteCommand) {
-    if (!c) return;
+    if (!c || c.disabled) return;
     onClose();
     c.run();
   }
@@ -56,17 +94,85 @@ export function CommandPalette({
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setActive((a) => Math.min(a + 1, filtered.length - 1));
+      setActive((a) => nextSelectable(ordered, a, 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setActive((a) => Math.max(a - 1, 0));
+      setActive((a) => nextSelectable(ordered, a, -1));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      run(filtered[active]);
+      run(ordered[active]);
     } else if (e.key === 'Escape') {
       e.preventDefault();
       onClose();
     }
+  }
+
+  /** One command row. `i` is its index into `filtered` (the nav/active space). */
+  function renderRow(c: PaletteCommand, i: number) {
+    return (
+      <li
+        key={c.id}
+        role="option"
+        aria-selected={i === active}
+        aria-disabled={c.disabled || undefined}
+        onMouseEnter={() => {
+          if (!c.disabled) setActive(i);
+        }}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          run(c);
+        }}
+        style={{
+          position: 'relative',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 12,
+          padding: '10px 12px 10px 16px',
+          borderRadius: 'var(--r-md)',
+          cursor: c.disabled ? 'default' : 'pointer',
+          background: i === active ? 'var(--accent-soft)' : 'transparent',
+          color: 'var(--chrome-fg)',
+          opacity: c.disabled ? 0.45 : 1,
+          fontSize: 13.5,
+          fontWeight: 500,
+          transition: 'background var(--dur-1)',
+        }}
+      >
+        {i === active && (
+          <span
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              left: 5,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              width: 3,
+              height: 16,
+              borderRadius: 2,
+              background: 'var(--accent)',
+            }}
+          />
+        )}
+        <span>{c.label}</span>
+        {c.hint && (
+          <kbd
+            style={{
+              fontFamily: 'var(--font-mono-pre)',
+              fontSize: 10.5,
+              fontWeight: 600,
+              padding: '2px 6px',
+              borderRadius: 'var(--r-sm)',
+              border: '1px solid var(--chrome-border)',
+              background: 'var(--chrome-bg-2)',
+              color: 'var(--chrome-fg-muted)',
+            }}
+          >
+            {c.hint}
+          </kbd>
+        )}
+      </li>
+    );
   }
 
   return (
@@ -148,71 +254,34 @@ export function CommandPalette({
           role="listbox"
           style={{ listStyle: 'none', margin: 0, padding: 6, maxHeight: 376, overflowY: 'auto' }}
         >
-          {filtered.length === 0 && (
+          {ordered.length === 0 && (
             <li style={{ padding: '16px 12px', color: 'var(--chrome-fg-subtle)', fontSize: 13, textAlign: 'center' }}>
               No matching command.
             </li>
           )}
-          {filtered.map((c, i) => (
-            <li
-              key={c.id}
-              role="option"
-              aria-selected={i === active}
-              onMouseEnter={() => setActive(i)}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                run(c);
-              }}
-              style={{
-                position: 'relative',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                gap: 12,
-                padding: '10px 12px 10px 16px',
-                borderRadius: 'var(--r-md)',
-                cursor: 'pointer',
-                background: i === active ? 'var(--accent-soft)' : 'transparent',
-                color: 'var(--chrome-fg)',
-                fontSize: 13.5,
-                fontWeight: 500,
-                transition: 'background var(--dur-1)',
-              }}
-            >
-              {i === active && (
-                <span
-                  aria-hidden="true"
-                  style={{
-                    position: 'absolute',
-                    left: 5,
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    width: 3,
-                    height: 16,
-                    borderRadius: 2,
-                    background: 'var(--accent)',
-                  }}
-                />
-              )}
-              <span>{c.label}</span>
-              {c.hint && (
-                <kbd
-                  style={{
-                    fontFamily: 'var(--font-mono-pre)',
-                    fontSize: 10.5,
-                    fontWeight: 600,
-                    padding: '2px 6px',
-                    borderRadius: 'var(--r-sm)',
-                    border: '1px solid var(--chrome-border)',
-                    background: 'var(--chrome-bg-2)',
-                    color: 'var(--chrome-fg-muted)',
-                  }}
-                >
-                  {c.hint}
-                </kbd>
-              )}
-            </li>
-          ))}
+          {sections
+            ? sections.map((sec) => (
+                <li key={`sec-${sec.group}`} style={{ listStyle: 'none' }}>
+                  <div
+                    role="presentation"
+                    style={{
+                      padding: '10px 12px 4px',
+                      fontFamily: 'var(--font-mono-pre)',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: '0.08em',
+                      textTransform: 'uppercase',
+                      color: 'var(--chrome-fg-subtle)',
+                    }}
+                  >
+                    {sec.group}
+                  </div>
+                  <ul role="group" aria-label={sec.group} style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                    {sec.items.map(({ c, i }) => renderRow(c, i))}
+                  </ul>
+                </li>
+              ))
+            : ordered.map((c, i) => renderRow(c, i))}
         </ul>
       </div>
     </div>

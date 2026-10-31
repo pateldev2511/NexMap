@@ -1,8 +1,9 @@
 import { useProjectStore } from '@/store/projectStore';
 import type { CanvasObject, Device, DeviceType, Link } from '@/model/types';
 import { NexIcon } from '@/ui/icons/NexIcon';
-import { isValidIp, isValidCidr } from '@/lib/ipcidr';
+import { isValidIp, isValidCidr, stripPrefix, ipInCidr } from '@/lib/ipcidr';
 import { nextFreeHost } from '@/lib/ipam';
+import { usedAddresses } from '@/sim/autoAddress';
 import { defaultDeviceName } from '@/model/schema';
 import {
   bodyText,
@@ -108,11 +109,11 @@ function DeviceInspector({ device }: { device: Device }) {
   function suggestIp() {
     const st = useProjectStore.getState();
     const subnets = st.subnetsAll();
-    const others = st
-      .devicesAll()
-      .filter((d) => d.id !== device.id)
-      .map((d) => d.managementIp)
-      .filter((ip): ip is string => !!ip);
+    // Avoid every address in use elsewhere — other devices' management IPs AND
+    // every per-port interface IP (this device's own ports included).
+    const others = usedAddresses(st.devicesAll().filter((d) => d.id !== device.id)).concat(
+      (device.interfaces ?? []).map((i) => i.ip).filter((ip): ip is string => !!ip),
+    );
     for (const subnet of subnets) {
       const host = nextFreeHost(subnet.cidr, others, { gateway: subnet.gateway });
       if (host) {
@@ -333,7 +334,32 @@ function InterfacesSection({ device }: { device: Device }) {
   const updateInterface = useProjectStore((s) => s.updateInterface);
   const deleteInterface = useProjectStore((s) => s.deleteInterface);
   const endEdit = useProjectStore((s) => s.endEdit);
+  const subnetCount = useProjectStore((s) => s.subnetsAll().length);
   const interfaces = device.interfaces ?? [];
+
+  /**
+   * Suggest the next free host for one port. Prefers the device's management
+   * subnet (so ports line up with the device, matching bulk auto-address), then
+   * falls back to the first subnet with room. Avoids every address already in use.
+   */
+  function suggestIfaceIp(ifaceId: string) {
+    const st = useProjectStore.getState();
+    const used = usedAddresses(st.devicesAll());
+    const mgmt = device.managementIp ? stripPrefix(device.managementIp) : null;
+    const subnets = mgmt
+      ? [...st.subnetsAll()].sort(
+          (a, b) => (ipInCidr(mgmt, a.cidr) ? 0 : 1) - (ipInCidr(mgmt, b.cidr) ? 0 : 1),
+        )
+      : st.subnetsAll();
+    for (const subnet of subnets) {
+      const host = nextFreeHost(subnet.cidr, used, { gateway: subnet.gateway });
+      if (host) {
+        updateInterface(device.id, ifaceId, { ip: host });
+        endEdit();
+        return;
+      }
+    }
+  }
 
   return (
     <div className={styles.group}>
@@ -372,6 +398,31 @@ function InterfacesSection({ device }: { device: Device }) {
             onChange={(e) => updateInterface(device.id, iface.id, { vlan: parseVlanId(e.target.value) })}
             onBlur={endEdit}
           />
+          <input
+            className={`${styles.ifaceIp}${ipError(iface.ip) ? ` ${styles.invalid}` : ''}`}
+            value={iface.ip ?? ''}
+            placeholder="port IP"
+            aria-label="Interface IP"
+            title={ipError(iface.ip) ?? 'Per-port IP address'}
+            onChange={(e) =>
+              updateInterface(device.id, iface.id, { ip: e.target.value || undefined })
+            }
+            onBlur={endEdit}
+          />
+          <button
+            type="button"
+            className={styles.ifaceSuggest}
+            onClick={() => suggestIfaceIp(iface.id)}
+            disabled={subnetCount === 0}
+            aria-label={`Suggest IP for ${iface.name}`}
+            title={
+              subnetCount === 0
+                ? 'Add a subnet (IP Plan) to suggest an address'
+                : 'Suggest the next free host (prefers this device’s management subnet)'
+            }
+          >
+            +IP
+          </button>
           <button
             type="button"
             className={styles.ifaceDel}

@@ -20,3 +20,39 @@ export function planPruneDanglingLinks(
   const ids = new Set(devices.map((d) => d.id));
   return links.filter((l) => !ids.has(l.sourceId) || !ids.has(l.targetId)).map((l) => l.id);
 }
+
+/** A link whose interface reference(s) point at a vanished interface. */
+export interface IfaceRefClear {
+  linkId: string;
+  clearSource: boolean;
+  clearTarget: boolean;
+}
+
+/**
+ * Find links whose interface reference points at an interface that no longer
+ * exists on its (present) endpoint device — the `dangling-interface` warning.
+ * Like a dangling link, the editor can't produce this: deleting an interface
+ * cascades its link refs clear, so these only arrive via import. The honest fix
+ * keeps the link and clears the stale pointer. A ref whose endpoint *device* is
+ * missing is left alone — that's the missing-endpoint error, prune's job, not
+ * this one's — so the two cleanups never fight over the same link.
+ */
+export function planClearDanglingIfaces(
+  devices: readonly Device[],
+  links: readonly Link[],
+): IfaceRefClear[] {
+  const byId = new Map(devices.map((d) => [d.id, d]));
+  const dangling = (deviceId: string, ifaceId: string | undefined): boolean => {
+    if (!ifaceId) return false;
+    const dev = byId.get(deviceId);
+    if (!dev) return false; // missing device → prune's job, not ours
+    return !(dev.interfaces ?? []).some((i) => i.id === ifaceId);
+  };
+  const out: IfaceRefClear[] = [];
+  for (const l of links) {
+    const clearSource = dangling(l.sourceId, l.sourceIfaceId);
+    const clearTarget = dangling(l.targetId, l.targetIfaceId);
+    if (clearSource || clearTarget) out.push({ linkId: l.id, clearSource, clearTarget });
+  }
+  return out;
+}
