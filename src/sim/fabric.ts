@@ -52,23 +52,28 @@ export function fabricEdges(nodes: readonly FabricNode[]): FabricEdge[] {
     let u = -1;
     let bestD = Infinity;
     for (let i = 0; i < n; i++) {
-      if (!inTree[i] && best[i] < bestD) {
-        bestD = best[i];
+      // i, v, u are all loop indices in [0, n); the fixed-length arrays are
+      // defined at every such index, so the non-null assertions are sound (the
+      // build's noUncheckedIndexedAccess just can't see it).
+      if (!inTree[i] && best[i]! < bestD) {
+        bestD = best[i]!;
         u = i;
       }
     }
     if (u === -1) break; // disconnected guard (can't happen for a complete graph)
     inTree[u] = true;
-    if (parent[u] !== -1) {
-      const a = ns[parent[u]].id;
-      const b = ns[u].id;
+    const nu = ns[u]!;
+    const pu = parent[u]!;
+    if (pu !== -1) {
+      const a = ns[pu]!.id;
+      const b = nu.id;
       edges.push(a < b ? [a, b] : [b, a]);
     }
     // Relax distances to the remaining outside nodes through the newly added u.
     for (let v = 0; v < n; v++) {
       if (inTree[v]) continue;
-      const dist = d2(ns[u], ns[v]);
-      if (dist < best[v]) {
+      const dist = d2(nu, ns[v]!);
+      if (dist < best[v]!) {
         best[v] = dist;
         parent[v] = u;
       }

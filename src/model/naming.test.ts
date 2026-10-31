@@ -113,7 +113,12 @@ describe('planNameDevices', () => {
   });
 
   it('does not create a duplicate-name warning for mixed types', () => {
-    const plan = planNameDevices([typed('switch', ''), typed('server', '')]);
-    expect(plan.map((p) => p.name)).toEqual(['Switch', 'Server']);
+    // Output order follows id sort, not input order, so assert per-device.
+    const sw = typed('switch', '');
+    const srv = typed('server', '');
+    const byId = new Map(planNameDevices([sw, srv]).map((p) => [p.deviceId, p.name]));
+    expect(byId.get(sw.id)).toBe('Switch');
+    expect(byId.get(srv.id)).toBe('Server');
+    expect(new Set(byId.values()).size).toBe(2); // distinct → no duplicate-name warning
   });
 });
