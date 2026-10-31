@@ -42,6 +42,11 @@ const EGRESS_RANK: Partial<Record<DeviceType, number>> = {
   'vpn-gateway': 3,
   router: 2,
   firewall: 1,
+  // A load balancer is the ingress to an app tier — the entry point reachability
+  // is measured against when no higher-ranked edge device is present (e.g. a
+  // three-tier app with no router/firewall drawn). Ranked below the real edge so
+  // an ISP/firewall still wins whenever one exists.
+  'load-balancer': 1,
 };
 
 /** Undirected adjacency, skipping self-loops, dangling endpoints, and `exclude`d nodes. */
@@ -114,9 +119,12 @@ function activeLinks(links: Link[], dist: Map<string, number>): Set<string> {
 
 /**
  * The egress/core nodes reachability is measured against: every linked device with
- * an egress role (ISP / gateway / router / firewall). When a diagram has no such
- * device, the single highest-degree linked node stands in as "the hub" (ties broken
- * by id for determinism), so failing it still reads as isolating its dependents.
+ * an egress role (ISP / gateway / router / firewall / LB). When a diagram has no
+ * such device, EVERY linked node tied at the maximum degree stands in as "the
+ * core" — not just one. That matters for redundant fabrics with no edge device
+ * drawn (dual top-of-rack switches, a dual-core pair): picking a single anchor
+ * would make failing it read as a total outage even though its twin survives.
+ * Order is resolved by id so the result is deterministic.
  */
 export function egressNodes(devices: Device[], links: Link[]): string[] {
   const adj = buildAdjacency(devices, links, new Set());
@@ -126,16 +134,13 @@ export function egressNodes(devices: Device[], links: Link[]): string[] {
     .sort((a, b) => (EGRESS_RANK[b.type]! - EGRESS_RANK[a.type]!) || (a.id < b.id ? -1 : 1));
   if (ranked.length) return ranked.map((d) => d.id);
 
-  let best: string | null = null;
-  let bestDeg = -1;
-  for (const d of linked) {
-    const deg = adj.get(d.id)!.size;
-    if (deg > bestDeg || (deg === bestDeg && best !== null && d.id < best)) {
-      bestDeg = deg;
-      best = d.id;
-    }
-  }
-  return best ? [best] : [];
+  let maxDeg = 0;
+  for (const d of linked) maxDeg = Math.max(maxDeg, adj.get(d.id)!.size);
+  if (maxDeg === 0) return [];
+  return linked
+    .filter((d) => adj.get(d.id)!.size === maxDeg)
+    .map((d) => d.id)
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
 /** A single representative egress for display ("rerouted via core-b" etc.). */

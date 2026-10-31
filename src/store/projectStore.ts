@@ -45,6 +45,8 @@ import {
   createDevice,
   createEmptyDocument,
   createInterface,
+  DEFAULT_DEVICE_SIZE,
+  defaultDeviceName,
   createLink,
   createImageObject,
   createLayer,
@@ -65,6 +67,16 @@ import { avoidRoute } from '@/lib/routing';
 import { pointInPolygon, type Point } from '@/lib/geometry';
 import { parseNexText, buildModel, type Diagnostic as NexDiagnostic } from '@/lib/nextext';
 import { analyzeHealth, edgeDisjointPaths, type HealthReport } from '@/lib/health';
+import { fabricEdges } from '@/sim/fabric';
+import { pickHub, starEdges } from '@/sim/hub';
+import { planAddresses, planGateways, planDeduplicateIps } from '@/sim/autoAddress';
+import { planSegment } from '@/sim/segment';
+import { planUplink } from '@/sim/uplink';
+import { planTwin } from '@/sim/redundancy';
+import { findSpofs, planHardening } from '@/sim/resilience';
+import { uniqueName, planDeduplicateNames, planNameDevices } from '@/model/naming';
+import { planPruneDanglingLinks } from '@/model/integrity';
+import { buildTemplateObjects } from '@/model/templates';
 import { History } from './history';
 import {
   AddDeviceCommand,
@@ -132,6 +144,12 @@ let pasteOffset = 0;
 let currentCamera = { tx: 0, ty: 0, scale: 1 };
 /** Camera the canvas should jump to (set by applyView, read on cameraTick). */
 let pendingCamera: { tx: number; ty: number; scale: number } | null = null;
+/**
+ * Flat canvas-space point at the center of the visible viewport, reported by the
+ * renderer. null when no canvas is mounted (headless/first run) so summon/insert
+ * can fall back to content-bounds placement. Module-scoped to avoid render loops.
+ */
+let currentViewCenter: { x: number; y: number } | null = null;
 /** A saved view applies temporary visibility without mutating saved layer state. */
 let activeViewHiddenLayers: Set<string> | null = null;
 
@@ -272,8 +290,12 @@ export interface ProjectStore {
   /** Bumped to ask the canvas to center on `focusTarget` (jump-to-object). */
   focusTarget: string | null;
   focusTick: number;
+  /** Transient one-line result banner for Conductor moves (null = hidden). */
+  flash: string | null;
 
   // --- actions (the only writers) ---
+  /** Set or clear the transient Conductor result banner. */
+  setFlash(message: string | null): void;
   addDeviceAt(type: DeviceType, x: number, y: number): string;
   addText(x: number, y: number): string;
   addShape(x: number, y: number, width: number, height: number): string;
@@ -320,6 +342,119 @@ export interface ProjectStore {
   /** Quick-create "Connect to new…" (M4b): create the device AND its link as
       ONE undoable transaction — one gesture, one Cmd+Z. Returns the device id. */
   addDeviceAndConnect(type: DeviceType, x: number, y: number, sourceId: string): string;
+  /**
+   * Conductor: summon a device where the user is looking. Places it at the visible
+   * viewport center (grid-snapped, nudged clear of overlaps), auto-wires it to the
+   * nearest existing device within reach, selects it — all as ONE undoable entry.
+   * Falls back to below-the-content placement when no canvas camera is known.
+   */
+  summonDevice(type: DeviceType): string;
+  /**
+   * Conductor: scaffold a whole validation-clean topology (see sim/templates.ts)
+   * centered on the viewport, as ONE undoable transaction. Selects the new group.
+   * Returns the new device ids, or [] for an unknown template key.
+   */
+  insertTemplate(key: string): string[];
+  /**
+   * Lasso-to-fabric: weave the given devices (default: the current selection) into
+   * one connected fabric — a euclidean MST — adding only the links that don't
+   * already exist, as ONE undoable transaction. Returns the number of links added.
+   */
+  weaveFabric(ids?: string[]): number;
+  /**
+   * Wire-to-hub: connect the given devices (default: the current selection) into a
+   * hub-and-spoke star around their single infrastructure node (switch/router/
+   * firewall/LB/WLC), adding only the links that don't already exist, as ONE
+   * undoable transaction. Returns the number of links added, or 0 when the
+   * selection has zero or more than one hub (ambiguous — we don't guess).
+   */
+  wireToHub(ids?: string[]): number;
+  /**
+   * Conductor: give the topology real IP addresses. Assigns the next free host from
+   * the project's subnets to every addressable device that has none (never
+   * overwriting an existing IP); when no subnet exists it creates a default /24
+   * first — all as ONE undoable transaction. `ids` scopes the pass to a selection.
+   * Returns how many devices were addressed.
+   */
+  autoAddressDevices(ids?: string[]): number;
+  /**
+   * Conductor: segment a selection into its own subnet. Picks the next free
+   * private /24, creates a named subnet, and addresses the selection's
+   * addressable, unaddressed members into it — all as ONE undoable transaction.
+   * `ids` scopes the pass to a selection. Returns how many devices were addressed,
+   * or 0 when nothing in the selection needs an address (no empty subnet is made).
+   */
+  segmentSelection(ids?: string[]): number;
+  /**
+   * Conductor: connect the design to the internet. Finds the edge device (a single
+   * firewall, else a single router; `ids` scopes the pick to a selection), reuses an
+   * existing internet node or creates one above the edge, and wires them — all as ONE
+   * undoable transaction. Returns 1 when an uplink was made, or 0 when there's no
+   * unambiguous edge or the edge already reaches an ISP (idempotent).
+   */
+  connectToInternet(ids?: string[]): number;
+  /**
+   * Conductor: make a device redundant. Clones the one target device (the given id,
+   * else the single selected device) beside itself and wires the twin to the same
+   * neighbors, so the original is no longer a single point of failure — the fix for
+   * what the Flow lens reveals. The twin lands WITHOUT the original's IP (a duplicate
+   * address would be an error), ready for auto-address. ONE undoable transaction.
+   * Returns 1 when a twin was added, or 0 when the target is ambiguous (zero or
+   * several selected) or has no neighbors (a twin there adds no redundancy).
+   */
+  addRedundantTwin(id?: string): number;
+  /**
+   * Conductor: scan the whole topology for single points of failure — devices whose
+   * loss isolates something else from the network — and select them (worst first) so
+   * each can be hardened with addRedundantTwin. Uses the same blastRadius engine the
+   * Flow lens uses on click. Sets a result banner; returns how many SPOFs were found.
+   */
+  scanWeakPoints(): number;
+  /**
+   * Conductor: harden the whole design in one move. Adds a redundant twin for every
+   * INTERNAL single point of failure (external nodes like an ISP/cloud are left alone
+   * — a second provider is a deliberate choice), wiring each twin to the original's
+   * neighbors, all as ONE undoable transaction. Twins land unaddressed, ready for
+   * auto-address. Sets a result banner; returns how many twins were added.
+   */
+  hardenDesign(): number;
+  /**
+   * Conductor: assign gateways to gateway-less subnets. For each subnet with no
+   * gateway, if exactly one addressed router/firewall sits inside its CIDR, that
+   * device's IP becomes the gateway — all as ONE undoable transaction. Completes the
+   * gateway story on hand-drawn/imported subnets and clears the "subnet has no
+   * gateway" warning. Sets a result banner; returns how many gateways were assigned.
+   */
+  assignGateways(): number;
+  /**
+   * Conductor: resolve duplicate management IPs. For each address shared by several
+   * devices, one keeps it and the rest are re-addressed to free hosts in the subnet
+   * that contains the clash — all as ONE undoable transaction — clearing the
+   * duplicate-IP error. Leaves clashes with no containing subnet alone. Sets a result
+   * banner; returns how many devices were re-addressed.
+   */
+  deduplicateIps(): number;
+  /**
+   * Conductor: resolve devices that share a name. The lowest-id device in each
+   * clashing group keeps its name; the rest are numbered ("Core" → "Core 2", …)
+   * as ONE undoable transaction, clearing the duplicate-name warning. Sets a
+   * result banner; returns how many devices were renamed.
+   */
+  deduplicateNames(): number;
+  /**
+   * Conductor: label every blank-named device with its type default ("Switch",
+   * "Server", …), numbered to stay distinct and clear of existing names, as ONE
+   * undoable transaction — clearing the device-no-name warning. Sets a result
+   * banner; returns how many devices were labelled.
+   */
+  nameUnnamedDevices(): number;
+  /**
+   * Conductor: prune links that point at a device that no longer exists (the
+   * `missing-endpoint` error — reachable only via import, since device deletion
+   * cascades its links). Removes them as ONE undoable transaction. Sets a result
+   * banner; returns how many links were pruned.
+   */
+  pruneDanglingLinks(): number;
   /** Apply imported devices+links as ONE atomic, undoable transaction (DA-T2). */
   importObjects(devices: Device[], links: Link[]): void;
   /** Apply imported VLANs/subnets as one atomic, undoable transaction. */
@@ -347,6 +482,8 @@ export interface ProjectStore {
   viewsAll(): View[];
   /** Renderer reports its camera so views can capture it. */
   reportCamera(c: { tx: number; ty: number; scale: number }): void;
+  /** Renderer reports the flat canvas point at the viewport center (null = no canvas). */
+  reportViewCenter(p: { x: number; y: number } | null): void;
   /** Camera the canvas should restore (consumed on cameraTick). */
   cameraRequest(): { tx: number; ty: number; scale: number } | null;
   /** Save the current layer-visibility + camera as a named view. */
@@ -500,6 +637,75 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     return model.layers.keys().next().value ?? 'default';
   }
 
+  /**
+   * Where a summoned device / template should land: the visible viewport center
+   * when the canvas has reported one, else just below everything already drawn
+   * (so headless and first-run placement still reads sensibly). Canvas coords.
+   */
+  function placementCenter(): { x: number; y: number } {
+    if (currentViewCenter) return { ...currentViewCenter };
+    const b = get().contentBounds();
+    if (b.width > 0) return { x: b.x + b.width / 2, y: b.y + b.height + 96 };
+    return { x: 0, y: 0 };
+  }
+
+  /** Nearest existing device to a canvas point by center distance, within maxDist. */
+  function nearestDeviceTo(
+    cx: number,
+    cy: number,
+    maxDist: number,
+    exclude = new Set<string>(),
+  ): Device | null {
+    let best: Device | null = null;
+    let bestD2 = maxDist * maxDist;
+    for (const d of model.devices.values()) {
+      if (exclude.has(d.id)) continue;
+      const dx = d.x + d.width / 2 - cx;
+      const dy = d.y + d.height / 2 - cy;
+      const dist2 = dx * dx + dy * dy;
+      if (dist2 < bestD2) {
+        bestD2 = dist2;
+        best = d;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * A grid spot near `center` whose device-sized box clears existing devices.
+   * Spirals outward on the grid so summoning next to something never stacks two
+   * nodes on the same pixel. Returns the chosen CENTER point.
+   */
+  function freeSpotNear(center: { x: number; y: number }): { x: number; y: number } {
+    const { width: W, height: H } = DEFAULT_DEVICE_SIZE;
+    const PAD = 16;
+    const occupied = (cx: number, cy: number) => {
+      const hits = index.query({
+        x: cx - W / 2 - PAD,
+        y: cy - H / 2 - PAD,
+        width: W + PAD * 2,
+        height: H + PAD * 2,
+      });
+      return hits.some((id) => model.devices.has(id));
+    };
+    const sx = snapValue(center.x, false);
+    const sy = snapValue(center.y, false);
+    if (!occupied(sx, sy)) return { x: sx, y: sy };
+    const step = 80;
+    // Eight compass offsets per ring, expanding outward until a slot is clear.
+    const dirs = [
+      [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1],
+    ] as const;
+    for (let ring = 1; ring <= 16; ring++) {
+      for (const [dx, dy] of dirs) {
+        const cx = snapValue(sx + dx * step * ring, false);
+        const cy = snapValue(sy + dy * step * ring, false);
+        if (!occupied(cx, cy)) return { x: cx, y: cy };
+      }
+    }
+    return { x: sx, y: sy }; // give up gracefully; overlap is better than a hang
+  }
+
   /** Generated content for a title-block / legend, from current project data. */
   function docBlockContent(role: 'title-block' | 'legend', rackId?: string): CalloutBlock[] {
     const date = model.project.updatedAt.slice(0, 10); // YYYY-MM-DD, deterministic
@@ -595,6 +801,11 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     cameraTick: 0,
     focusTarget: null,
     focusTick: 0,
+    flash: null,
+
+    setFlash(message) {
+      set({ flash: message });
+    },
 
     addDeviceAt(type, x, y) {
       const device = createDevice(type, x, y, firstLayerId());
@@ -1044,6 +1255,508 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       return device.id;
     },
 
+    summonDevice(type) {
+      const layer = firstLayerId();
+      const hadCamera = currentViewCenter != null;
+      // Intent first: with exactly one device selected, the summon means "add a
+      // neighbor to THIS" — place it beside the selection and wire to it. Otherwise
+      // it lands where you're looking and wires to the nearest node within reach.
+      const sel = [...get().selection].filter((id) => model.devices.has(id));
+      const anchor = sel.length === 1 ? model.devices.get(sel[0]!) : undefined;
+      const seed = anchor
+        ? { x: anchor.x + anchor.width / 2 + 128, y: anchor.y + anchor.height / 2 }
+        : placementCenter();
+      const center = freeSpotNear(seed);
+      const { width: W, height: H } = DEFAULT_DEVICE_SIZE;
+      // Auto-number duplicates so repeated summons read "Server", "Server 2", …
+      // instead of a stack of identical labels.
+      const name = uniqueName(
+        defaultDeviceName(type),
+        [...model.devices.values()].map((d) => d.name),
+      );
+      const device = createDevice(type, center.x - W / 2, center.y - H / 2, layer, { name });
+      const cmds: Command[] = [new AddDeviceCommand(device)];
+      // SUMMON_WIRE_RADIUS keeps a nearest-node link local, not flung across the canvas.
+      const SUMMON_WIRE_RADIUS = 520;
+      const neighbor =
+        anchor ?? (hadCamera ? nearestDeviceTo(center.x, center.y, SUMMON_WIRE_RADIUS) : null);
+      if (neighbor) {
+        cmds.push(new AddLinkCommand(createLink(neighbor.id, device.id, layer)));
+      }
+      history.dispatch(transaction(`Summon ${device.name}`, cmds), model);
+      index.insert(device.id, deviceBox(device));
+      history.commitCoalesceBoundary();
+      set({
+        rev: get().rev + 1,
+        selection: new Set([device.id]),
+        // Only jump the camera when we placed blind (no known viewport); when we
+        // placed at the visible center it's already on screen — don't yank the view.
+        focusTarget: hadCamera ? get().focusTarget : device.id,
+        focusTick: hadCamera ? get().focusTick : get().focusTick + 1,
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+      });
+      get().runValidation();
+      return device.id;
+    },
+
+    insertTemplate(key) {
+      const built = buildTemplateObjects(key, placementCenter(), firstLayerId());
+      if (!built) return [];
+      const { devices, links } = built;
+      const cmds: Command[] = [
+        ...devices.map((d) => new AddDeviceCommand(d)),
+        ...links.map((l) => new AddLinkCommand(l)),
+      ];
+      history.dispatch(transaction('Insert template', cmds), model);
+      for (const d of devices) index.insert(d.id, deviceBox(d));
+      history.commitCoalesceBoundary();
+      const ids = devices.map((d) => d.id);
+      set({
+        rev: get().rev + 1,
+        selection: new Set(ids),
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+      });
+      get().runValidation();
+      return ids;
+    },
+
+    weaveFabric(ids) {
+      // Default to the current selection; only devices can be woven.
+      const pool = (ids ?? [...get().selection]).filter((id) => model.devices.has(id));
+      if (pool.length < 2) return 0;
+      const nodes = pool.map((id) => {
+        const d = model.devices.get(id)!;
+        return { id, x: d.x + d.width / 2, y: d.y + d.height / 2 };
+      });
+      // Skip pairs already linked (either direction) so re-weaving is idempotent.
+      const existing = new Set<string>();
+      for (const l of model.links.values()) {
+        existing.add(l.sourceId < l.targetId ? `${l.sourceId}|${l.targetId}` : `${l.targetId}|${l.sourceId}`);
+      }
+      const layer = firstLayerId();
+      const cmds: Command[] = [];
+      for (const [a, b] of fabricEdges(nodes)) {
+        if (existing.has(`${a}|${b}`)) continue;
+        cmds.push(new AddLinkCommand(createLink(a, b, layer)));
+      }
+      if (cmds.length === 0) return 0;
+      history.dispatch(transaction('Weave fabric', cmds), model);
+      history.commitCoalesceBoundary();
+      set({
+        rev: get().rev + 1,
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+      });
+      get().runValidation();
+      return cmds.length;
+    },
+
+    wireToHub(ids) {
+      const pool = (ids ?? [...get().selection]).filter((id) => model.devices.has(id));
+      if (pool.length < 2) return 0;
+      const hubId = pickHub(pool.map((id) => ({ id, type: model.devices.get(id)!.type })));
+      if (!hubId) return 0; // zero or several infra nodes — ambiguous, don't guess.
+      // Skip pairs already linked (either direction) so re-wiring is idempotent.
+      const existing = new Set<string>();
+      for (const l of model.links.values()) {
+        existing.add(l.sourceId < l.targetId ? `${l.sourceId}|${l.targetId}` : `${l.targetId}|${l.sourceId}`);
+      }
+      const layer = firstLayerId();
+      const cmds: Command[] = [];
+      for (const [a, b] of starEdges(hubId, pool)) {
+        if (existing.has(`${a}|${b}`)) continue;
+        cmds.push(new AddLinkCommand(createLink(a, b, layer)));
+      }
+      if (cmds.length === 0) return 0;
+      history.dispatch(transaction('Wire to hub', cmds), model);
+      history.commitCoalesceBoundary();
+      set({
+        rev: get().rev + 1,
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+      });
+      get().runValidation();
+      return cmds.length;
+    },
+
+    autoAddressDevices(ids) {
+      const onlyIds = ids
+        ? new Set(ids.filter((id) => model.devices.has(id)))
+        : undefined;
+      const plan = planAddresses(
+        [...model.devices.values()],
+        [...model.subnets.values()],
+        onlyIds ? { onlyIds } : {},
+      );
+      if (plan.assignments.length === 0) return 0;
+      const cmds: Command[] = [];
+      // Synthesize the default subnet first (same transaction) when none existed.
+      if (plan.createdSubnetCidr) {
+        cmds.push(
+          new AddSubnetCommand(
+            createSubnet(plan.createdSubnetCidr, {
+              name: 'Default',
+              gateway: plan.createdSubnetGateway ?? undefined,
+            }),
+          ),
+        );
+      }
+      for (const a of plan.assignments) {
+        const d = model.devices.get(a.deviceId)!;
+        cmds.push(
+          new UpdateDeviceCommand(a.deviceId, { managementIp: d.managementIp }, { managementIp: a.ip }),
+        );
+      }
+      history.dispatch(transaction('Auto-assign IPs', cmds), model);
+      history.commitCoalesceBoundary();
+      set({
+        rev: get().rev + 1,
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+      });
+      get().runValidation();
+      return plan.assignments.length;
+    },
+
+    segmentSelection(ids) {
+      const pool = (ids ?? [...get().selection]).filter((id) => model.devices.has(id));
+      const selected = pool.map((id) => model.devices.get(id)!);
+      const existingIps = [...model.devices.values()]
+        .map((d) => d.managementIp)
+        .filter((ip): ip is string => !!ip);
+      const plan = planSegment(selected, [...model.subnets.values()], existingIps);
+      if (!plan) return 0;
+      const name = uniqueName(
+        'Segment',
+        [...model.subnets.values()].map((s) => s.name).filter((n): n is string => !!n),
+      );
+      const cmds: Command[] = [
+        new AddSubnetCommand(createSubnet(plan.cidr, { name, gateway: plan.gateway ?? undefined })),
+      ];
+      for (const a of plan.assignments) {
+        const d = model.devices.get(a.deviceId)!;
+        cmds.push(
+          new UpdateDeviceCommand(a.deviceId, { managementIp: d.managementIp }, { managementIp: a.ip }),
+        );
+      }
+      history.dispatch(transaction('Segment into subnet', cmds), model);
+      history.commitCoalesceBoundary();
+      set({
+        rev: get().rev + 1,
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+      });
+      get().runValidation();
+      return plan.assignments.length;
+    },
+
+    connectToInternet(ids) {
+      const onlyIds = ids ? new Set(ids.filter((id) => model.devices.has(id))) : undefined;
+      const plan = planUplink(
+        [...model.devices.values()].map((d) => ({ id: d.id, type: d.type })),
+        [...model.links.values()].map((l) => ({ sourceId: l.sourceId, targetId: l.targetId })),
+        onlyIds ? { onlyIds } : {},
+      );
+      if (!plan) return 0;
+      const layer = firstLayerId();
+      const edge = model.devices.get(plan.edgeId)!;
+      const cmds: Command[] = [];
+      let ispId = plan.existingIspId;
+      let createdIsp: Device | null = null;
+      if (!ispId) {
+        // Internet reads "up" / upstream — place the new node above the edge device,
+        // nudged to a free grid spot so it never lands on top of something.
+        const { width: W, height: H } = DEFAULT_DEVICE_SIZE;
+        const seed = { x: edge.x + edge.width / 2, y: edge.y + edge.height / 2 - 160 };
+        const center = freeSpotNear(seed);
+        const name = uniqueName(
+          defaultDeviceName('isp'),
+          [...model.devices.values()].map((dv) => dv.name),
+        );
+        createdIsp = createDevice('isp', center.x - W / 2, center.y - H / 2, layer, { name });
+        ispId = createdIsp.id;
+        cmds.push(new AddDeviceCommand(createdIsp));
+      }
+      cmds.push(new AddLinkCommand(createLink(ispId, plan.edgeId, layer)));
+      history.dispatch(transaction('Connect to internet', cmds), model);
+      if (createdIsp) index.insert(createdIsp.id, deviceBox(createdIsp));
+      history.commitCoalesceBoundary();
+      set({
+        rev: get().rev + 1,
+        selection: new Set([plan.edgeId]),
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+      });
+      get().runValidation();
+      return 1;
+    },
+
+    addRedundantTwin(id) {
+      // Resolve one unambiguous target: the given id, else a lone selection.
+      let targetId: string | undefined = id;
+      if (!targetId) {
+        const sel = [...get().selection].filter((s) => model.devices.has(s));
+        if (sel.length !== 1) return 0; // zero or several — which device? don't guess.
+        targetId = sel[0]!;
+      }
+      const src = model.devices.get(targetId);
+      if (!src) return 0;
+      const plan = planTwin(
+        targetId,
+        [...model.links.values()].map((l) => ({ sourceId: l.sourceId, targetId: l.targetId })),
+      );
+      if (!plan) return 0; // no neighbors — a twin would be an island, not redundancy.
+      const layer = firstLayerId();
+      const { width: W, height: H } = DEFAULT_DEVICE_SIZE;
+      // Place the twin beside its original (the pair reads as a pair), nudged clear.
+      const seed = { x: src.x + src.width / 2 + 128, y: src.y + src.height / 2 };
+      const center = freeSpotNear(seed);
+      const name = uniqueName(src.name, [...model.devices.values()].map((d) => d.name));
+      // Clone type only — NOT the management IP (a duplicate address would be a real
+      // error); the twin lands unaddressed, ready for auto-address.
+      const twin = createDevice(src.type, center.x - W / 2, center.y - H / 2, layer, { name });
+      const cmds: Command[] = [new AddDeviceCommand(twin)];
+      for (const nId of plan.neighborIds) {
+        cmds.push(new AddLinkCommand(createLink(twin.id, nId, layer)));
+      }
+      history.dispatch(transaction(`Add redundant ${src.name}`, cmds), model);
+      index.insert(twin.id, deviceBox(twin));
+      history.commitCoalesceBoundary();
+      set({
+        rev: get().rev + 1,
+        selection: new Set([twin.id]),
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+      });
+      get().runValidation();
+      return 1;
+    },
+
+    scanWeakPoints() {
+      const spofs = findSpofs([...model.devices.values()], [...model.links.values()]);
+      if (spofs.length === 0) {
+        set({ flash: 'No single points of failure — every device has a backup path.' });
+        return 0;
+      }
+      // Select the weak devices (worst first) so they're highlighted and ready to
+      // harden; the banner names the count and the worst offender.
+      const ids = spofs.map((s) => s.deviceId);
+      const worst = model.devices.get(spofs[0]!.deviceId);
+      const n = spofs.length;
+      set({
+        selection: new Set(ids),
+        flash:
+          `${n} single point${n === 1 ? '' : 's'} of failure` +
+          (worst ? ` — worst: ${worst.name} isolates ${spofs[0]!.isolates}` : '') +
+          `. Harden with "Add a redundant twin".`,
+      });
+      return n;
+    },
+
+    hardenDesign() {
+      const plan = planHardening([...model.devices.values()], [...model.links.values()]);
+      if (plan.steps.length === 0) {
+        set({
+          flash: plan.skippedExternal.length
+            ? 'Only the internet/cloud uplink is a single point of failure — add a second provider deliberately.'
+            : 'Nothing to harden — no internal single points of failure.',
+        });
+        return 0;
+      }
+      const layer = firstLayerId();
+      const { width: W, height: H } = DEFAULT_DEVICE_SIZE;
+      const GAP = W + 40;
+      const cmds: Command[] = [];
+      const twins: Device[] = [];
+      // Twins placed this batch aren't in the model yet, so freeSpotNear (which only
+      // avoids committed devices) can't see them — track their boxes and nudge clear.
+      const reserved: { x: number; y: number }[] = [];
+      for (const step of plan.steps) {
+        const src = model.devices.get(step.deviceId);
+        if (!src) continue;
+        let c = freeSpotNear({ x: src.x + src.width / 2 + 128, y: src.y + src.height / 2 });
+        for (
+          let guard = 0;
+          guard < 48 &&
+          reserved.some((r) => Math.abs(r.x - c.x) < GAP && Math.abs(r.y - c.y) < H + 24);
+          guard++
+        ) {
+          c = freeSpotNear({ x: c.x + GAP, y: c.y });
+        }
+        reserved.push(c);
+        const name = uniqueName(src.name, [
+          ...[...model.devices.values()].map((d) => d.name),
+          ...twins.map((t) => t.name),
+        ]);
+        // Clone type only — NOT the IP (a duplicate address would be a real error).
+        const twin = createDevice(src.type, c.x - W / 2, c.y - H / 2, layer, { name });
+        twins.push(twin);
+        cmds.push(new AddDeviceCommand(twin));
+        for (const nId of step.neighborIds) {
+          cmds.push(new AddLinkCommand(createLink(twin.id, nId, layer)));
+        }
+      }
+      if (twins.length === 0) return 0;
+      history.dispatch(transaction('Harden the design', cmds), model);
+      for (const t of twins) index.insert(t.id, deviceBox(t));
+      history.commitCoalesceBoundary();
+      const n = twins.length;
+      const tail = plan.skippedExternal.length
+        ? ' The internet/cloud uplink is still a single point of failure — add a second provider deliberately.'
+        : '';
+      set({
+        rev: get().rev + 1,
+        selection: new Set(twins.map((t) => t.id)),
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+        flash:
+          `Hardened ${n} single point${n === 1 ? '' : 's'} of failure — added ${n} ` +
+          `twin${n === 1 ? '' : 's'} (unaddressed; run auto-address next).${tail}`,
+      });
+      get().runValidation();
+      return n;
+    },
+
+    assignGateways() {
+      const plan = planGateways([...model.subnets.values()], [...model.devices.values()]);
+      if (plan.length === 0) {
+        set({
+          flash:
+            'No gateways to assign — every subnet with a lone in-range router/firewall already has one.',
+        });
+        return 0;
+      }
+      const cmds: Command[] = plan.map((a) => {
+        const s = model.subnets.get(a.subnetId)!;
+        return new UpdateSubnetCommand(a.subnetId, { gateway: s.gateway }, { gateway: a.gateway });
+      });
+      history.dispatch(transaction('Assign gateways', cmds), model);
+      history.commitCoalesceBoundary();
+      const n = plan.length;
+      set({
+        rev: get().rev + 1,
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+        flash: `Assigned ${n} subnet gateway${n === 1 ? '' : 's'} from in-range routers/firewalls.`,
+      });
+      get().runValidation();
+      return n;
+    },
+
+    deduplicateIps() {
+      const plan = planDeduplicateIps([...model.devices.values()], [...model.subnets.values()]);
+      if (plan.length === 0) {
+        set({ flash: 'No duplicate addresses to resolve.' });
+        return 0;
+      }
+      const cmds: Command[] = plan.map((a) => {
+        const d = model.devices.get(a.deviceId)!;
+        return new UpdateDeviceCommand(
+          a.deviceId,
+          { managementIp: d.managementIp },
+          { managementIp: a.ip },
+        );
+      });
+      history.dispatch(transaction('Resolve duplicate IPs', cmds), model);
+      history.commitCoalesceBoundary();
+      const n = plan.length;
+      set({
+        rev: get().rev + 1,
+        selection: new Set(plan.map((a) => a.deviceId)),
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+        flash: `Re-addressed ${n} device${n === 1 ? '' : 's'} that shared an address.`,
+      });
+      get().runValidation();
+      return n;
+    },
+
+    deduplicateNames() {
+      const plan = planDeduplicateNames([...model.devices.values()]);
+      if (plan.length === 0) {
+        set({ flash: 'No duplicate names to resolve.' });
+        return 0;
+      }
+      const cmds: Command[] = plan.map((a) => {
+        const d = model.devices.get(a.deviceId)!;
+        return new UpdateDeviceCommand(a.deviceId, { name: d.name }, { name: a.name });
+      });
+      history.dispatch(transaction('Resolve duplicate names', cmds), model);
+      history.commitCoalesceBoundary();
+      const n = plan.length;
+      set({
+        rev: get().rev + 1,
+        selection: new Set(plan.map((a) => a.deviceId)),
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+        flash: `Renamed ${n} device${n === 1 ? '' : 's'} that shared a name.`,
+      });
+      get().runValidation();
+      return n;
+    },
+
+    nameUnnamedDevices() {
+      const plan = planNameDevices([...model.devices.values()]);
+      if (plan.length === 0) {
+        set({ flash: 'No unnamed devices — every device already has a name.' });
+        return 0;
+      }
+      const cmds: Command[] = plan.map((a) => {
+        const d = model.devices.get(a.deviceId)!;
+        return new UpdateDeviceCommand(a.deviceId, { name: d.name }, { name: a.name });
+      });
+      history.dispatch(transaction('Name unnamed devices', cmds), model);
+      history.commitCoalesceBoundary();
+      const n = plan.length;
+      set({
+        rev: get().rev + 1,
+        selection: new Set(plan.map((a) => a.deviceId)),
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+        flash: `Named ${n} unnamed device${n === 1 ? '' : 's'}.`,
+      });
+      get().runValidation();
+      return n;
+    },
+
+    pruneDanglingLinks() {
+      const ids = planPruneDanglingLinks(
+        [...model.devices.values()],
+        [...model.links.values()],
+      );
+      if (ids.length === 0) {
+        set({ flash: 'No dangling links to prune — every link connects two devices.' });
+        return 0;
+      }
+      history.dispatch(transaction('Prune dangling links', [new DeleteCommand([], ids)]), model);
+      history.commitCoalesceBoundary();
+      const n = ids.length;
+      set({
+        rev: get().rev + 1,
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+        flash: `Pruned ${n} dangling link${n === 1 ? '' : 's'} that pointed at a missing device.`,
+      });
+      get().runValidation();
+      return n;
+    },
+
     importObjects(devices, links) {
       if (devices.length === 0 && links.length === 0) return;
       const cmds: Command[] = [
@@ -1225,6 +1938,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     reportCamera(c) {
       currentCamera = c;
+    },
+
+    reportViewCenter(p) {
+      currentViewCenter = p;
     },
 
     cameraRequest() {

@@ -13,11 +13,120 @@ the cables down to the hardware, with a user control to dial the motion.
 
 ### Added
 
-- **Summon devices by name (Conductor).** Open the command palette (⌘K) and type
-  a device name — "firewall", "switch", "router" — and it appears on the canvas,
-  selected, with the view jumped to it. The first slice of a faster, declarative
-  way to build: create by intent, from the one palette, without hunting the
-  library. (More Conductor to come: summon-at-cursor, templates, lasso-to-fabric.)
+- **Conductor — build by intent, from the one palette.** A faster, declarative
+  way to design, all through ⌘K:
+  - **Summon at cursor, intent-aware.** Type a device name — "firewall", "switch",
+    "router" — and it appears *where you're looking* (the viewport center, nudged
+    clear of anything already there) and **auto-wires** so it joins the topology
+    instead of floating: to the device you have selected when there's exactly one
+    (summon again and it chains off the new node), otherwise to the nearest node
+    within reach. Repeated summons auto-number — "Server", "Server 2", "Server 3" —
+    so a tier reads like a design, not a stack of identical labels. One undo.
+  - **Scaffold a whole topology.** "Insert: …" drops a complete, validation-clean
+    network — redundant core (HA), DMZ perimeter, data-center rack, three-tier
+    campus, a 3-tier app stack (load balancer → web → app → database, HA-meshed),
+    and more — laid out and wired at the viewport, as one undoable step. Reuses the
+    curated starter registry; management IPs are dropped on insert so a template
+    never collides with the addresses already on your canvas.
+  - **Weave a lasso into a fabric.** Select a scatter of devices and "Weave into a
+    fabric" (⌘K, or the selection toolbar) connects them into one clean mesh — a
+    euclidean minimum spanning tree, shortest total wire, no cycles — skipping any
+    pair already linked, so re-weaving is idempotent. A pile of nodes becomes a
+    connected topology in a click.
+  - **Wire a lasso to its hub (star).** The other half of real topologies: select
+    some clients plus the one switch/router/firewall they hang off, and "Wire
+    selection to its hub" (⌘K, or the toolbar) stars every client to that hub. It
+    refuses to guess — zero or several infrastructure nodes in the selection and it
+    does nothing — and skips links that already exist, so it's idempotent too.
+  - **Segment a lasso into a subnet.** The missing verb between drawing and
+    addressing: select a group (a DMZ, a server tier) and "Segment selection into a
+    subnet" (⌘K) carves it its own network — picks the next free private /24 that
+    overlaps nothing on the canvas, creates a named subnet ("Segment", "Segment 2",
+    …), and addresses the selection's unaddressed members into it from .1. A flat
+    drawing becomes a segmented design one lasso at a time. Never re-homes a device
+    that already has an IP; invents no empty subnet when nothing needs one. When the
+    group holds a single router or firewall, it's adopted as the subnet's gateway
+    (addressed .1) — so the new subnet is complete, not flagged for a missing one.
+  - **Auto-address the topology.** "Auto-assign IP addresses" (⌘K) gives every
+    addressable device without an IP the next free host from your subnets — and
+    when you have none (the usual case right after inserting a template), it
+    creates a default `10.0.0.0/24` and fills from there. One undoable step from a
+    drawn shape to a specified network. Never overwrites an address, never
+    collides, skips external/abstract nodes (ISP, cloud), and shares lib/ipam's
+    allocation policy with the inspector's one-at-a-time "Suggest". When it has to
+    create that default subnet and a single router/firewall is being addressed, that
+    device becomes the subnet's gateway, so the result is a complete, clean design.
+  - **Connect to the internet (uplink).** The last declarative step a diagram
+    usually wants: "Connect to the internet" (⌘K) wires your edge device to an ISP.
+    It finds the box that faces the world — a single firewall (the perimeter by
+    definition, so it wins even when routers are present), else a single router —
+    reuses the internet node you've already drawn or creates one above the edge, and
+    links them, as one undoable step. Refuses to guess when the edge is ambiguous
+    (two firewalls, or several routers with no firewall), is idempotent (an edge that
+    already reaches an ISP is left alone), and never spawns a second internet cloud.
+  - **Add a redundant twin (fix a single point of failure).** Where Conductor and the
+    Flow lens meet: Flow *reveals* that losing one device isolates everything behind
+    it; this *fixes* it. Select the single point of failure and "Add a redundant twin"
+    (⌘K) clones it beside itself and wires the twin to the same neighbors, so traffic
+    has a parallel path and failing the original cuts no one off — re-run Flow and the
+    blast radius collapses to nothing. The twin lands *without* the original's IP (a
+    duplicate address would be a real error), so it's ready for auto-address next. One
+    undoable step. Refuses when the target is ambiguous (zero or several selected) or
+    has no neighbors (a twin there is an island, not redundancy).
+  - **Scan for single points of failure.** Flow lets you pull one device at a time;
+    this pulls *every* device at once. "Scan for single points of failure" (⌘K) runs
+    the same blast-radius engine across the whole topology and selects every device
+    whose loss would isolate something else — worst first — with a one-line verdict
+    ("2 single points of failure — worst: Core isolates 5"), or "No single points of
+    failure — every device has a backup path" when the design is already resilient.
+    Failure-finding goes from a manual hunt to an exhaustive answer; each weak device
+    it selects is one "Add a redundant twin" away from fixed.
+  - **Harden the design (the capstone).** The one-move version of the whole resilience
+    loop: "Harden the design" (⌘K) scans for every single point of failure and adds a
+    redundant twin to each *internal* one — wiring every twin to its original's
+    neighbors — in a single undoable step, so one ⌘Z reverts the lot. Rescan afterward
+    and you're at zero. It's honest about its limits: external nodes (an ISP, a cloud)
+    are never silently duplicated — a second provider is a real decision with a
+    contract behind it, so hardening leaves them and says so ("the internet/cloud
+    uplink is still a single point of failure — add a second provider deliberately").
+    Twins land unaddressed, ready for auto-address; "Nothing to harden" when the design
+    is already resilient.
+  - **Assign gateways to subnets.** Finishes the gateway story. Auto-address and
+    segment already set a gateway on the subnets they create; this closes the same
+    loop on subnets you drew by hand or imported. "Assign gateways to subnets" (⌘K)
+    walks every gateway-less subnet and, when exactly one addressed router or firewall
+    sits inside its CIDR, adopts that device's IP as the gateway — one undoable step
+    that clears the honest "subnet has no gateway" warning truthfully. Never overwrites
+    a gateway you set, and refuses the ambiguous case (zero or several in-range L3
+    devices), leaving the warning so you decide.
+  - **Resolve duplicate IP addresses.** The error a paste, a clone, or an import
+    leaves behind — and the one auto-address never touches, since it only fills blanks.
+    "Resolve duplicate IP addresses" (⌘K) finds every address shared by more than one
+    device, keeps one, and re-addresses the rest to free hosts in the subnet that
+    contains the clash — one undoable step that clears the duplicate-IP error. Same
+    allocator as everything else (never collides, skips the gateway), and honest about
+    its reach: a clash whose address falls in no defined subnet is left flagged rather
+    than re-homed into a range Conductor would have to invent.
+  - **Resolve duplicate device names.** The sibling to the address fix. "Resolve
+    duplicate device names" (⌘K) finds every name shared by more than one device,
+    keeps the first, and numbers the rest ("Core" → "Core 2", "Core 3") — one
+    undoable step that clears the duplicate-name warning. It matches the validator
+    exactly, grouping and numbering case-insensitively, so it never clears one
+    clash by minting another; blank names are left for the separate "no name" nudge.
+  - **Prune dangling links.** The other hard error — a link that points at a device
+    that isn't there. You can't draw one (deleting a device takes its links with it);
+    it only rides in on a hand-edited or externally generated `.nexmap`. "Prune
+    dangling links" (⌘K) removes every link with a missing endpoint in one undoable
+    step, clearing the error, and leaves the links that connect two real devices alone.
+  - **Name unnamed devices.** The small, friendly one. "Name unnamed devices" (⌘K)
+    gives every blank device a sensible label from its type ("Switch", "Server"),
+    numbered so the batch stays distinct ("Switch", "Switch 2") and never collides
+    with a name already on the board — clearing the no-name warning without ever
+    creating a duplicate-name one. Devices you've already named, however oddly, are
+    left alone; naming is your call, and this only fills true blanks.
+  - Along the way, Flow's blast-radius engine learned that a load balancer is an
+    ingress, and that an egress-less redundant fabric (dual ToR, dual core) has
+    *two* cores, not one — so failing one twin no longer reads as a total outage.
 - **Stress-test your design (Flow lens).** A read-only "Flow" mode (toolbar TEST
   toggle, Esc to exit) turns the network canvas into a what-if instrument: click
   any device to pull it and watch the blast radius cascade red along the links to
