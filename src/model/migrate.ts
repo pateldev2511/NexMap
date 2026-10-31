@@ -75,6 +75,18 @@ export const MIGRATIONS: Record<number, Migration> = {
       };
     }),
   }),
+  // v4 → v5: per-port IP addresses. Purely ADDITIVE — `Interface.ip` is a new
+  // optional field (absent = unaddressed), so nothing on disk changes beyond the
+  // version stamp. Older builds refuse a v5 file (too-new guard) rather than
+  // re-save and silently drop port IPs.
+  4: (doc) => ({ ...doc, schemaVersion: 5 }),
+  // v5 → v6: declarative invariants. Purely ADDITIVE — add the `invariants` list
+  // of declared rule ids (empty: a pre-v6 design declared none). Older builds
+  // refuse a v6 file (too-new guard) rather than re-save and drop the rules.
+  5: (doc) => ({ ...doc, schemaVersion: 6, invariants: [] }),
+  // v6 → v7: authored role-based rules. Purely ADDITIVE — add the `customRules`
+  // list (empty: a pre-v7 design authored none). Older builds refuse a v7 file.
+  6: (doc) => ({ ...doc, schemaVersion: 7, customRules: [] }),
 };
 
 export type LoadResult =

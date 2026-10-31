@@ -199,3 +199,53 @@ describe('validate — first-class interfaces (schema v2)', () => {
     expect(issues.some((i) => i.code === 'oversubscribed-interface')).toBe(false);
   });
 });
+
+describe('validate — per-port IP addresses (schema v5)', () => {
+  const withPort = (name: string, ip?: string, mgmt?: string): Device =>
+    createDevice('switch', 0, 0, LAYER, {
+      name,
+      managementIp: mgmt,
+      interfaces: [{ id: `${name}-i1`, name: 'Gi0/1', ip }],
+    });
+
+  it('flags a duplicate IP shared between a port and a device management IP', () => {
+    const a = createDevice('router', 0, 0, LAYER, { name: 'R1', managementIp: '10.0.0.1' });
+    const b = withPort('SW1', '10.0.0.1'); // port clashes with R1's mgmt IP
+    const dup = validate({ devices: [a, b], links: [] }).find((i) => i.code === 'duplicate-ip');
+    expect(dup).toBeDefined();
+    expect(dup?.objectIds.sort()).toEqual([a.id, b.id].sort());
+  });
+
+  it('flags a duplicate IP shared between two ports', () => {
+    const a = withPort('SW1', '10.0.0.9');
+    const b = withPort('SW2', '10.0.0.9');
+    expect(validate({ devices: [a, b], links: [] }).some((i) => i.code === 'duplicate-ip')).toBe(true);
+  });
+
+  it('flags an invalid port IP', () => {
+    const a = withPort('SW1', '10.0.0.999');
+    expect(validate({ devices: [a], links: [] }).some((i) => i.code === 'invalid-ip')).toBe(true);
+  });
+
+  it('flags a port IP that sits outside every defined subnet', () => {
+    const a = withPort('SW1', '192.168.9.9');
+    const issues = validate({ devices: [a], links: [], subnets: [createSubnet('10.0.0.0/24')] });
+    expect(issues.some((i) => i.code === 'ip-outside-subnet')).toBe(true);
+  });
+
+  it('accepts a valid, in-subnet, unique port IP', () => {
+    const a = withPort('SW1', '10.0.0.5', '10.0.0.1');
+    const issues = validate({ devices: [a], links: [], subnets: [createSubnet('10.0.0.0/24')] });
+    expect(issues.some((i) => ['duplicate-ip', 'invalid-ip', 'ip-outside-subnet'].includes(i.code))).toBe(
+      false,
+    );
+  });
+
+  it('ignores interfaces with no IP (unaddressed ports are fine)', () => {
+    const a = createDevice('switch', 0, 0, LAYER, {
+      name: 'SW1',
+      interfaces: [{ id: 'i1', name: 'Gi0/1' }, { id: 'i2', name: 'Gi0/2' }],
+    });
+    expect(validate({ devices: [a], links: [] })).toEqual([]);
+  });
+});

@@ -24,7 +24,7 @@ import type {
 } from './types';
 
 /** Bump when the on-disk shape changes; add a migration in migrate.ts. */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 7;
 export const APP_VERSION = '0.1.0';
 
 export const DEFAULT_DEVICE_SIZE = { width: 56, height: 40 } as const;
@@ -253,6 +253,8 @@ export function createEmptyDocument(now: string): NexMapDocument {
     subnets: [],
     racks: [],
     rackCables: [],
+    invariants: [],
+    customRules: [],
     assets: [],
     customFields: [],
   };

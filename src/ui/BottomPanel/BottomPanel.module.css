@@ -212,6 +212,40 @@
   color: var(--chrome-fg);
 }
 
+/* One-click Conductor fix for issues that have a safe, deterministic remedy. */
+.fixBtn {
+  margin-left: auto;
+  align-self: center;
+  flex: none;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--chrome-bg);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.fixBtn:hover {
+  color: var(--chrome-bg);
+  background: var(--accent);
+}
+
+/* Header row offering the one-shot "fix everything safe" macro. */
+.fixAllRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--chrome-border);
+  background: var(--chrome-bg);
+}
+.fixAllLabel {
+  color: var(--chrome-fg-muted);
+  font-size: 12px;
+}
+
 .cleanState {
   display: flex;
   align-items: center;
@@ -328,4 +362,218 @@
 .redundancyResult {
   font-size: 12px;
   color: var(--chrome-fg);
+}
+
+/* Rules tab — declarative invariants. */
+.rules {
+  display: flex;
+  flex-direction: column;
+}
+.rulesIntro {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--chrome-fg-muted);
+  border-bottom: 1px solid var(--chrome-border);
+}
+.ruleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--chrome-border);
+}
+.ruleToggle {
+  flex: none;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+.ruleToggle input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.ruleText {
+  min-width: 0;
+  flex: 1;
+}
+.ruleLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--chrome-fg);
+}
+.ruleDesc {
+  font-size: 11.5px;
+  color: var(--chrome-fg-muted);
+}
+.ruleStatus {
+  flex: none;
+  margin-left: auto;
+  font-size: 12px;
+}
+.ruleOff {
+  color: var(--chrome-fg-subtle);
+  font-size: 11.5px;
+}
+.ruleMet {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--sev-info);
+  font-weight: 600;
+}
+.ruleMet svg {
+  width: 14px;
+  height: 14px;
+}
+.ruleViolation {
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sev-warn);
+  background: var(--chrome-bg);
+  border: 1px solid var(--sev-warn);
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ruleViolation:hover {
+  color: var(--chrome-bg);
+  background: var(--sev-warn);
+}
+
+.ruleActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ruleCount {
+  padding: 2px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sev-warn);
+  background: var(--chrome-bg);
+  border: 1px solid var(--sev-warn);
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ruleCount:hover {
+  color: var(--chrome-bg);
+  background: var(--sev-warn);
+}
+.ruleRestore {
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--chrome-bg);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ruleRestore:hover {
+  color: var(--chrome-bg);
+  background: var(--accent);
+}
+
+.restoreAllRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--chrome-border);
+  background: var(--chrome-bg);
+}
+.restoreAllLabel {
+  flex: 1;
+  font-size: 12px;
+  color: var(--chrome-fg-muted);
+}
+
+/* Custom (authored) rules section. */
+.customRules {
+  display: flex;
+  flex-direction: column;
+  border-top: 2px solid var(--chrome-border);
+}
+.customHeader {
+  padding: 8px 12px 4px;
+  font-family: var(--font-mono-pre);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--chrome-fg-subtle);
+}
+.ruleRemove {
+  flex: none;
+  margin-left: 8px;
+  width: 22px;
+  height: 22px;
+  line-height: 1;
+  font-size: 16px;
+  color: var(--chrome-fg-muted);
+  background: transparent;
+  border: 1px solid var(--chrome-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.ruleRemove:hover {
+  color: var(--sev-error);
+  border-color: var(--sev-error);
+}
+.customAdd {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 9px 12px 12px;
+}
+.customAddLabel {
+  font-size: 12px;
+  color: var(--chrome-fg-muted);
+}
+.customInput {
+  width: 110px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--chrome-fg);
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 6px;
+}
+.customNum {
+  width: 52px;
+  padding: 4px 6px;
+  font-size: 12px;
+  color: var(--chrome-fg);
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 6px;
+}
+.customInput:focus,
+.customNum:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.ruleRestore:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.customKind {
+  padding: 4px 6px;
+  font-size: 12px;
+  color: var(--chrome-fg);
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.customKind:focus {
+  outline: none;
+  border-color: var(--accent);
 }

@@ -79,37 +79,59 @@ function checkDuplicateNames(devices: Device[]): ValidationIssue[] {
   return issues;
 }
 
-/** Rule: duplicate management IP addresses across devices. */
+/**
+ * Every address in the model, each tagged with the device that owns it: the
+ * device's management IP plus every per-port interface IP (schema v5). The
+ * address checks below all work off this one walk so management and port IPs
+ * are validated identically.
+ */
+interface AddressRef {
+  ip: string; // raw, may include a /prefix
+  deviceId: string;
+}
+function allAddresses(devices: Device[]): AddressRef[] {
+  const out: AddressRef[] = [];
+  for (const d of devices) {
+    if (d.managementIp?.trim()) out.push({ ip: d.managementIp, deviceId: d.id });
+    for (const iface of d.interfaces ?? []) {
+      if (iface.ip?.trim()) out.push({ ip: iface.ip, deviceId: d.id });
+    }
+  }
+  return out;
+}
+
+/** Rule: duplicate IP addresses across devices and their ports. */
 function checkDuplicateIps(devices: Device[]): ValidationIssue[] {
   const byIp = new Map<string, string[]>();
-  for (const d of devices) {
-    if (!d.managementIp) continue;
-    const ip = stripPrefix(d.managementIp);
+  for (const { ip: raw, deviceId } of allAddresses(devices)) {
+    const ip = stripPrefix(raw);
     if (!ip) continue;
     const list = byIp.get(ip) ?? [];
-    list.push(d.id);
+    list.push(deviceId);
     byIp.set(ip, list);
   }
   const issues: ValidationIssue[] = [];
   for (const [ip, ids] of byIp) {
     if (ids.length > 1) {
+      // De-dupe object ids so a device with the same IP on two ports isn't double-listed.
+      const objectIds = [...new Set(ids)];
       issues.push({
         id: issueId(),
         severity: 'error',
         code: 'duplicate-ip',
-        message: `IP ${ip} is assigned to ${ids.length} devices.`,
-        objectIds: ids,
+        message: `IP ${ip} is assigned to ${ids.length} interfaces.`,
+        objectIds,
       });
     }
   }
   return issues;
 }
 
-/** Rule: management IP is a valid IPv4/IPv6, and any /prefix is a valid CIDR. */
+/** Rule: every IP (management or per-port) is a valid IPv4/IPv6, /prefix a valid CIDR. */
 function checkInvalidIpCidr(devices: Device[]): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  for (const d of devices) {
-    const raw = d.managementIp?.trim();
+  for (const { ip, deviceId } of allAddresses(devices)) {
+    const raw = ip.trim();
     if (!raw) continue;
     if (raw.includes('/')) {
       if (!parseCidr(raw)) {
@@ -118,7 +140,7 @@ function checkInvalidIpCidr(devices: Device[]): ValidationIssue[] {
           severity: 'error',
           code: 'invalid-cidr',
           message: `"${raw}" is not a valid CIDR.`,
-          objectIds: [d.id],
+          objectIds: [deviceId],
         });
       }
       continue;
@@ -129,7 +151,7 @@ function checkInvalidIpCidr(devices: Device[]): ValidationIssue[] {
         severity: 'error',
         code: 'invalid-ip',
         message: `"${raw}" is not a valid IP address.`,
-        objectIds: [d.id],
+        objectIds: [deviceId],
       });
     }
   }
@@ -238,14 +260,13 @@ function checkSubnets(subnets: Subnet[]): ValidationIssue[] {
   return issues;
 }
 
-/** Rule: a device IP should fall within one of the defined subnets. */
+/** Rule: every IP (management or per-port) should fall within one of the defined subnets. */
 function checkIpOutsideSubnet(devices: Device[], subnets: Subnet[]): ValidationIssue[] {
   const cidrs = subnets.map((s) => s.cidr).filter((c) => parseCidr(c));
   if (cidrs.length === 0) return [];
   const issues: ValidationIssue[] = [];
-  for (const d of devices) {
-    if (!d.managementIp) continue;
-    const ip = stripPrefix(d.managementIp);
+  for (const { ip: raw, deviceId } of allAddresses(devices)) {
+    const ip = stripPrefix(raw);
     if (!isValidIpv4(ip)) continue; // IPv6/invalid handled elsewhere
     if (!cidrs.some((c) => ipInCidr(ip, c))) {
       issues.push({
@@ -253,7 +274,7 @@ function checkIpOutsideSubnet(devices: Device[], subnets: Subnet[]): ValidationI
         severity: 'warn',
         code: 'ip-outside-subnet',
         message: `${ip} is not within any defined subnet.`,
-        objectIds: [d.id],
+        objectIds: [deviceId],
       });
     }
   }

@@ -13,8 +13,86 @@ the cables down to the hardware, with a user control to dial the motion.
 
 ### Added
 
+- **Declarative invariants — the rules your design asserts about itself.** A new
+  **Rules** tab turns Conductor from "fix what's wrong now" into "hold this design
+  to what I declare." Where validation flags mistakes, an invariant is a *goal* you
+  opt into — "No single point of failure," "Every device is addressed," "Every device
+  is named," "Every subnet has a gateway" — and once declared, Conductor shows live,
+  as you edit, whether the design still meets it. A declared rule reads **met** or
+  shows how many objects break it, with one click to select them on the canvas. Add a
+  redundant path and the no-SPOF rule goes green on its own; blank a name and the
+  naming rule lights up. Each rule is a pure check composed from primitives NexMap
+  already trusts (the failure-scan, addressing, gateway and naming logic), so a rule
+  never claims more than the underlying check knows. And a violated rule isn't just
+  flagged — it offers a one-click **Restore**: Conductor runs the fixer that owns the
+  remedy (harden the single points of failure, auto-address the unaddressed devices,
+  name the blank ones, adopt gateways), in one undoable step, then the rule re-checks
+  and shows whatever it couldn't safely close. Declare "No single point of failure,"
+  hit Restore, and watch Conductor twin the weak device and the rule go green. And the
+  rules you declare now **travel with the design** (schema v6): they're written into the
+  `.nexmap` file and the autosave draft, so reopening a project restores its rules and
+  re-checks them against the diagram. The invariant list round-trips unknown ids too, so
+  a rule from a newer build survives a trip through an older one. And when several
+  declared rules are broken at once, a **Restore all** button brings the design into
+  compliance in one move — Conductor runs the remedies in dependency order (harden the
+  single points of failure first, then name and address the twins that creates, then
+  adopt gateways), so a rule a fix momentarily breaks still gets mended in the same pass.
+  And you can now **author your own rules** (schema v7): a "Custom rules" section lets you
+  declare role-based connectivity — "Every *access* connects to ≥ *2* *core*" — straight
+  from the design's own device roles, with a datalist of the roles already in use. Conductor
+  checks it live as you wire things up (dual-home the access switch and it goes green), the
+  rule is selectable to its offenders, and it travels with the `.nexmap` file like the
+  built-ins. Rules come in two kinds: **connectivity** ("every access connects to ≥2 core")
+  and **isolation** ("no *guest* may reach *internal*") — the segmentation check. Isolation
+  is path-level: it flags any device that shares a connected fabric with a role it's supposed
+  to be walled off from, so cutting the link that bridges them turns it green. That's the
+  air-gap / separate-fabric test NexMap's local-first stance is built for; it checks wiring,
+  not firewall or VLAN policy, so two roles meeting at a firewall still read as "can reach."
+  These authored rules flag but don't auto-restore — Conductor won't invent (or cut) links.
+  Rules are reachable by intent from ⌘K, too: a **Rules** group lets you declare or retract
+  each built-in rule from the keyboard (the hint shows its live status — "not declared",
+  "met", "2 to fix"), and when declared rules are broken, a "Restore N declared rules"
+  command joins the Suggested section at the top.
+- **⌘K search ranks what you typed first.** Searching used to return matches in list order,
+  so a loose letter-by-letter match could beat an exact one — typing "restore" landed on
+  "Add a redundant twin…" before "Restore 1 declared rule". Results are now ranked: label
+  prefix, then word start, then anywhere in the label, then the hint, and loose
+  in-order matches last.
+- **Per-port IP addresses (schema v5).** Interfaces are now addressable, not just
+  the device. Each port in the inspector has its own IP field with live validation
+  and a one-click **Suggest** that pulls the next free host (preferring the device's
+  management subnet). Every address check — duplicate, invalid, outside-every-subnet
+  — now covers port IPs exactly as it does management IPs, so a clash between a port
+  and a device, or between two ports, is caught. And a new Conductor move,
+  **"Auto-address interfaces,"** fills every unaddressed port in one undoable step:
+  each port inherits the subnet of its device's management IP and takes the next free
+  host. It's honest about its limits — a device with no management IP, or whose
+  management IP sits in no subnet, is skipped rather than guessed, and existing port
+  IPs are never overwritten. The schema bump is backward-compatible: older files load
+  and gain the field; v5 files are protected from older builds that would drop it.
+  The existing Conductor fixers follow the ports all the way: **Resolve duplicate IP
+  addresses** now re-homes a clashing *port* (keeping the management IP over a port
+  when they collide), and **Draw subnets to cover orphan addresses** draws a range for
+  a *port* outside every subnet — so the one-click Fix buttons the Validation panel
+  shows on a port's issue actually resolve it, not just the device's.
 - **Conductor — build by intent, from the one palette.** A faster, declarative
   way to design, all through ⌘K:
+  - **Fix it from the Issues panel.** Every Conductor fix now has a one-click button
+    right where the problem shows up: a flagged issue in the Validation panel —
+    duplicate IP, orphan address, missing gateway, dangling link or interface ref,
+    duplicate or blank name — carries a **Fix** button that runs the matching move
+    and clears it, no palette hunting. Only issues with a safe, deterministic remedy
+    get a button; judgment calls (invalid addresses, overlaps, rack collisions) stay
+    for you to decide. This closes the loop the whole feature is built on: the
+    diagram flags it, and you fix it without leaving the flag.
+  - **Fix all safe issues, in one move.** When several issues have safe remedies,
+    the Validation panel offers a single "Fix all safe issues" button (and a ⌘K
+    command) that runs every automatic fix in dependency order — prune, clear refs,
+    name, de-dupe names, de-dupe VLANs, re-address, cover, assign gateways — and reports a combined
+    summary ("Conductor fixed: 1 unnamed device, 3 duplicate names, 1 duplicate IP,
+    1 new subnet, 1 gateway"). It only does the moves that can't guess, so it stops
+    exactly where judgment begins: a freshly drawn subnet with no router inside it is
+    left without a gateway rather than handed an invented one.
   - **Summon at cursor, intent-aware.** Type a device name — "firewall", "switch",
     "router" — and it appears *where you're looking* (the viewport center, nudged
     clear of anything already there) and **auto-wires** so it joins the topology
@@ -107,17 +185,62 @@ the cables down to the hardware, with a user control to dial the motion.
     allocator as everything else (never collides, skips the gateway), and honest about
     its reach: a clash whose address falls in no defined subnet is left flagged rather
     than re-homed into a range Conductor would have to invent.
+  - **Draw subnets to cover orphan addresses.** The other side of addressing: you
+    have IPs that sit outside every subnet you've drawn (an import, a hand-typed
+    address). "Draw subnets to cover orphan addresses" (⌘K) adds the natural /24 for
+    each — one subnet per distinct /24, covering several addresses at once — clearing
+    the "not within any defined subnet" warning. It's the one move that picks a prefix
+    rather than reading one off your model, so it stays careful: the address itself
+    fixes the network, only the /24 boundary is a convention, and it refuses to draw a
+    /24 that would overlap a subnet you already have, leaving that address flagged
+    instead. New subnets come gateway-less (run "Assign gateways" to adopt one).
   - **Resolve duplicate device names.** The sibling to the address fix. "Resolve
     duplicate device names" (⌘K) finds every name shared by more than one device,
     keeps the first, and numbers the rest ("Core" → "Core 2", "Core 3") — one
     undoable step that clears the duplicate-name warning. It matches the validator
     exactly, grouping and numbering case-insensitively, so it never clears one
     clash by minting another; blank names are left for the separate "no name" nudge.
+  - **Resolve duplicate VLAN IDs.** The VLAN sibling, and the last error-severity
+    gap in the catalog. Two VLANs on the same 802.1Q ID is a hard error — a paste or
+    import will do it. "Resolve duplicate VLAN IDs" (⌘K, or the per-issue **Resolve**
+    button) keeps the first and moves the rest to the next free valid ID (1–4094) in
+    one undoable step, never reusing a number already live on the board. It fixes only
+    the duplication: a group colliding on an out-of-range number (two VLANs at 0) still
+    leaves one there — that's the separate invalid-range error, with no safe auto-guess.
+- **A command palette that knows what you can do.** The ⌘K commands that need a
+  selection — weave into a fabric, wire to a hub, segment into a subnet, add a
+  redundant twin — no longer fire into a "nothing happened" flash when the selection
+  isn't right. They stay listed (so you learn they exist) but show dimmed, with the
+  reason in place of the shortcut ("select 2+", "select one device"), and light up
+  the moment the selection qualifies. The keyboard highlight skips the dimmed rows, so
+  arrow-and-Enter only ever lands on a command that will actually run.
+- **The palette reads as a menu, not a wall.** With the command list past thirty
+  entries, opening ⌘K now groups them under section headers — Build, Connect, Address,
+  Resilience, Repair, Edit, View, File — so you can scan to the kind of thing you want
+  instead of down one long list. Start typing and the sections fall away for a flat,
+  ranked fuzzy match across everything, exactly as before. The keyboard walks the
+  grouped order top-to-bottom, so arrow-and-Enter follows what you see.
+- **Conductor suggests, right where you act.** Open ⌘K and the palette now leads with
+  a **Suggested** section: the fixes that would actually change your design right now,
+  each with a live count — "Resolve 3 duplicate IP addresses", "Draw 2 subnets to
+  cover orphan addresses", and a "Fix all N safe issues" to do them in one move. A fix
+  that has nothing to do stays quietly under Repair in its plain form — no counts, no
+  false urgency. The suggestions are computed by dry-running the same planners the
+  fixes use, so the number you see is exactly what the command will do; nothing is
+  mutated to find out. It turns the palette from a list of everything into Conductor
+  looking at your design and telling you what it would fix.
   - **Prune dangling links.** The other hard error — a link that points at a device
     that isn't there. You can't draw one (deleting a device takes its links with it);
     it only rides in on a hand-edited or externally generated `.nexmap`. "Prune
     dangling links" (⌘K) removes every link with a missing endpoint in one undoable
     step, clearing the error, and leaves the links that connect two real devices alone.
+  - **Clear dangling interface references.** The last one NexMap flags. A link can
+    carry a reference to a specific port that an import left pointing at an interface
+    the device no longer has (you can't cause it in the editor — removing a port
+    cascades its links clear). "Clear dangling interface references" (⌘K) drops just
+    the stale pointer and keeps the link, clearing the warning. A link whose whole
+    *device* is missing is left for "Prune dangling links" instead, so the two
+    cleanups never fight over the same link.
   - **Name unnamed devices.** The small, friendly one. "Name unnamed devices" (⌘K)
     gives every blank device a sensible label from its type ("Switch", "Server"),
     numbered so the batch stays distinct ("Switch", "Switch 2") and never collides
@@ -186,6 +309,10 @@ the cables down to the hardware, with a user control to dial the motion.
 
 ### Fixed
 
+- **Redundant twins of an unnamed device get a real name.** Twinning a device with a
+  blank name (via "Add a redundant twin", "Harden the design", or restoring the no-SPOF
+  rule) produced a twin named "" or " 2". Twins of an unnamed device are now named from
+  their type ("Switch 2").
 - **E2E CI.** Pinned the Playwright E2E job to `ubuntu-24.04`. `ubuntu-latest`
   had rolled to 26.04, where Playwright can't install Chromium
   (`does not support chromium on ubuntu26.04-x64`), reddening every run.

@@ -513,15 +513,15 @@ export function App() {
               const st = useProjectStore.getState;
               // Commands relevant in both designers.
               const generic: PaletteCommand[] = [
-                { id: 'new', label: 'New project', hint: '⌘N', run: handleNew },
-                { id: 'open', label: 'Open .nexmap…', hint: '⌘O', run: () => void handleOpen() },
-                { id: 'save', label: 'Save', hint: '⌘S', run: () => void persistence.save() },
-                { id: 'undo', label: 'Undo', hint: '⌘Z', run: doUndo },
-                { id: 'redo', label: 'Redo', hint: '⌘⇧Z', run: doRedo },
-                { id: 'switch', label: 'Switch designer…', run: switchDesigner },
-                { id: 'theme', label: 'Toggle theme', run: toggleTheme },
-                { id: 'shortcuts', label: 'Keyboard shortcuts', hint: '?', run: () => setShowHelp(true) },
-                { id: 'about', label: 'About & privacy', run: () => setShowAbout(true) },
+                { id: 'new', label: 'New project', hint: '⌘N', group: 'File', run: handleNew },
+                { id: 'open', label: 'Open .nexmap…', hint: '⌘O', group: 'File', run: () => void handleOpen() },
+                { id: 'save', label: 'Save', hint: '⌘S', group: 'File', run: () => void persistence.save() },
+                { id: 'undo', label: 'Undo', hint: '⌘Z', group: 'Edit', run: doUndo },
+                { id: 'redo', label: 'Redo', hint: '⌘⇧Z', group: 'Edit', run: doRedo },
+                { id: 'switch', label: 'Switch designer…', group: 'View', run: switchDesigner },
+                { id: 'theme', label: 'Toggle theme', group: 'View', run: toggleTheme },
+                { id: 'shortcuts', label: 'Keyboard shortcuts', hint: '?', group: 'View', run: () => setShowHelp(true) },
+                { id: 'about', label: 'About & privacy', group: 'View', run: () => setShowAbout(true) },
               ];
               // Conductor (slice 1): summon a device by name. Type its name in the
               // palette and it appears, selected, with the view jumped to it — the
@@ -531,6 +531,7 @@ export function App() {
                 id: `add-${t}`,
                 label: `Add ${defaultDeviceName(t)}`,
                 hint: 'device',
+                group: 'Build',
                 // Summon-at-cursor: lands where you're looking and auto-wires to the
                 // nearest node — the store owns placement + wiring (one undo).
                 run: () => st().summonDevice(t),
@@ -543,10 +544,48 @@ export function App() {
                 id: `template-${tpl.key}`,
                 label: `Insert: ${tpl.name}`,
                 hint: 'template',
+                group: 'Build',
                 run: () => st().insertTemplate(tpl.key),
               }));
               // Topology-only commands — hidden in the Rack designer.
               const selCount = st().selection.size;
+              // Conductor, proactive: how many changes each safe fixer would make on
+              // the current design. A fix that would do something jumps to a
+              // "Suggested" group at the top of the palette with its live count; the
+              // rest sit quietly under "Repair". Snapshot at open, like selCount.
+              const fixCounts = st().conductorFixCounts();
+              const n = (id: string) => fixCounts[id] ?? 0;
+              const fixGroup = (id: string) => (n(id) > 0 ? 'Suggested' : 'Repair');
+              const totalFixable = Object.values(fixCounts).reduce((a, b) => a + b, 0);
+              // Declarative invariants by intent: declare/retract each built-in rule
+              // from ⌘K (hint = its live status), and — when declared rules are broken
+              // and have a remedy — a Suggested "Restore" that brings the design back
+              // into compliance without opening the Rules panel.
+              const invariants = st().invariantsAll();
+              const invEnabled = st().invariantsEnabled;
+              const invViolations = st().invariantViolations;
+              const restorableIds = new Set(invariants.filter((i) => i.restorable).map((i) => i.id));
+              const brokenRestorable = invViolations.filter((v) => restorableIds.has(v.id)).length;
+              const ruleCommands: PaletteCommand[] = invariants.map((inv) => {
+                const on = invEnabled.has(inv.id);
+                const v = invViolations.find((x) => x.id === inv.id);
+                return {
+                  id: `rule-${inv.id}`,
+                  label: `${on ? 'Retract' : 'Declare'} rule: ${inv.label}`,
+                  hint: !on ? 'not declared' : v ? `${v.objectIds.length} to fix` : 'met',
+                  group: 'Rules',
+                  run: () => st().toggleInvariant(inv.id),
+                };
+              });
+              if (brokenRestorable > 0) {
+                ruleCommands.unshift({
+                  id: 'restore-rules',
+                  label: `Restore ${brokenRestorable} declared rule${brokenRestorable === 1 ? '' : 's'}`,
+                  hint: 'runs each broken rule’s remedy in order',
+                  group: 'Suggested',
+                  run: () => st().restoreAllInvariants(),
+                });
+              }
               const networkOnly: PaletteCommand[] = [
                 ...deviceSummon,
                 ...templateInserts,
@@ -554,98 +593,171 @@ export function App() {
                   id: 'weave',
                   label: 'Weave selection into a fabric (auto-connect)',
                   hint: selCount >= 2 ? `${selCount} selected` : 'select 2+',
+                  disabled: selCount < 2,
+                  group: 'Connect',
                   run: () => st().weaveFabric(),
                 },
                 {
                   id: 'hub',
                   label: 'Wire selection to its hub (star)',
-                  hint: 'select spokes + 1 switch/router',
+                  hint: selCount >= 2 ? `${selCount} selected` : 'select spokes + 1 switch/router',
+                  disabled: selCount < 2,
+                  group: 'Connect',
                   run: () => st().wireToHub(),
                 },
                 {
                   id: 'auto-ip',
                   label: 'Auto-assign IP addresses',
                   hint: 'IPAM',
+                  group: 'Address',
                   run: () => st().autoAddressDevices(),
                 },
                 {
                   id: 'segment',
                   label: 'Segment selection into a subnet',
                   hint: selCount >= 1 ? `${selCount} selected` : 'select devices',
+                  disabled: selCount < 1,
+                  group: 'Address',
                   run: () => st().segmentSelection(),
                 },
                 {
                   id: 'uplink',
                   label: 'Connect to the internet (uplink)',
                   hint: 'wires your firewall/router to an ISP',
+                  group: 'Connect',
                   run: () => st().connectToInternet(),
                 },
                 {
                   id: 'redundant',
                   label: 'Add a redundant twin (fix a single point of failure)',
                   hint: selCount === 1 ? 'clones the selected device' : 'select one device',
+                  disabled: selCount !== 1,
+                  group: 'Resilience',
                   run: () => st().addRedundantTwin(),
                 },
                 {
                   id: 'scan-spof',
                   label: 'Scan for single points of failure',
                   hint: 'selects every weak device',
+                  group: 'Resilience',
                   run: () => st().scanWeakPoints(),
                 },
                 {
                   id: 'harden',
                   label: 'Harden the design (twin every single point of failure)',
                   hint: 'adds a redundant twin to each weak device',
+                  group: 'Resilience',
                   run: () => st().hardenDesign(),
                 },
                 {
                   id: 'assign-gateways',
-                  label: 'Assign gateways to subnets',
+                  label: n('assign-gateways') > 0
+                    ? `Assign gateways to ${n('assign-gateways')} subnet${n('assign-gateways') === 1 ? '' : 's'}`
+                    : 'Assign gateways to subnets',
                   hint: 'adopts an in-range router/firewall per subnet',
+                  group: fixGroup('assign-gateways'),
                   run: () => st().assignGateways(),
                 },
                 {
                   id: 'dedupe-ips',
-                  label: 'Resolve duplicate IP addresses',
+                  label: n('dedupe-ips') > 0
+                    ? `Resolve ${n('dedupe-ips')} duplicate IP address${n('dedupe-ips') === 1 ? '' : 'es'}`
+                    : 'Resolve duplicate IP addresses',
                   hint: 're-addresses devices that share an address',
+                  group: fixGroup('dedupe-ips'),
                   run: () => st().deduplicateIps(),
                 },
                 {
+                  id: 'cover-orphans',
+                  label: n('cover-orphans') > 0
+                    ? `Draw ${n('cover-orphans')} subnet${n('cover-orphans') === 1 ? '' : 's'} to cover orphan addresses`
+                    : 'Draw subnets to cover orphan addresses',
+                  hint: 'adds a /24 for IPs outside every subnet',
+                  group: fixGroup('cover-orphans'),
+                  run: () => st().coverOrphanIps(),
+                },
+                {
+                  id: 'addr-ifaces',
+                  label: 'Auto-address interfaces',
+                  hint: 'gives each port an IP from its device’s subnet',
+                  group: 'Address',
+                  run: () => st().autoAddressInterfaces(),
+                },
+                {
                   id: 'dedupe-names',
-                  label: 'Resolve duplicate device names',
+                  label: n('dedupe-names') > 0
+                    ? `Resolve ${n('dedupe-names')} duplicate device name${n('dedupe-names') === 1 ? '' : 's'}`
+                    : 'Resolve duplicate device names',
                   hint: 'renames devices that share a name',
+                  group: fixGroup('dedupe-names'),
                   run: () => st().deduplicateNames(),
                 },
                 {
+                  id: 'dedupe-vlans',
+                  label: n('dedupe-vlans') > 0
+                    ? `Resolve ${n('dedupe-vlans')} duplicate VLAN ID${n('dedupe-vlans') === 1 ? '' : 's'}`
+                    : 'Resolve duplicate VLAN IDs',
+                  hint: 'renumbers VLANs that share an 802.1Q ID',
+                  group: fixGroup('dedupe-vlans'),
+                  run: () => st().deduplicateVlans(),
+                },
+                {
                   id: 'name-unnamed',
-                  label: 'Name unnamed devices',
+                  label: n('name-unnamed') > 0
+                    ? `Name ${n('name-unnamed')} unnamed device${n('name-unnamed') === 1 ? '' : 's'}`
+                    : 'Name unnamed devices',
                   hint: 'labels blank devices from their type',
+                  group: fixGroup('name-unnamed'),
                   run: () => st().nameUnnamedDevices(),
                 },
                 {
                   id: 'prune-links',
-                  label: 'Prune dangling links',
+                  label: n('prune-links') > 0
+                    ? `Prune ${n('prune-links')} dangling link${n('prune-links') === 1 ? '' : 's'}`
+                    : 'Prune dangling links',
                   hint: 'removes links that point at a missing device',
+                  group: fixGroup('prune-links'),
                   run: () => st().pruneDanglingLinks(),
                 },
-                { id: 'export', label: 'Export…', hint: '⌘E', run: () => setExporting(true) },
-                { id: 'import', label: 'Import…', run: () => setImporting(true) },
-                { id: 'nextext', label: 'NexText (describe in text)…', run: () => setNexText(true) },
-                { id: 'layout', label: 'Auto-layout (tidy)', run: () => st().autoLayout() },
+                {
+                  id: 'clear-ifaces',
+                  label: n('clear-ifaces') > 0
+                    ? `Clear ${n('clear-ifaces')} dangling interface reference${n('clear-ifaces') === 1 ? '' : 's'}`
+                    : 'Clear dangling interface references',
+                  hint: 'drops link ports that no longer exist',
+                  group: fixGroup('clear-ifaces'),
+                  run: () => st().clearDanglingIfaces(),
+                },
+                {
+                  id: 'fix-all',
+                  label: totalFixable > 0
+                    ? `Fix all ${totalFixable} safe issue${totalFixable === 1 ? '' : 's'}`
+                    : 'Fix all safe issues',
+                  hint: 'runs every automatic Conductor remedy at once',
+                  group: totalFixable > 0 ? 'Suggested' : 'Repair',
+                  run: () => st().fixAllSafeIssues(),
+                },
+                ...ruleCommands,
+                { id: 'export', label: 'Export…', hint: '⌘E', group: 'File', run: () => setExporting(true) },
+                { id: 'import', label: 'Import…', group: 'File', run: () => setImporting(true) },
+                { id: 'nextext', label: 'NexText (describe in text)…', group: 'Build', run: () => setNexText(true) },
+                { id: 'layout', label: 'Auto-layout (tidy)', group: 'View', run: () => st().autoLayout() },
                 {
                   id: 'projection',
                   label: 'Toggle 2D / isometric view',
+                  group: 'View',
                   run: () => st().setProjection(st().projection === 'iso' ? 'flat' : 'iso'),
                 },
                 {
                   id: 'reroute',
                   label: 'Route selected link(s) around obstacles',
+                  group: 'View',
                   run: () => st().rerouteSelectedLinks(),
                 },
-                { id: 'selectall', label: 'Select all', hint: '⌘A', run: () => st().selectAll() },
-                { id: 'deselect', label: 'Deselect', run: () => st().clearSelection() },
-                { id: 'present', label: 'Presentation mode', run: () => setPresentation(true) },
-                { id: 'outline', label: 'Topology outline (accessible list)', run: () => setShowOutline(true) },
+                { id: 'selectall', label: 'Select all', hint: '⌘A', group: 'Edit', run: () => st().selectAll() },
+                { id: 'deselect', label: 'Deselect', group: 'Edit', run: () => st().clearSelection() },
+                { id: 'present', label: 'Presentation mode', group: 'View', run: () => setPresentation(true) },
+                { id: 'outline', label: 'Topology outline (accessible list)', group: 'View', run: () => setShowOutline(true) },
               ];
               const cmds: PaletteCommand[] =
                 mode === 'rack' ? generic : [...generic.slice(0, 5), ...networkOnly, ...generic.slice(5)];

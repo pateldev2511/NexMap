@@ -129,9 +129,34 @@
 
 .ifaceRow {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   align-items: center;
   margin-bottom: 4px;
+}
+.ifaceIp {
+  flex: 1 1 90px !important;
+  min-width: 80px;
+}
+.ifaceSuggest {
+  flex: none;
+  height: 26px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  background: transparent;
+  border: 1px solid var(--chrome-border);
+  border-radius: 6px;
+  color: var(--chrome-fg-muted);
+  cursor: pointer;
+}
+.ifaceSuggest:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.ifaceSuggest:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .ifaceRow input {

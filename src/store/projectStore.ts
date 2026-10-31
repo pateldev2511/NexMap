@@ -13,6 +13,7 @@ import { nanoid } from 'nanoid';
 import type {
   CalloutBlock,
   CanvasObject,
+  CustomRuleSpec,
   Device,
   DeviceType,
   Interface,
@@ -69,13 +70,29 @@ import { parseNexText, buildModel, type Diagnostic as NexDiagnostic } from '@/li
 import { analyzeHealth, edgeDisjointPaths, type HealthReport } from '@/lib/health';
 import { fabricEdges } from '@/sim/fabric';
 import { pickHub, starEdges } from '@/sim/hub';
-import { planAddresses, planGateways, planDeduplicateIps } from '@/sim/autoAddress';
+import {
+  planAddresses,
+  planGateways,
+  planDeduplicateIps,
+  planCoveringSubnets,
+  planInterfaceAddresses,
+} from '@/sim/autoAddress';
 import { planSegment } from '@/sim/segment';
 import { planUplink } from '@/sim/uplink';
 import { planTwin } from '@/sim/redundancy';
 import { findSpofs, planHardening } from '@/sim/resilience';
 import { uniqueName, planDeduplicateNames, planNameDevices } from '@/model/naming';
-import { planPruneDanglingLinks } from '@/model/integrity';
+import { planDeduplicateVlans } from '@/model/vlans';
+import {
+  evaluateInvariants,
+  evaluateCustomRules,
+  createConnectivityRule,
+  createIsolationRule,
+  BUILT_IN_INVARIANTS,
+  type Invariant,
+  type InvariantViolation,
+} from '@/model/invariants';
+import { planPruneDanglingLinks, planClearDanglingIfaces } from '@/model/integrity';
 import { buildTemplateObjects } from '@/model/templates';
 import { History } from './history';
 import {
@@ -272,6 +289,12 @@ export interface ProjectStore {
   issues: ValidationIssue[];
   /** Topology-health report, recomputed on the same debounce as validation. */
   health: HealthReport;
+  /** Invariant ids the current design has declared (opted into). */
+  invariantsEnabled: Set<string>;
+  /** Authored role-based rules (schema v7). */
+  customRules: CustomRuleSpec[];
+  /** Declared invariants not currently met (built-in + custom), with validation. */
+  invariantViolations: InvariantViolation[];
   canUndo: boolean;
   canRedo: boolean;
   dirty: boolean;
@@ -435,12 +458,40 @@ export interface ProjectStore {
    */
   deduplicateIps(): number;
   /**
+   * Conductor: draw subnets to cover device IPs that sit outside every defined
+   * range (the `ip-outside-subnet` warning), one gateway-less /24 per distinct
+   * orphan /24, as ONE undoable transaction. Refuses a /24 that would overlap an
+   * existing subnet. Sets a result banner; returns how many subnets were drawn.
+   */
+  coverOrphanIps(): number;
+  /**
+   * Conductor: bulk auto-address interfaces (schema v5). Each port inherits the
+   * subnet of its device's management IP and takes the next free host, as ONE
+   * undoable transaction. Skips devices with no management IP or whose management
+   * IP is in no subnet; never overwrites a port IP. Returns ports addressed.
+   */
+  autoAddressInterfaces(): number;
+  /**
    * Conductor: resolve devices that share a name. The lowest-id device in each
    * clashing group keeps its name; the rest are numbered ("Core" → "Core 2", …)
    * as ONE undoable transaction, clearing the duplicate-name warning. Sets a
    * result banner; returns how many devices were renamed.
    */
   deduplicateNames(): number;
+  /**
+   * Conductor: resolve VLANs that share an 802.1Q ID. The lowest-id VLAN in each
+   * clashing group keeps its number; the rest move to the next free valid ID
+   * (1–4094) as ONE undoable transaction, clearing the duplicate-vlan error. Sets
+   * a result banner; returns how many VLANs were renumbered.
+   */
+  deduplicateVlans(): number;
+  /**
+   * Conductor: how many changes each safe fixer would make on the current model
+   * right now, keyed by its palette command id ('dedupe-ips', 'cover-orphans',
+   * …). Pure read — dry-runs the planners, mutates nothing. The palette uses it
+   * to surface the fixes that would actually do something, with live counts.
+   */
+  conductorFixCounts(): Record<string, number>;
   /**
    * Conductor: label every blank-named device with its type default ("Switch",
    * "Server", …), numbered to stay distinct and clear of existing names, as ONE
@@ -455,6 +506,22 @@ export interface ProjectStore {
    * banner; returns how many links were pruned.
    */
   pruneDanglingLinks(): number;
+  /**
+   * Conductor: clear link interface references that point at an interface that no
+   * longer exists on its (present) endpoint device (the `dangling-interface`
+   * warning — reachable only via import, since deleting an interface cascades its
+   * refs clear). Keeps the links; drops the stale pointer (id + cached name), as
+   * ONE undoable transaction. Sets a result banner; returns how many refs cleared.
+   */
+  clearDanglingIfaces(): number;
+  /**
+   * Conductor: run every safe, deterministic remedy in dependency order (prune →
+   * clear refs → name → de-dupe names → de-dupe IPs → cover orphans → assign
+   * gateways), each its own undoable step, and report a combined banner. Only the
+   * moves that won't guess; judgment-call issues are left for the user. Returns
+   * the total number of fixes applied across all categories.
+   */
+  fixAllSafeIssues(): number;
   /** Apply imported devices+links as ONE atomic, undoable transaction (DA-T2). */
   importObjects(devices: Device[], links: Link[]): void;
   /** Apply imported VLANs/subnets as one atomic, undoable transaction. */
@@ -559,6 +626,39 @@ export interface ProjectStore {
   undo(): void;
   redo(): void;
   runValidation(): void;
+  /** Every built-in invariant, for the Rules UI to list and toggle. */
+  invariantsAll(): readonly Invariant[];
+  /**
+   * Declare or retract an invariant for this design. Toggling re-evaluates
+   * immediately so the Rules surface reflects the new rule at once.
+   */
+  toggleInvariant(id: string): void;
+  /**
+   * Conductor: restore a violated invariant by running its matching safe fixer
+   * (no-SPOF → harden, addressed → auto-address, named → name-unnamed, gateway →
+   * assign-gateways). Returns how many changes the fixer made; the rule then
+   * re-evaluates and shows whatever it couldn't safely close (e.g. an external
+   * SPOF, or a subnet with no in-range router). Undoable in one step via the
+   * underlying action. No-op (0) for an unknown or non-restorable id.
+   */
+  restoreInvariant(id: string): number;
+  /**
+   * Conductor: restore every declared-and-violated rule that has a remedy, in one
+   * move. Runs the fixers in dependency order (harden first so its twins exist,
+   * then name and address them, then adopt gateways), re-checking between steps so
+   * a rule a twin just broke still gets mended. Returns the total changes and sets
+   * one combined banner; each underlying fixer stays individually undoable.
+   */
+  restoreAllInvariants(): number;
+  /**
+   * Author a role-based rule and declare it for this design: a `connectivity`
+   * rule ("every <fromRole> connects to ≥<min> <toRole>") or an `isolation` rule
+   * ("no <fromRole> may reach any <toRole>"; `min` ignored). Marks dirty (travels
+   * with the file) and re-evaluates.
+   */
+  addCustomRule(kind: CustomRuleSpec['kind'], fromRole: string, toRole: string, min: number): void;
+  /** Remove an authored rule by id. */
+  removeCustomRule(id: string): void;
   /** On-demand redundancy: count edge-disjoint paths between two devices (opt-in, not debounced). */
   checkRedundancy(sourceId: string, targetId: string): number;
   loadDoc(doc: NexMapDocument): void;
@@ -779,6 +879,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     rev: 0,
     selection: new Set<string>(),
     issues: [],
+    invariantsEnabled: new Set<string>(),
+    customRules: [],
+    invariantViolations: [],
     health: {
       issues: [],
       score: 100,
@@ -1520,7 +1623,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       // Place the twin beside its original (the pair reads as a pair), nudged clear.
       const seed = { x: src.x + src.width / 2 + 128, y: src.y + src.height / 2 };
       const center = freeSpotNear(seed);
-      const name = uniqueName(src.name, [...model.devices.values()].map((d) => d.name));
+      // An unnamed source would give a twin named "" or " 2" — base it on the type.
+      const base = src.name.trim() || defaultDeviceName(src.type);
+      const name = uniqueName(base, [...model.devices.values()].map((d) => d.name));
       // Clone type only — NOT the management IP (a duplicate address would be a real
       // error); the twin lands unaddressed, ready for auto-address.
       const twin = createDevice(src.type, center.x - W / 2, center.y - H / 2, layer, { name });
@@ -1594,7 +1699,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           c = freeSpotNear({ x: c.x + GAP, y: c.y });
         }
         reserved.push(c);
-        const name = uniqueName(src.name, [
+        const name = uniqueName(src.name.trim() || defaultDeviceName(src.type), [
           ...[...model.devices.values()].map((d) => d.name),
           ...twins.map((t) => t.name),
         ]);
@@ -1661,27 +1766,120 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         set({ flash: 'No duplicate addresses to resolve.' });
         return 0;
       }
-      const cmds: Command[] = plan.map((a) => {
-        const d = model.devices.get(a.deviceId)!;
-        return new UpdateDeviceCommand(
-          a.deviceId,
-          { managementIp: d.managementIp },
-          { managementIp: a.ip },
-        );
-      });
+      // Group by device so a device whose management IP and/or several ports move
+      // is ONE command (separate commands over the same interfaces array would
+      // clobber each other). A target with an ifaceId updates that port; without,
+      // the management IP.
+      const byDevice = new Map<string, typeof plan>();
+      for (const a of plan) {
+        const g = byDevice.get(a.deviceId);
+        if (g) g.push(a);
+        else byDevice.set(a.deviceId, [a]);
+      }
+      const cmds: Command[] = [];
+      for (const [deviceId, targets] of byDevice) {
+        const d = model.devices.get(deviceId)!;
+        const before: Partial<Device> = {};
+        const after: Partial<Device> = {};
+        const mgmt = targets.find((t) => !t.ifaceId);
+        if (mgmt) {
+          before.managementIp = d.managementIp;
+          after.managementIp = mgmt.ip;
+        }
+        const ports = targets.filter((t) => t.ifaceId);
+        if (ports.length > 0) {
+          const existing = d.interfaces ?? [];
+          const ipByIface = new Map(ports.map((t) => [t.ifaceId!, t.ip]));
+          before.interfaces = existing;
+          after.interfaces = existing.map((i) =>
+            ipByIface.has(i.id) ? { ...i, ip: ipByIface.get(i.id)! } : i,
+          );
+        }
+        cmds.push(new UpdateDeviceCommand(deviceId, before, after));
+      }
       history.dispatch(transaction('Resolve duplicate IPs', cmds), model);
       history.commitCoalesceBoundary();
       const n = plan.length;
       set({
         rev: get().rev + 1,
-        selection: new Set(plan.map((a) => a.deviceId)),
+        selection: new Set(byDevice.keys()),
         canUndo: history.canUndo,
         canRedo: history.canRedo,
         dirty: true,
-        flash: `Re-addressed ${n} device${n === 1 ? '' : 's'} that shared an address.`,
+        flash: `Re-addressed ${n} interface${n === 1 ? '' : 's'} that shared an address.`,
       });
       get().runValidation();
       return n;
+    },
+
+    coverOrphanIps() {
+      const plan = planCoveringSubnets(
+        [...model.devices.values()],
+        [...model.subnets.values()],
+      );
+      if (plan.length === 0) {
+        set({
+          flash:
+            'No orphan addresses to cover — every device IP sits in a defined subnet (or its /24 would overlap one).',
+        });
+        return 0;
+      }
+      const cmds: Command[] = plan.map((p) => new AddSubnetCommand(createSubnet(p.cidr)));
+      history.dispatch(transaction('Cover orphan addresses', cmds), model);
+      history.commitCoalesceBoundary();
+      const n = plan.length;
+      set({
+        rev: get().rev + 1,
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+        flash: `Drew ${n} subnet${n === 1 ? '' : 's'} to cover addresses that sat outside every defined range.`,
+      });
+      get().runValidation();
+      return n;
+    },
+
+    autoAddressInterfaces() {
+      const plan = planInterfaceAddresses(
+        [...model.devices.values()],
+        [...model.subnets.values()],
+      );
+      if (plan.length === 0) {
+        set({
+          flash:
+            'No interfaces to address — every port already has an IP, or its device has no management subnet to draw from.',
+        });
+        return 0;
+      }
+      // Group by device so each device is one UpdateDeviceCommand.
+      const byDevice = new Map<string, Map<string, string>>();
+      for (const a of plan) {
+        const m = byDevice.get(a.deviceId) ?? new Map<string, string>();
+        m.set(a.ifaceId, a.ip);
+        byDevice.set(a.deviceId, m);
+      }
+      const cmds: Command[] = [];
+      for (const [deviceId, ipByIface] of byDevice) {
+        const d = model.devices.get(deviceId)!;
+        const existing = d.interfaces ?? [];
+        const next = existing.map((i) =>
+          ipByIface.has(i.id) ? { ...i, ip: ipByIface.get(i.id)! } : i,
+        );
+        cmds.push(new UpdateDeviceCommand(deviceId, { interfaces: existing }, { interfaces: next }));
+      }
+      history.dispatch(transaction('Auto-address interfaces', cmds), model);
+      history.commitCoalesceBoundary();
+      const ports = plan.length;
+      const deviceCount = byDevice.size;
+      set({
+        rev: get().rev + 1,
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+        flash: `Addressed ${ports} interface${ports === 1 ? '' : 's'} across ${deviceCount} device${deviceCount === 1 ? '' : 's'}.`,
+      });
+      get().runValidation();
+      return ports;
     },
 
     deduplicateNames() {
@@ -1704,6 +1902,30 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         canRedo: history.canRedo,
         dirty: true,
         flash: `Renamed ${n} device${n === 1 ? '' : 's'} that shared a name.`,
+      });
+      get().runValidation();
+      return n;
+    },
+
+    deduplicateVlans() {
+      const plan = planDeduplicateVlans([...model.vlans.values()]);
+      if (plan.length === 0) {
+        set({ flash: 'No duplicate VLAN IDs to resolve.' });
+        return 0;
+      }
+      const cmds: Command[] = plan.map((a) => {
+        const v = model.vlans.get(a.id)!;
+        return new UpdateVlanCommand(a.id, { vlanId: v.vlanId }, { vlanId: a.vlanId });
+      });
+      history.dispatch(transaction('Resolve duplicate VLAN IDs', cmds), model);
+      history.commitCoalesceBoundary();
+      const n = plan.length;
+      set({
+        rev: get().rev + 1,
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+        flash: `Renumbered ${n} VLAN${n === 1 ? '' : 's'} that shared an ID.`,
       });
       get().runValidation();
       return n;
@@ -1755,6 +1977,97 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       });
       get().runValidation();
       return n;
+    },
+
+    clearDanglingIfaces() {
+      const plan = planClearDanglingIfaces(
+        [...model.devices.values()],
+        [...model.links.values()],
+      );
+      if (plan.length === 0) {
+        set({ flash: 'No dangling interface references to clear.' });
+        return 0;
+      }
+      const cmds: Command[] = plan.map((p) => {
+        const l = model.links.get(p.linkId)!;
+        const before: Partial<Link> = {};
+        const after: Partial<Link> = {};
+        if (p.clearSource) {
+          before.sourceIfaceId = l.sourceIfaceId;
+          before.sourceInterface = l.sourceInterface;
+          after.sourceIfaceId = undefined;
+          after.sourceInterface = undefined;
+        }
+        if (p.clearTarget) {
+          before.targetIfaceId = l.targetIfaceId;
+          before.targetInterface = l.targetInterface;
+          after.targetIfaceId = undefined;
+          after.targetInterface = undefined;
+        }
+        return new UpdateLinkCommand(p.linkId, before, after);
+      });
+      history.dispatch(transaction('Clear dangling interface references', cmds), model);
+      history.commitCoalesceBoundary();
+      const refs = plan.reduce((s, p) => s + (p.clearSource ? 1 : 0) + (p.clearTarget ? 1 : 0), 0);
+      set({
+        rev: get().rev + 1,
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+        flash: `Cleared ${refs} dangling interface reference${refs === 1 ? '' : 's'}.`,
+      });
+      get().runValidation();
+      return refs;
+    },
+
+    conductorFixCounts() {
+      const devices = [...model.devices.values()];
+      const links = [...model.links.values()];
+      const subnets = [...model.subnets.values()];
+      const vlans = [...model.vlans.values()];
+      // Clear-ifaces fixes individual port refs, not whole links — count the refs
+      // so the suggestion matches what the action reports.
+      const refCount = planClearDanglingIfaces(devices, links).reduce(
+        (n, r) => n + (r.clearSource ? 1 : 0) + (r.clearTarget ? 1 : 0),
+        0,
+      );
+      return {
+        'prune-links': planPruneDanglingLinks(devices, links).length,
+        'clear-ifaces': refCount,
+        'name-unnamed': planNameDevices(devices).length,
+        'dedupe-names': planDeduplicateNames(devices).length,
+        'dedupe-vlans': planDeduplicateVlans(vlans).length,
+        'dedupe-ips': planDeduplicateIps(devices, subnets).length,
+        'cover-orphans': planCoveringSubnets(devices, subnets).length,
+        'assign-gateways': planGateways(subnets, devices).length,
+      };
+    },
+
+    fixAllSafeIssues() {
+      // Dependency order: remove garbage links first, then clear stale port refs
+      // on survivors; name/de-dupe names; then addressing — de-dupe IPs, draw
+      // covering subnets, and finally adopt gateways (so it sees the new subnets).
+      // Each call is its own validated, undoable step and sets its own flash; we
+      // overwrite with a combined banner at the end.
+      const results: Array<[number, string]> = [
+        [get().pruneDanglingLinks(), 'dangling link'],
+        [get().clearDanglingIfaces(), 'dangling interface ref'],
+        [get().nameUnnamedDevices(), 'unnamed device'],
+        [get().deduplicateNames(), 'duplicate name'],
+        [get().deduplicateVlans(), 'duplicate VLAN'],
+        [get().deduplicateIps(), 'duplicate IP'],
+        [get().coverOrphanIps(), 'new subnet'],
+        [get().assignGateways(), 'gateway'],
+      ];
+      const done = results.filter(([n]) => n > 0);
+      const total = done.reduce((s, [n]) => s + n, 0);
+      if (total === 0) {
+        set({ flash: 'Nothing to auto-fix — no issues with a safe, automatic remedy remain.' });
+        return 0;
+      }
+      const parts = done.map(([n, label]) => `${n} ${label}${n === 1 ? '' : 's'}`);
+      set({ flash: `Conductor fixed: ${parts.join(', ')}.` });
+      return total;
     },
 
     importObjects(devices, links) {
@@ -2620,7 +2933,87 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       });
       // Topology health rides the same debounce — all O(V+E), main-thread (eng-review lock).
       const health = analyzeHealth(devices, links);
-      set({ issues, health });
+      // Declared rules re-evaluate on the same pass (built-in + authored custom);
+      // disabled/empty ones cost nothing.
+      const invCtx = { devices, links, subnets: [...model.subnets.values()] };
+      const invariantViolations = [
+        ...evaluateInvariants(invCtx, get().invariantsEnabled),
+        ...evaluateCustomRules(get().customRules, invCtx),
+      ];
+      set({ issues, health, invariantViolations });
+    },
+
+    invariantsAll() {
+      return BUILT_IN_INVARIANTS;
+    },
+
+    toggleInvariant(id) {
+      const next = new Set(get().invariantsEnabled);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      // Declaring/retracting a rule changes the document (schema v6) → dirty, so
+      // autosave and Save persist it.
+      set({ invariantsEnabled: next, dirty: true });
+      get().runValidation();
+    },
+
+    restoreInvariant(id) {
+      // Each rule delegates to the fixer that already owns its remedy; each of
+      // those is its own undoable, validated step and sets its own flash.
+      switch (id) {
+        case 'no-single-point-of-failure':
+          return get().hardenDesign();
+        case 'every-device-addressed':
+          return get().autoAddressDevices();
+        case 'every-device-named':
+          return get().nameUnnamedDevices();
+        case 'every-subnet-has-gateway':
+          return get().assignGateways();
+        default:
+          return 0;
+      }
+    },
+
+    restoreAllInvariants() {
+      // Dependency order: harden mints twins; then name + address them (incl. the
+      // new twins); then adopt gateways once devices are addressed. Re-reading the
+      // violations each step lets a rule a twin just broke get mended in this pass.
+      const ORDER = [
+        'no-single-point-of-failure',
+        'every-device-named',
+        'every-device-addressed',
+        'every-subnet-has-gateway',
+      ];
+      let total = 0;
+      for (const id of ORDER) {
+        if (!get().invariantsEnabled.has(id)) continue;
+        if (get().invariantViolations.some((v) => v.id === id)) {
+          total += get().restoreInvariant(id);
+        }
+      }
+      set({
+        flash:
+          total === 0
+            ? 'Nothing to restore — every declared rule is already met.'
+            : `Restored declared rules — ${total} change${total === 1 ? '' : 's'}.`,
+      });
+      return total;
+    },
+
+    addCustomRule(kind, fromRole, toRole, min) {
+      const from = fromRole.trim();
+      const to = toRole.trim();
+      const rule =
+        kind === 'isolation'
+          ? createIsolationRule(from, to)
+          : createConnectivityRule(from, to, Math.max(1, Math.round(min)));
+      set({ customRules: [...get().customRules, rule], dirty: true });
+      get().runValidation();
+    },
+
+    removeCustomRule(id) {
+      set({ customRules: get().customRules.filter((r) => r.id !== id), dirty: true });
+      get().runValidation();
     },
 
     checkRedundancy(sourceId, targetId) {
@@ -2640,6 +3033,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       resetIssueIds();
       activeViewHiddenLayers = null;
       pendingCamera = null;
+      const loadedInvariants = new Set<string>(doc.invariants ?? []);
+      const loadedCustomRules = doc.customRules ?? [];
       set({
         rev: get().rev + 1,
         selection: new Set(),
@@ -2650,6 +3045,21 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           subnets: [...model.subnets.values()],
           racks: [...model.racks.values()],
         }),
+        // Declared rules travel with the file (built-in v6 + custom v7): adopt the
+        // design's own and evaluate them against the just-loaded model.
+        invariantsEnabled: loadedInvariants,
+        customRules: loadedCustomRules,
+        invariantViolations: (() => {
+          const ctx = {
+            devices: [...model.devices.values()],
+            links: [...model.links.values()],
+            subnets: [...model.subnets.values()],
+          };
+          return [
+            ...evaluateInvariants(ctx, loadedInvariants),
+            ...evaluateCustomRules(loadedCustomRules, ctx),
+          ];
+        })(),
         canUndo: false,
         canRedo: false,
         dirty: false,
@@ -2662,7 +3072,13 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     },
 
     getDocument() {
-      return toDocument(model, baseDoc);
+      // Declared rules live in store state, not the diagram model — fold them into
+      // the serialized doc here so they travel with the file (built-in v6 + custom v7).
+      return {
+        ...toDocument(model, baseDoc),
+        invariants: [...get().invariantsEnabled],
+        customRules: get().customRules,
+      };
     },
 
     newProject(now) {

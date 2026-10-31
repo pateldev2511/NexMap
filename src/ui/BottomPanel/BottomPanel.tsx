@@ -3,6 +3,7 @@ import { useProjectStore } from '@/store/projectStore';
 import { getPanelOpen, setPanelOpen } from '@/lib/prefs';
 import { NexIcon } from '@/ui/icons/NexIcon';
 import { defaultDeviceName } from '@/model/schema';
+import { customRuleLabel } from '@/model/invariants';
 import { severityRank } from '@/model/validate';
 import type { Device, Link, Rack, Subnet, ValidationIssue, Vlan } from '@/model/types';
 import { stripPrefix } from '@/lib/ipcidr';
@@ -14,7 +15,7 @@ import styles from './BottomPanel.module.css';
  * Links, Validation. Every row/issue jumps to its object on the canvas
  * (DA-DES-2.5) via focusObject. Collapsed by default so the canvas leads.
  */
-type Tab = 'inventory' | 'links' | 'ipplan' | 'vlans' | 'racks' | 'validation' | 'health';
+type Tab = 'inventory' | 'links' | 'ipplan' | 'vlans' | 'racks' | 'validation' | 'health' | 'rules';
 
 export function BottomPanel() {
   // Open/closed survives reloads (M3c). Collapsed, the tab strip stays as a
@@ -37,6 +38,7 @@ export function BottomPanel() {
   const vlans = store().vlansAll();
   const racks = store().racksAll();
   const health = useProjectStore((s) => s.health);
+  const invariantViolations = useProjectStore((s) => s.invariantViolations);
   const errorCount = issues.filter(
     (i) => i.severity === 'error' || i.severity === 'critical',
   ).length;
@@ -49,6 +51,7 @@ export function BottomPanel() {
     { key: 'racks', label: 'Racks', count: racks.length },
     { key: 'validation', label: 'Validation', count: issues.length, err: errorCount > 0 },
     { key: 'health', label: 'Health', count: health.issues.length },
+    { key: 'rules', label: 'Rules', count: invariantViolations.length, err: invariantViolations.length > 0 },
   ];
 
   return (
@@ -91,6 +94,7 @@ export function BottomPanel() {
           {tab === 'racks' && <RackTable racks={racks} devices={devices} />}
           {tab === 'validation' && <ValidationList issues={issues} />}
           {tab === 'health' && <HealthPanel devices={devices} />}
+          {tab === 'rules' && <RulesPanel />}
         </div>
       )}
     </div>
@@ -454,6 +458,56 @@ function RackTable({ racks, devices }: { racks: Rack[]; devices: Device[] }) {
   );
 }
 
+/**
+ * Validation codes with a safe, deterministic Conductor remedy, and the store
+ * action that applies it. Each action fixes every issue of its kind in one
+ * undoable move, so the button on any instance resolves the whole category.
+ * Codes absent here (invalid IP/CIDR, VLAN range, overlaps, rack collisions,
+ * oversubscription, orphaned device) need a human decision — no button.
+ */
+const CONDUCTOR_FIX: Record<string, { label: string; title: string; run: () => void }> = {
+  'duplicate-ip': {
+    label: 'Resolve',
+    title: 'Re-address devices that share an IP',
+    run: () => useProjectStore.getState().deduplicateIps(),
+  },
+  'duplicate-name': {
+    label: 'Resolve',
+    title: 'Rename devices that share a name',
+    run: () => useProjectStore.getState().deduplicateNames(),
+  },
+  'duplicate-vlan': {
+    label: 'Resolve',
+    title: 'Renumber VLANs that share an 802.1Q ID',
+    run: () => useProjectStore.getState().deduplicateVlans(),
+  },
+  'device-no-name': {
+    label: 'Name it',
+    title: 'Label unnamed devices from their type',
+    run: () => useProjectStore.getState().nameUnnamedDevices(),
+  },
+  'ip-outside-subnet': {
+    label: 'Add subnet',
+    title: 'Draw a /24 to cover addresses outside every subnet',
+    run: () => useProjectStore.getState().coverOrphanIps(),
+  },
+  'subnet-no-gateway': {
+    label: 'Assign',
+    title: 'Adopt an in-range router/firewall as the gateway',
+    run: () => useProjectStore.getState().assignGateways(),
+  },
+  'missing-endpoint': {
+    label: 'Prune',
+    title: 'Remove links that point at a missing device',
+    run: () => useProjectStore.getState().pruneDanglingLinks(),
+  },
+  'dangling-interface': {
+    label: 'Clear ref',
+    title: 'Clear link references to a removed interface',
+    run: () => useProjectStore.getState().clearDanglingIfaces(),
+  },
+};
+
 function ValidationList({ issues }: { issues: ValidationIssue[] }) {
   const focus = useProjectStore((s) => s.focusObject);
   if (issues.length === 0) {
@@ -467,8 +521,24 @@ function ValidationList({ issues }: { issues: ValidationIssue[] }) {
   const sorted = [...issues].sort(
     (a, b) => severityRank(b.severity) - severityRank(a.severity),
   );
+  const fixableCount = issues.filter((i) => CONDUCTOR_FIX[i.code]).length;
   return (
     <div>
+      {fixableCount > 1 && (
+        <div className={styles.fixAllRow}>
+          <span className={styles.fixAllLabel}>
+            {fixableCount} issue{fixableCount === 1 ? '' : 's'} Conductor can fix automatically
+          </span>
+          <button
+            type="button"
+            className={styles.fixBtn}
+            title="Run every safe Conductor remedy at once"
+            onClick={() => useProjectStore.getState().fixAllSafeIssues()}
+          >
+            Fix all safe issues
+          </button>
+        </div>
+      )}
       {sorted.map((i) => (
         <div
           key={i.id}
@@ -487,8 +557,233 @@ function ValidationList({ issues }: { issues: ValidationIssue[] }) {
             {i.severity.toUpperCase()}
           </span>
           <span className={styles.issueMsg}>{i.message}</span>
+          {CONDUCTOR_FIX[i.code] && (
+            <button
+              type="button"
+              className={styles.fixBtn}
+              title={CONDUCTOR_FIX[i.code]!.title}
+              onClick={(e) => {
+                e.stopPropagation(); // don't also fire the row's jump-to-object
+                CONDUCTOR_FIX[i.code]!.run();
+              }}
+            >
+              {CONDUCTOR_FIX[i.code]!.label}
+            </button>
+          )}
         </div>
       ))}
+    </div>
+  );
+}
+
+/**
+ * Rules — declarative invariants. Each row is a goal the design can declare; once
+ * declared, Conductor shows live whether it's met and, if not, lets you jump to
+ * the offending objects. (Restoring a violated rule with a fixer is slice 2.)
+ */
+function RulesPanel() {
+  useProjectStore((s) => s.rev); // re-evaluate on model change
+  const enabled = useProjectStore((s) => s.invariantsEnabled);
+  const violations = useProjectStore((s) => s.invariantViolations);
+  const toggleInvariant = useProjectStore((s) => s.toggleInvariant);
+  const restoreInvariant = useProjectStore((s) => s.restoreInvariant);
+  const restoreAllInvariants = useProjectStore((s) => s.restoreAllInvariants);
+  const select = useProjectStore((s) => s.select);
+  const invariants = useProjectStore.getState().invariantsAll();
+  const byId = new Map(violations.map((v) => [v.id, v]));
+  const declared = enabled.size;
+  const restorableById = new Map(invariants.map((inv) => [inv.id, inv.restorable]));
+  const restorableViolations = violations.filter((v) => restorableById.get(v.id)).length;
+
+  return (
+    <div className={styles.rules}>
+      <div className={styles.rulesIntro}>
+        {declared === 0
+          ? 'Declare a rule and Conductor holds your design to it as you edit.'
+          : `${declared} rule${declared === 1 ? '' : 's'} declared · ${violations.length} not met`}
+      </div>
+      {restorableViolations > 1 && (
+        <div className={styles.restoreAllRow}>
+          <span className={styles.restoreAllLabel}>
+            {restorableViolations} declared rules Conductor can restore
+          </span>
+          <button
+            className={styles.ruleRestore}
+            onClick={() => restoreAllInvariants()}
+            title="Restore every violated rule that has a remedy"
+          >
+            Restore all
+          </button>
+        </div>
+      )}
+      {invariants.map((inv) => {
+        const on = enabled.has(inv.id);
+        const v = byId.get(inv.id);
+        return (
+          <div key={inv.id} className={styles.ruleRow}>
+            <label className={styles.ruleToggle} title={on ? 'Retract this rule' : 'Declare this rule'}>
+              <input type="checkbox" checked={on} onChange={() => toggleInvariant(inv.id)} />
+            </label>
+            <div className={styles.ruleText}>
+              <div className={styles.ruleLabel}>{inv.label}</div>
+              <div className={styles.ruleDesc}>{inv.description}</div>
+            </div>
+            <div className={styles.ruleStatus}>
+              {!on ? (
+                <span className={styles.ruleOff}>not declared</span>
+              ) : v ? (
+                <div className={styles.ruleActions}>
+                  <button
+                    className={styles.ruleCount}
+                    onClick={() => select(v.objectIds)}
+                    title="Select the objects that break this rule"
+                  >
+                    {v.objectIds.length} to fix
+                  </button>
+                  {inv.restorable && (
+                    <button
+                      className={styles.ruleRestore}
+                      onClick={() => restoreInvariant(inv.id)}
+                      title="Let Conductor restore this rule"
+                    >
+                      Restore
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <span className={styles.ruleMet}>
+                  <NexIcon name="check" /> met
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })}
+      <CustomRulesSection />
+    </div>
+  );
+}
+
+/**
+ * Custom rules — authored, role-based connectivity invariants. List the design's
+ * rules with live status and a remove control, and offer a compact author row:
+ * "Every <role> connects to ≥<n> <role>". Not auto-restorable (Conductor won't
+ * invent which links to draw), so these flag only.
+ */
+function CustomRulesSection() {
+  useProjectStore((s) => s.rev); // re-evaluate on model change
+  const customRules = useProjectStore((s) => s.customRules);
+  const violations = useProjectStore((s) => s.invariantViolations);
+  const addCustomRule = useProjectStore((s) => s.addCustomRule);
+  const removeCustomRule = useProjectStore((s) => s.removeCustomRule);
+  const select = useProjectStore((s) => s.select);
+  const byId = new Map(violations.map((v) => [v.id, v]));
+  const roles = [
+    ...new Set(
+      useProjectStore
+        .getState()
+        .devicesAll()
+        .map((d) => d.role?.trim())
+        .filter((r): r is string => !!r),
+    ),
+  ];
+  const [kind, setKind] = useState<'connectivity' | 'isolation'>('connectivity');
+  const [fromRole, setFromRole] = useState('');
+  const [toRole, setToRole] = useState('');
+  const [min, setMin] = useState('2');
+  const canAdd =
+    fromRole.trim() !== '' && toRole.trim() !== '' && (kind === 'isolation' || Number(min) >= 1);
+  const submit = () => {
+    if (!canAdd) return;
+    addCustomRule(kind, fromRole, toRole, Number(min));
+    setFromRole('');
+    setToRole('');
+    setMin('2');
+  };
+
+  return (
+    <div className={styles.customRules}>
+      <div className={styles.customHeader}>Custom rules</div>
+      {customRules.map((r) => {
+        const v = byId.get(r.id);
+        return (
+          <div key={r.id} className={styles.ruleRow}>
+            <div className={styles.ruleText}>
+              <div className={styles.ruleLabel}>{customRuleLabel(r)}</div>
+              <div className={styles.ruleDesc}>Role-based connectivity</div>
+            </div>
+            <div className={styles.ruleStatus}>
+              {v ? (
+                <button
+                  className={styles.ruleCount}
+                  onClick={() => select(v.objectIds)}
+                  title="Select the objects that break this rule"
+                >
+                  {v.objectIds.length} to fix
+                </button>
+              ) : (
+                <span className={styles.ruleMet}>
+                  <NexIcon name="check" /> met
+                </span>
+              )}
+            </div>
+            <button
+              className={styles.ruleRemove}
+              onClick={() => removeCustomRule(r.id)}
+              title="Remove this rule"
+              aria-label="Remove rule"
+            >
+              ×
+            </button>
+          </div>
+        );
+      })}
+      <div className={styles.customAdd}>
+        <span className={styles.customAddLabel}>Every</span>
+        <input
+          list="nx-roles"
+          className={styles.customInput}
+          placeholder="role"
+          value={fromRole}
+          onChange={(e) => setFromRole(e.target.value)}
+          aria-label="from role"
+        />
+        <select
+          className={styles.customKind}
+          value={kind}
+          onChange={(e) => setKind(e.target.value as 'connectivity' | 'isolation')}
+          aria-label="rule kind"
+        >
+          <option value="connectivity">connects to ≥</option>
+          <option value="isolation">must not reach</option>
+        </select>
+        {kind === 'connectivity' && (
+          <input
+            className={styles.customNum}
+            type="number"
+            min={1}
+            value={min}
+            onChange={(e) => setMin(e.target.value)}
+            aria-label="minimum"
+          />
+        )}
+        <input
+          list="nx-roles"
+          className={styles.customInput}
+          placeholder="role"
+          value={toRole}
+          onChange={(e) => setToRole(e.target.value)}
+          aria-label="to role"
+        />
+        <button className={styles.ruleRestore} disabled={!canAdd} onClick={submit}>
+          Add
+        </button>
+        <datalist id="nx-roles">
+          {roles.map((r) => (
+            <option key={r} value={r} />
+          ))}
+        </datalist>
+      </div>
     </div>
   );
 }

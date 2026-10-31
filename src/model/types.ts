@@ -73,6 +73,13 @@ export interface Interface {
    * untagged/unset. Drives the rack VLAN-mismatch health check and the cable schedule.
    */
   vlan?: number;
+  /**
+   * Per-port IP address (schema v5 additive). An IPv4 address, optionally with a
+   * /prefix, e.g. "10.0.0.2" or "10.0.0.2/24". Absent → the port is unaddressed.
+   * Participates in the same duplicate/invalid/outside-subnet validations as a
+   * device's management IP.
+   */
+  ip?: string;
   notes?: string;
   extra?: ExtraFields;
 }
@@ -424,6 +431,20 @@ export interface ProjectMeta {
  * Reserved collections are kept as `unknown[]` so the schema is forward-stable
  * and can round-trip future content without dropping it.
  */
+/**
+ * An authored, parameterized invariant (schema v7). Two kinds:
+ *  - 'connectivity': "every `fromRole` connects to at least `min` `toRole`"
+ *  - 'isolation':    "no `fromRole` may reach any `toRole`" (path-level, `min` unused)
+ * The shape leaves room for more; an unknown kind is preserved and skipped.
+ */
+export interface CustomRuleSpec {
+  id: string;
+  kind: 'connectivity' | 'isolation';
+  fromRole: string;
+  toRole: string;
+  min: number;
+}
+
 export interface NexMapDocument {
   schemaVersion: number;
   appVersion: string;
@@ -438,6 +459,14 @@ export interface NexMapDocument {
   /** Physical rack cables (schema v3). Separate from logical `links[]`. */
   rackCables: RackCable[];
   views: View[];
+  /**
+   * Declarative invariants the design has opted into, by id (schema v6). The rules
+   * a design asserts about itself travel with the file; unknown ids are preserved
+   * and simply ignored, so a rule added in a newer build round-trips safely.
+   */
+  invariants: string[];
+  /** Authored, parameterized rules (role-based connectivity, schema v7). */
+  customRules: CustomRuleSpec[];
   // Forward-declared, unused yet — preserved verbatim on load→save.
   interfaces: unknown[];
   assets: unknown[];
