@@ -13,6 +13,245 @@ the cables down to the hardware, with a user control to dial the motion.
 
 ### Added
 
+- **Carry your rules to the next design.** The Rules tab (and ⌘K) can save a
+  design's rules as a small `.nexrules` file and load rules into another design,
+  from a rules file or straight from any `.nexmap` design. Loading merges as one
+  undo step: new rules are added, the same rule with another minimum takes the
+  file's number, and nothing already declared is dropped. The banner says what
+  happened: "Loaded 2 rules from “Site standard.nexrules”: 2 added — 1 not met."
+  A file that isn't one, or a design with no rules, says so and changes nothing.
+  Files are written with a download and read with the file picker; nothing leaves
+  your machine.
+- **⌘Z undoes rule changes too.** Declaring, retracting, tightening or locking in a
+  rule is now an undo step, in the same history as your edits, so ⌘Z after "at
+  least 3 firewalls" puts the rule back to 2. Since nothing on the canvas changes,
+  the banner says which step it was: "Undid: Change At least 2 “firewall” to 3." /
+  "Redid: …". A retracted rule comes back unchanged (same rule, same minimum).
+  Opening another design clears these steps along with the rest of history.
+- **Change a rule by saying it again.** With "At least 2 “firewall”" declared,
+  typing "need at least 3 firewalls" in ⌘K offers "Change rule: At least 3
+  “firewall” (was 2)" with its live preview ("1 short"). Choosing it changes the
+  declared rule in place instead of adding a second one, and says "Tightened to …
+  (was 2) — 1 short." Count and "connects to ≥N" rules also get small − / +
+  buttons in the Rules tab (never below 1). Saying the same rule with the same
+  number says it's already declared. Changing a rule's minimum is a rule change,
+  so the edit guard doesn't later report it as "That edit broke …".
+- **See your load-bearing devices on the canvas.** A device that a met rule can't
+  lose (delete it and the rule breaks) gets a small accent column mark at its
+  bottom-left, with a tooltip and screen-reader text ("holds up a declared rule").
+  In a dual-firewall, dual-core design, the two firewalls and two cores are marked
+  and the access switches aren't. Add a third firewall and those marks go, since no
+  single firewall is load-bearing anymore. The mark sits in the opposite corner from
+  the amber "breaks a rule" diamond, so a device can carry both.
+- **Rule checks stay fast on big designs.** The single-point-of-failure scan now runs
+  in one linear pass (articulation points against the egress set) instead of one
+  failure simulation per device, with the same results; a randomized test checks it
+  against the old method. "Held up by" answers most rules directly instead of
+  re-checking everything per device. On 1,000 devices it takes about 55 ms, down
+  from about 1.5 s. It's reused until a device's type, role or name, a link, or a
+  rule changes, so dragging and re-addressing cost nothing. Above 1,000 devices the
+  SPOF rule shows plain "met" instead of "held up by". The Inspector, the Rules tab
+  and suggestions now refresh after each validation pass instead of on every drag
+  frame and keystroke.
+- **New devices follow your naming standard.** With "every firewall is named FW-#"
+  declared, a firewall you add gets the next free standard name ("FW-4") instead of
+  "Firewall 4". That covers dropping one on the canvas, quick-creating one from
+  another device, "Add Firewall" in ⌘K, an added twin, Harden, Connect to internet
+  (when ISPs have a standard) and Restore for count rules. A role standard covers
+  twins of that role ("CORE-3"). Devices with no standard, or whose template
+  Conductor can't fill in, keep the usual default name.
+- **Naming rules: "every firewall is named FW-#".** A new rule kind for naming
+  standards. In the template, `#` is a number and `*` is anything; the rest is
+  literal and case-sensitive. Devices are picked by role or type, like count rules.
+  You can say it in ⌘K ("every firewall is named FW-#", "name every switch SW-#",
+  quotes for spaces: `"Core #"`) or pick "is named like" in the Rules tab. Offenders
+  read "“Firewall 7” doesn't match “FW-#”". Restore renames them to the next free
+  numbers in reading order (top to bottom, left to right): "Renamed 2 devices to
+  fit “FW-#”: FW-2, FW-3." A template it can't fill in (a `*`, or more than one
+  `#`) says so instead. Restore all names freshly added twins to the standard
+  before the generic "every device is named" rule runs. Suggestions offer a
+  template every device of a group already follows (FW-1, FW-2 → "FW-#"), but only
+  in room left after the protective rules. Naming rules travel in rules files and
+  appear in exports.
+- **Quick fixes don't deepen a rule that's already broken.** A suggested cut now
+  never removes an uplink a "connects to ≥N" rule is counting on. Before, when the
+  guest's own link was locked, Conductor could suggest cutting an access switch's
+  only core uplink, because dual-homing was "already broken". Apply all also
+  leaves links on a locked layer alone, and that's now tested.
+- **Apply every quick fix at once.** When more than one quick fix is on offer, the
+  Rules tab shows "3 quick fixes for broken connectivity and isolation rules · Apply
+  all", and ⌘K has "Apply all 3 rule fixes". Conductor plans them one at a time
+  (cuts first, then uplinks), re-checking after each, so later fixes take earlier
+  ones into account. It applies them as a single undo step and reports what it
+  did: "Applied 3 fixes: cut Guest SW–C1; connected A1 to C2; connected A2 to C2.
+  Every declared rule is met. ⌘Z undoes all of it." Links on a locked layer are
+  left alone. When no fix exists, it says the broken rules need a choice Conductor
+  won't make for you.
+- **Fix broken rules from ⌘K and the Inspector too.** The same quick fixes as the
+  Rules tab's why-list are now ⌘K commands ("Connect A2 to C2 · fixes Every
+  “access” connects to ≥2 “core”", "Cut Guest SW–C1 · fixes No “guest” may reach
+  “access”"). Selecting a device that breaks a rule shows its fix right under that
+  rule in the Inspector. All three use one list and one action, so they always
+  agree. Fixes are also planned together: suggested uplinks are chosen as if the
+  suggested cuts were already made, so Conductor won't suggest wiring an access
+  switch to the guest's core, which would let the guest back in after the cut.
+- **See how a walled-off role gets through, and cut it from the why-list.** A
+  broken "no guest may reach access" now names the route, not just the endpoint:
+  "reaches “access” A1 via C1", in the Rules tab and in exports. The row offers
+  "Cut Guest SW–C1": a link on that shortest path whose single cut separates them.
+  It starts at the guest end, skips doubled links and cuts that leave another way
+  round, and never offers a cut that would break another rule that holds now. The
+  cut uses the same delete as the Delete key (locks, enforcement and the edit guard
+  all apply), and ⌘Z puts the link back. Suggested uplinks for a connectivity rule
+  are also now judged together, so two links that are each fine alone but break a
+  rule together aren't both offered.
+- **Fix a missing uplink from the why-list.** When "every access connects to ≥2
+  core" is broken, each short switch in the why-list gets a "Connect to C2" button,
+  one per missing uplink. It prefers the core with the fewest access switches
+  already on it, and never suggests a link that would break another rule that
+  holds now. For example, it won't suggest a core on the guest island when "no
+  guest may reach access" is declared. Conductor only suggests; you click, and ⌘Z
+  takes the link back. The delete preview also now counts only what Delete would
+  really remove: locked devices and anything on a locked layer are left out, and it
+  says so ("1 locked — Delete leaves it").
+- **Preview what deleting a selection or a link would break.** Select several
+  objects, or one link, and the Inspector's Rules group says what deleting them
+  would do: "Deleting these breaks At least 1 “firewall” — 1 short — none of them
+  alone holds it up; together they do." If the rule is enforced, it says the delete
+  will be blocked. That "together" case is the one the single-device view can't
+  show: a redundant pair where neither box alone is load-bearing. When nothing would
+  break, it says so ("Deleting this link breaks no declared rule.").
+- **You can see enforcement before you act, and it travels with your rules.**
+  Selecting a device that holds up an enforced rule shows "Holds up At least 2
+  “firewall” · enforced — deleting it would break the rule (1 short), so the delete
+  will be blocked." On the canvas, its load-bearing mark gets a ring, and the
+  tooltip and screen-reader text say a delete will be blocked. Saved rules files now
+  record which rules are enforced, and loading rules (from a `.nexrules` file or a
+  `.nexmap` design) enforces those here too, without un-enforcing anything you
+  already enforce ("… 1 now enforced").
+- **Enforce a rule, and Conductor holds the line.** Each declared rule in the Rules
+  tab has a lock. While it's on, an edit that would break the rule is taken back
+  as soon as it settles: "Blocked: that delete would break At least 2
+  “firewall”, which is enforced. Stop enforcing it in the Rules tab to make this
+  change." A field edit is judged when you leave the field, not keystroke by
+  keystroke. The blocked edit is gone, not parked on the redo stack. Undo and redo
+  are never blocked (they warn as before). Turning enforcement on or off is an undo
+  step, a retracted rule stops being enforced, and the setting is saved with the
+  design (older builds open the file and simply don't enforce).
+- **VLAN rules see rack patch cables too.** A camera patched in the rack view into
+  a VLAN 10 switch port now breaks "every camera is on VLAN 20", even with no link
+  drawn on the canvas, and Restore retags that port. A port reached by both a link
+  and a cable counts once. Every place rules are checked (Rules tab, Inspector, ⌘K
+  preview, suggestions, CSV/HTML/PDF exports) now reads the same design, cables
+  included, so they can't disagree.
+- **VLAN rules check the switch port, not just the address.** A camera at
+  10.20.0.10 patched into a VLAN 10 access port now breaks "every camera is on
+  VLAN 20", with the reason "SW1 Gi0/3 is on VLAN 10". Conductor reads the far
+  end's port VLAN, the device's own port VLAN, and a single VLAN typed on the
+  link. Trunks and untagged ports are left alone. Restore retags the wrong ports to
+  the rule's VLAN in the same undoable step as any re-addressing ("Retagged 1
+  port to VLAN 20 (SW1 Gi0/3)."). Subnet rules still look only at the address.
+- **Every edit is held to your rules, not just deletes.** Re-address a camera out
+  of its VLAN, unplug an uplink, or undo a fix, and once the edit settles Conductor
+  says what it broke: "That edit broke Every “camera” is on VLAN 20. ⌘Z puts it
+  back." (after an undo: "⌘⇧Z puts it back"). It waits until you leave the field,
+  so a half-typed IP doesn't set it off. The banner clears itself once the rule
+  holds again. Declaring a rule that's already broken, or opening another design,
+  isn't reported as an edit that broke it.
+- **Rules can name a VLAN.** Say "every camera is on VLAN 20" in ⌘K, or pick
+  "VLAN 20" as the target in the Rules tab. A device is on VLAN 20 when its
+  management IP sits in any subnet tagged VLAN 20. The why reads "10.10.0.50 is in
+  “Office” (VLAN 10), not VLAN 20". Restore re-addresses into the VLAN's subnet
+  when it has exactly one; when it spans several, Conductor says so instead of
+  guessing. "vlan20", "VLAN-20" and "VLAN 20" are the same rule. Suggestions offer
+  a VLAN rule when a role is spread across several subnets that share one VLAN.
+- **See which devices a rule depends on.** A met rule in the Rules tab now shows
+  "held up by N" when some devices can't be lost without breaking it. Clicking it
+  selects them on the canvas and lists what deleting each would leave ("FW1 · Delete
+  it and the rule breaks (1 to fix)"). A rule with slack just says "met". It's the
+  same check as the Inspector's "Holds up", run per device, so the two always agree.
+- **See what a device means to your rules before you touch it.** Once the design
+  declares rules, the Inspector gets a Rules group for the selected device. It lists
+  the rules the device breaks (with the same reason as the Rules tab), and the rules
+  it holds up: rules that are met now but would break without it ("Holds up At least
+  2 “firewall” · delete it and the rule breaks (1 short)"). Deleting something that
+  breaks a rule that held now says so: "That delete broke At least 2 “firewall”. ⌘Z
+  puts it back." Both use the same evaluators as the Rules tab, so they can't
+  disagree with it.
+- **Conductor suggests rules from your design.** The Rules tab has a "Suggested
+  from your design" list, and ⌘K has matching "Lock in rule: …" commands. They
+  offer what the design already does, as rules to keep: "At least 2 “firewall”",
+  "Every “access” connects to ≥2 “core”", "Every “camera” lives in “CCTV”", "No
+  “guest” may reach “core”". Every suggestion is true right now (checked by the
+  same evaluator the rules use), never already declared, and capped at eight, mixed
+  across kinds so no one kind crowds out the rest. Uplinks are suggested pointing
+  toward the edge (access → core, not core → access). One click declares it, so a
+  later edit that breaks it gets flagged. Declaring or retracting a built-in rule
+  now confirms in a toast, like authored rules do.
+- **Count rules: "at least 2 firewalls".** Type it in ⌘K ("need at least 2 firewalls",
+  "at least 3 core") or pick "exist (count)" in the Rules tab. A count matches a
+  device's role or its type, so "firewalls" works with no roles set. When it's short,
+  the rule says "1 short" (no device is to blame, so nothing is badged), and Restore
+  adds copies of the best-connected one: same type and role, wired to the same
+  neighbors, no IP. With nothing to copy yet, it says so instead of guessing.
+  The CSV, HTML and PDF reports show the gap ("1 present, 1 short").
+- **Redundant twins keep their role.** A twin of a "core" switch, from Add a
+  redundant twin or Harden, is now a "core" too, so it counts toward your rules.
+- **Shared designs carry their rules.** The standalone HTML export now has a Rules
+  sidebar: the verdict ("1 of 4 rules met"), each rule marked ✓ or ✕, and every
+  offender with its reason. Click a name and that device is ringed on the diagram;
+  click again to clear it. The PDF export (and the PDF in the ZIP package) adds a
+  rules page after the diagram. Both are checked against the whole design, and
+  neither shows anything when no rules are declared.
+- **Rule breakers are marked on the canvas.** A device that breaks a declared rule now
+  carries a small amber diamond at its top-left corner. It appears and clears live as you
+  edit: restore the camera placement rule and the cameras' marks disappear. It's
+  deliberately unlike the red validation badge (different shape, mark, color and corner),
+  so a device can carry both and each reads without relying on color. Hover says "Breaks a
+  declared rule — see the Rules tab", and screen readers hear "…, breaks a declared rule".
+  Works in both the flat and isometric views.
+- **Export your rules as an audit trail: CSV · Rules.** A new export format writes every
+  declared rule with its status. A met rule takes one row, and a broken one takes a row per
+  offender, with the same reason the Rules panel shows: `Every “camera” lives in “CCTV”,
+  placement, broken, Cam Lobby, 10.10.0.21 is in “Office”, not “CCTV”`. It's the
+  evidence a design review or a regulated sign-off asks for, and it's produced entirely on
+  your machine. Rules describe the whole design, so the report always checks the whole
+  diagram (the dialog hides Scope for it), never a selection. A rule written by a newer
+  NexMap is listed as "not checked", never as "met". Cells get the same spreadsheet-
+  formula guard as the other CSVs. The **ZIP package** now includes `rules.csv` whenever
+  the design declares rules.
+- **Every broken rule says why, one line per offender.** Clicking a rule's "N to fix" still
+  selects the offenders, and now also opens a short list under the rule. Each offender is
+  named, with what about it breaks the rule: "Core SW: its failure cuts off 3 devices",
+  "Cam Lobby: 10.10.0.21 is in “Office”, not “CCTV”", "Cam Dock: no management IP",
+  "Guest Kiosk: reaches “internal” HR-DB", "acc-1: links to 1 of ≥2 “core”". Click one to
+  focus it on the canvas. The reasons are recomputed from the same checks that flagged
+  them, so they can't disagree with the count. Custom rules also join ⌘K's **Rules**
+  group, so you can retract one by name ("retract guest") from the keyboard.
+- **Declare a rule by saying it, in ⌘K.** Type the rule as a sentence and the palette
+  offers it as the top result: "every camera lives in CCTV", "no guest may reach
+  internal", "guests must not reach internal", "isolate guest from internal", "every
+  access connects to at least 2 core". Enter declares it. The hint previews what it
+  would do *before* you commit: "1 to fix", "met now", "already declared" (shown greyed
+  out, so you can't add a duplicate), or "no “guests” devices yet" when no device carries
+  that role (so a typo or a not-yet-used role doesn't read as "met"). It's a small,
+  fixed grammar that runs locally (no model, no network) and either reads the sentence
+  exactly or offers nothing. It never half-guesses a rule. Plurals resolve to a role
+  the design already uses ("cameras" → "camera"), a subnet takes its real spelling
+  ("cctv" → "CCTV"), and multi-word names go in "quotes".
+- **Placement rules — "every camera lives in CCTV."** A third kind of custom rule pins a
+  role to a subnet: "Every *camera* lives in *CCTV*", naming the subnet by its name or
+  CIDR (with a datalist of the design's subnets). Conductor checks each device's
+  management IP against the range live, and flags any that sit elsewhere or have no
+  address yet. It's the addressing half of segmentation, next to isolation's wiring half.
+  And it's the first custom rule Conductor can **restore**. Re-addressing into a named
+  range is deterministic, so one click moves every offender to the next free host in that
+  subnet, skipping the gateway and every address already in use, in one undoable step.
+  "Restore all" runs placement before auto-address, so an unaddressed camera lands
+  straight in CCTV instead of the first subnet. It refuses rather than guesses: when no
+  subnet has that name, or two do, nothing moves and the rule says why. Only the
+  management IP moves; ports keep their addresses. No schema bump is needed, because
+  custom rules already round-trip unknown kinds.
 - **Declarative invariants — the rules your design asserts about itself.** A new
   **Rules** tab turns Conductor from "fix what's wrong now" into "hold this design
   to what I declare." Where validation flags mistakes, an invariant is a *goal* you
@@ -309,6 +548,13 @@ the cables down to the hardware, with a user control to dial the motion.
 
 ### Fixed
 
+- **Declaring a rule is autosaved right away.** Autosave only watched for diagram
+  edits, and declaring, retracting, adding or removing a rule doesn't edit the diagram.
+  So a rule-only change wasn't written to the draft until you next touched the canvas.
+  Close the tab before that, and the rule was gone on recovery. Autosave now also fires
+  when the declared rules change.
+- **The Rules panel's "N rules declared" count includes custom rules**, so it no longer
+  reads "0 declared · 1 not met".
 - **Redundant twins of an unnamed device get a real name.** Twinning a device with a
   blank name (via "Add a redundant twin", "Harden the design", or restoring the no-SPOF
   rule) produced a twin named "" or " 2". Twins of an unnamed device are now named from

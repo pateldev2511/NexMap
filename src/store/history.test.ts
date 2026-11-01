@@ -6,6 +6,7 @@ import {
   MoveDeviceCommand,
   DeleteCommand,
   UpdateDeviceCommand,
+  UpdateLinkCommand,
   transaction,
 } from './commands';
 import { emptyModel, type ModelState } from './modelState';
@@ -172,5 +173,77 @@ describe('History — property: undo-all === initial, redo-all === final', () =>
     guard = 0;
     while (h.canRedo && guard++ < 10000) h.redo(s);
     expect(snapshot(s)).toBe(final);
+  });
+});
+
+describe('History — checkpoint / revertTo', () => {
+  const setup = () => {
+    const s = emptyModel(NOW);
+    const h = new History();
+    const a = createDevice('router', 0, 0, LAYER);
+    const b = createDevice('switch', 100, 0, LAYER);
+    h.dispatch(new AddDeviceCommand(a), s);
+    h.commitCoalesceBoundary();
+    h.dispatch(new AddDeviceCommand(b), s);
+    h.commitCoalesceBoundary();
+    const link = createLink(a.id, b.id, LAYER, { vlan: '20' });
+    h.dispatch(new AddLinkCommand(link), s);
+    h.commitCoalesceBoundary();
+    return { s, h, a, b, link };
+  };
+
+  it('takes back exactly what came after the checkpoint, and offers none of it to redo', () => {
+    const { s, h, a } = setup();
+    const cp = h.checkpoint();
+    h.dispatch(new UpdateDeviceCommand(a.id, { name: a.name }, { name: 'R1' }), s);
+    h.commitCoalesceBoundary();
+    h.dispatch(new DeleteCommand([a.id]), s);
+    expect(h.revertTo(cp, s)).toBe(true);
+    expect(s.devices.get(a.id)!.name).toBe(a.name);
+    expect(s.links.size).toBe(1); // nothing before the checkpoint touched
+    expect(h.canRedo).toBe(false);
+    expect(h.depth).toBe(3);
+  });
+
+  it('a merge chain counts as one entry', () => {
+    const { s, h, a } = setup();
+    const cp = h.checkpoint();
+    for (const name of ['R', 'Ro', 'Rou']) h.dispatch(new UpdateDeviceCommand(a.id, { name: a.name }, { name }), s);
+    expect(h.revertTo(cp, s)).toBe(true);
+    expect(h.depth).toBe(3);
+    expect(s.devices.get(a.id)!.name).toBe(a.name);
+  });
+
+  it('an edit that collapses back to nothing, then another: only the later one is taken back', () => {
+    const { s, h, link } = setup();
+    const cp = h.checkpoint();
+    // Type the link's VLAN "20" → "202" → back to "20" (identity: the entry is dropped)…
+    h.dispatch(new UpdateLinkCommand(link.id, { vlan: '20' }, { vlan: '202' }), s);
+    h.dispatch(new UpdateLinkCommand(link.id, { vlan: '202' }, { vlan: '20' }), s);
+    // …then "201".
+    h.dispatch(new UpdateLinkCommand(link.id, { vlan: '20' }, { vlan: '201' }), s);
+    expect(h.revertTo(cp, s)).toBe(true);
+    expect(s.links.get(link.id)!.vlan).toBe('20');
+    expect(h.depth).toBe(3); // the two devices and the link are all still there
+    expect(s.devices.size).toBe(2);
+  });
+
+  it('refuses after an undo, a redo or a clear in between', () => {
+    const { s, h, a } = setup();
+    const cp = h.checkpoint();
+    h.dispatch(new UpdateDeviceCommand(a.id, { name: a.name }, { name: 'R1' }), s);
+    h.undo(s);
+    expect(h.revertTo(cp, s)).toBe(false);
+    const cp2 = h.checkpoint();
+    h.redo(s);
+    expect(h.revertTo(cp2, s)).toBe(false);
+    const cp3 = h.checkpoint();
+    h.clear();
+    expect(h.revertTo(cp3, s)).toBe(false);
+  });
+
+  it('refuses when there is nothing new to take back', () => {
+    const { s, h } = setup();
+    expect(h.revertTo(h.checkpoint(), s)).toBe(false);
   });
 });

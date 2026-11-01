@@ -11,6 +11,7 @@
  */
 import type {
   CanvasObject,
+  CustomRuleSpec,
   Device,
   Layer,
   Link,
@@ -45,6 +46,34 @@ export interface Command {
    * restore the state from BEFORE this command.
    */
   mergeWith?(next: Command): Command | null;
+}
+
+/** The design's declared rules: built-in invariants on, plus authored rules. */
+export interface RulesState {
+  invariants: ReadonlySet<string>;
+  customRules: readonly CustomRuleSpec[];
+  /** Declared rules (built-in or authored, by id) whose breaking edits are undone. */
+  enforced: ReadonlySet<string>;
+}
+
+/**
+ * Declare, retract or change rules — undoable like any edit. Rules live in store
+ * state, not the model, so the command carries the store's writer; apply/undo
+ * swap whole snapshots (rules are small and immutable).
+ */
+export class SetRulesCommand implements Command {
+  constructor(
+    readonly label: string,
+    private readonly before: RulesState,
+    private readonly after: RulesState,
+    private readonly write: (rules: RulesState) => void,
+  ) {}
+  apply() {
+    this.write(this.after);
+  }
+  undo() {
+    this.write(this.before);
+  }
 }
 
 export class AddDeviceCommand implements Command {

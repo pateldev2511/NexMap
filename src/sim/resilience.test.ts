@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { findSpofs, planHardening } from './resilience';
+import { findSpofs, planHardening, spofCountsWithout } from './resilience';
+import { blastRadius } from './blastRadius';
 import { createDevice, createLink } from '@/model/schema';
 import type { Device, DeviceType } from '@/model/types';
 
@@ -92,4 +93,62 @@ describe('planHardening', () => {
     expect(plan.steps).toEqual([]);
     expect(plan.skippedExternal).toEqual([]);
   });
+});
+
+describe('findSpofs agrees with a blast per device', () => {
+  /** The definition, the slow way: fail each linked device, count what it isolates. */
+  function oracle(devices: Device[], links: ReturnType<typeof createLink>[]) {
+    const out: { deviceId: string; isolates: number }[] = [];
+    for (const d of devices) {
+      if (!links.some((l) => l.sourceId !== l.targetId && (l.sourceId === d.id || l.targetId === d.id))) continue;
+      const n = blastRadius(devices, links, [d.id]).isolated.size;
+      if (n > 0) out.push({ deviceId: d.id, isolates: n });
+    }
+    return out.sort((a, b) => b.isolates - a.isolates || (a.deviceId < b.deviceId ? -1 : 1));
+  }
+
+  // Deterministic pseudo-random graphs: mixed device types (so some have an egress
+  // role and some don't), self-loops, parallel links, islands.
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
+  const TYPES: DeviceType[] = ['switch', 'switch', 'server', 'router', 'firewall', 'isp', 'camera', 'access-point'];
+  for (let g = 0; g < 60; g++) {
+    it(`random graph ${g}`, () => {
+      const n = 2 + Math.floor(rnd() * 14);
+      const devices = Array.from({ length: n }, (_, i) =>
+        createDevice(g % 4 === 0 ? 'switch' : TYPES[Math.floor(rnd() * TYPES.length)]!, 0, 0, 'l', { name: `D${i}` }),
+      );
+      const links = Array.from({ length: Math.floor(rnd() * n * 1.6) }, () =>
+        createLink(devices[Math.floor(rnd() * n)]!.id, devices[Math.floor(rnd() * n)]!.id, 'l'),
+      );
+      expect(findSpofs(devices, links)).toEqual(oracle(devices, links));
+    });
+  }
+});
+
+describe('spofCountsWithout agrees with findSpofs on the reduced graph', () => {
+  let seed = 23;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
+  const TYPES: DeviceType[] = ['switch', 'switch', 'server', 'router', 'firewall', 'isp', 'camera'];
+  for (let g = 0; g < 60; g++) {
+    it(`random graph ${g}`, () => {
+      const n = 2 + Math.floor(rnd() * 14);
+      const devices = Array.from({ length: n }, (_, i) =>
+        createDevice(g % 3 === 0 ? 'switch' : TYPES[Math.floor(rnd() * TYPES.length)]!, 0, 0, 'l', { name: `D${i}` }),
+      );
+      const links = Array.from({ length: Math.floor(rnd() * n * 2) }, () =>
+        createLink(devices[Math.floor(rnd() * n)]!.id, devices[Math.floor(rnd() * n)]!.id, 'l'),
+      );
+      const want = new Map<string, number>();
+      for (const d of devices) {
+        if (!links.some((l) => l.sourceId !== l.targetId && (l.sourceId === d.id || l.targetId === d.id))) continue;
+        const k = findSpofs(
+          devices.filter((x) => x.id !== d.id),
+          links.filter((l) => l.sourceId !== d.id && l.targetId !== d.id),
+        ).length;
+        if (k > 0) want.set(d.id, k);
+      }
+      expect(spofCountsWithout(devices, links)).toEqual(want);
+    });
+  }
 });

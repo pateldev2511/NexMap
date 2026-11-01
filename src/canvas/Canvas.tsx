@@ -1,4 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ruleOffenderIds } from '@/model/invariants';
+import { supportCounts } from '@/model/ruleStakes';
 import type { Device, DeviceType, Link, TextObject } from '@/model/types';
 import { bodyText, setBody } from '@/model/callout';
 import { DEFAULT_LEADER } from '@/model/leader';
@@ -235,6 +237,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   const flowMode = useProjectStore((s) => s.flowMode);
   const flowFailed = useProjectStore((s) => s.flowFailed);
   const issues = useProjectStore((s) => s.issues);
+  const invariantViolations = useProjectStore((s) => s.invariantViolations);
   const focusTick = useProjectStore((s) => s.focusTick);
   const canUndo = useProjectStore((s) => s.canUndo);
   const canRedo = useProjectStore((s) => s.canRedo);
@@ -309,6 +312,21 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusTick]);
+
+  // Devices that break a declared rule → rule badge (subnet offenders aren't drawn).
+  const ruleIds = useMemo(() => ruleOffenderIds(invariantViolations), [invariantViolations]);
+  // Devices a met rule can't lose → load-bearing mark.
+  const ruleSupports = useProjectStore((s) => s.ruleSupports);
+  const holdCounts = useMemo(() => supportCounts(ruleSupports), [ruleSupports]);
+  // …and those whose deletion an enforced rule would block.
+  const rulesEnforced = useProjectStore((s) => s.rulesEnforced);
+  const holdsEnforced = useMemo(() => {
+    const ids = new Set<string>();
+    for (const [ruleId, list] of ruleSupports) {
+      if (rulesEnforced.has(ruleId)) for (const x of list) ids.add(x.deviceId);
+    }
+    return ids;
+  }, [ruleSupports, rulesEnforced]);
 
   // Object IDs carrying an error/critical issue → canvas badge.
   const errorIds = new Set<string>();
@@ -1909,6 +1927,9 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
                 scale={viewport.scale}
                 validTarget={linkTarget === dev.id || pendingSource === dev.id}
                 hasIssue={errorIds.has(dev.id)}
+                breaksRule={ruleIds.has(dev.id)}
+                holdsUp={holdCounts.get(dev.id)}
+                holdsEnforced={holdsEnforced.has(dev.id)}
                 onPointerDown={onDevicePointerDown}
                 onActivate={onActivateNode}
                 onLabelDoubleClick={onLabelDoubleClick}
@@ -2014,6 +2035,9 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
                   tile={ISO_TILE}
                   validTarget={linkTarget === dev.id || pendingSource === dev.id}
                   hasIssue={errorIds.has(dev.id)}
+                  breaksRule={ruleIds.has(dev.id)}
+                holdsUp={holdCounts.get(dev.id)}
+                holdsEnforced={holdsEnforced.has(dev.id)}
                   onPointerDown={onDevicePointerDown}
                   onActivate={onActivateNode}
                   onLabelDoubleClick={onLabelDoubleClick}

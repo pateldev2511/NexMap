@@ -7,7 +7,8 @@ import { buildSvg } from './buildSvg';
 import { buildStandaloneHtml } from './html';
 import { rasterize, downloadBlob } from './raster';
 import { buildPdfBlob, type PageSize } from './pdf';
-import { exportInventoryCsv, exportLinksCsv } from './csvExport';
+import { exportInventoryCsv, exportLinksCsv, exportRulesCsv } from './csvExport';
+import { buildRulesReport, hasDeclaredRules, type RulesReportInput } from './rulesReport';
 import { buildPackageZip } from './zip';
 
 export type ExportFormat =
@@ -18,6 +19,7 @@ export type ExportFormat =
   | 'html'
   | 'csv-inventory'
   | 'csv-links'
+  | 'csv-rules'
   | 'zip';
 
 export interface ExportScene {
@@ -30,6 +32,8 @@ export interface ExportScene {
   projectName: string;
   /** Serialized .nexmap JSON (for the ZIP package's editable file). */
   docJson: string;
+  /** The whole design + its declared rules, for the rules report (never scoped). */
+  rules?: RulesReportInput;
 }
 
 export interface ExportOptions {
@@ -82,6 +86,15 @@ export async function runExport(
     return { fileName: fn };
   }
 
+  if (opts.format === 'csv-rules') {
+    const csv = exportRulesCsv(
+      scene.rules ?? { devices, links, subnets: scene.subnets, invariants: [], customRules: [] },
+    );
+    const fn = safeName(opts.fileName || `${scene.projectName}-rules`, 'csv');
+    downloadBlob(new Blob([csv], { type: 'text/csv' }), fn);
+    return { fileName: fn };
+  }
+
   if (opts.format === 'zip') {
     const blob = await buildPackageZip(
       {
@@ -93,6 +106,7 @@ export async function runExport(
         racks: scene.racks,
         projectName: scene.projectName,
         docJson: scene.docJson,
+        rules: scene.rules,
       },
       opts.scale,
     );
@@ -116,11 +130,15 @@ export async function runExport(
     return { fileName: fn };
   }
 
+  // The shareable formats carry the declared rules too (whole design, like the CSV).
+  const rulesReport = hasDeclaredRules(scene.rules) ? buildRulesReport(scene.rules) : [];
+
   if (opts.format === 'html') {
     const html = buildStandaloneHtml(svg, {
       projectName: scene.projectName,
       deviceCount: devices.length,
       linkCount: links.length,
+      rules: rulesReport,
     });
     const fn = safeName(opts.fileName || scene.projectName, 'html');
     downloadBlob(new Blob([html], { type: 'text/html' }), fn);
@@ -128,11 +146,12 @@ export async function runExport(
   }
 
   if (opts.format === 'pdf') {
-    const blob = await buildPdfBlob(svg, {
-      pageSize: opts.pageSize,
-      orientation: opts.orientation,
-      scale: opts.scale,
-    });
+    const blob = await buildPdfBlob(
+      svg,
+      { pageSize: opts.pageSize, orientation: opts.orientation, scale: opts.scale },
+      rulesReport,
+      scene.projectName,
+    );
     const fn = safeName(opts.fileName || scene.projectName, 'pdf');
     downloadBlob(blob, fn);
     return { fileName: fn };

@@ -493,6 +493,40 @@
   color: var(--chrome-fg-muted);
 }
 
+/* The "why" list under a broken rule: one row per offender. */
+.why {
+  list-style: none;
+  margin: 0;
+  padding: 2px 12px 8px 44px;
+  border-bottom: 1px solid var(--chrome-border);
+  background: var(--chrome-bg-2);
+}
+.whyRow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 4px 6px;
+  font-size: 12px;
+  text-align: left;
+  color: var(--chrome-fg);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.whyRow:hover {
+  background: var(--accent-soft);
+}
+.whyName {
+  flex: none;
+  min-width: 110px;
+  font-weight: 600;
+}
+.whyReason {
+  color: var(--chrome-fg-muted);
+}
+
 /* Custom (authored) rules section. */
 .customRules {
   display: flex;
@@ -576,4 +610,132 @@
 .customKind:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+/* "held up by N" on a met rule: the devices it can't lose. */
+.ruleHeld {
+  padding: 2px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ruleHeld:hover {
+  border-color: var(--accent);
+}
+
+/* − / + on a count or connectivity rule: loosen or tighten its minimum. */
+.ruleStep {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 8px;
+  vertical-align: 1px;
+}
+.ruleStep button {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--chrome-fg-muted);
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.ruleStep button:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.ruleStep button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Rules intro: the summary, then save/load rules on the right. */
+.rulesIntroRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.rulesFileActions {
+  display: inline-flex;
+  gap: 6px;
+  flex: none;
+}
+.rulesFileActions button {
+  padding: 2px 8px;
+  font-size: 12px;
+  color: var(--chrome-fg);
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.rulesFileActions button:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Enforce a declared rule: a lock; pressed reads "enforced" in the accent colour. */
+.ruleEnforce {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  margin-right: 8px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--chrome-fg-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0.55;
+}
+.ruleEnforce svg {
+  width: 12px;
+  height: 12px;
+}
+.ruleEnforce:hover {
+  opacity: 1;
+  border-color: var(--chrome-border);
+}
+.ruleEnforceOn {
+  color: var(--accent);
+  border-color: var(--accent);
+  opacity: 1;
+}
+
+/* A why-row with a quick fix beside it ("Connect to C2"). */
+.whyItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.whyItem .whyRow {
+  flex: 1;
+  min-width: 0;
+}
+.whyFix {
+  flex: none;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--chrome-bg);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.whyFix:hover {
+  color: var(--chrome-bg);
+  background: var(--accent);
 }

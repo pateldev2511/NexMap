@@ -56,3 +56,17 @@ export function rankCommands<T extends { label: string; hint?: string }>(
   scored.sort((a, b) => a.s - b.s || a.i - b.i);
   return scored.map((x) => x.c);
 }
+
+/**
+ * The palette's result list: the full list for an empty query; otherwise any
+ * commands read out of the query itself (`intent`, e.g. a rule typed as a
+ * sentence) first, then the ranked matches.
+ */
+export function paletteResults<T extends { label: string; hint?: string }>(
+  commands: readonly T[],
+  query: string,
+  intent?: (query: string) => T[],
+): T[] {
+  if (!query.trim()) return [...commands];
+  return [...(intent?.(query) ?? []), ...rankCommands(commands, query)];
+}

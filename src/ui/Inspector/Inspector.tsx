@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import type { CanvasObject, Device, DeviceType, Link } from '@/model/types';
 import { NexIcon } from '@/ui/icons/NexIcon';
@@ -25,6 +26,7 @@ import {
   MAX_LABEL_HEIGHT,
   DEFAULT_LABEL_HEIGHT,
 } from '@/canvas/nodeCard';
+import { deleteStakes, deviceStakes, ruleFixes, ruleFixLabel } from '@/model/ruleStakes';
 import { RichTextEditor } from './RichTextEditor';
 import { ComboBox } from './ComboBox';
 import styles from './Inspector.module.css';
@@ -197,6 +199,8 @@ function DeviceInspector({ device }: { device: Device }) {
         </Field>
       </div>
 
+      <RuleStakes deviceId={device.id} />
+
       <div className={styles.group}>
         <div className={styles.groupTitle}>Appearance</div>
         <Field label="Icon size">
@@ -326,6 +330,122 @@ function DeviceInspector({ device }: { device: Device }) {
         </Field>
       </div>
     </>
+  );
+}
+
+/**
+ * What the declared rules make of this device: the rules it breaks (and why), and
+ * the rules that hold only because of it — what a delete would break. Shown only
+ * once the design declares rules, so the Inspector stays lean until then.
+ */
+const RuleStakes = memo(function RuleStakes({ deviceId }: { deviceId: string }) {
+  // Re-read after each validation pass — not per drag frame or keystroke (`rev`).
+  useProjectStore((s) => s.ruleCheckRev);
+  const invariants = useProjectStore((s) => s.invariantsEnabled);
+  const customRules = useProjectStore((s) => s.customRules);
+  const enforced = useProjectStore((s) => s.rulesEnforced);
+  if (invariants.size === 0 && customRules.length === 0) return null;
+  const st = useProjectStore.getState();
+  const ctx = st.ruleContext();
+  const { breaks, holdsUp } = deviceStakes(deviceId, ctx, { invariants, customRules });
+  // Quick fixes for what this device breaks (same as the Rules tab and ⌘K).
+  const fixes = breaks.length > 0 ? ruleFixes(ctx, { invariants, customRules }, { onlyDevice: deviceId }) : [];
+  return (
+    <div className={styles.group} aria-label="Declared rules">
+      <div className={styles.groupTitle}>Rules</div>
+      {breaks.length === 0 && holdsUp.length === 0 && (
+        <div className={styles.stakeNone}>Meets every declared rule, and none depends on it.</div>
+      )}
+      {holdsUp.length > 0 && st.deletable([deviceId]).deviceIds.length === 0 && (
+        <div className={styles.stakeNone}>Locked, so Delete leaves it in place — this is what losing it would do.</div>
+      )}
+      {breaks.map((b) => (
+        <div key={b.id} className={`${styles.stake} ${styles.stakeBreaks}`}>
+          <div className={styles.stakeLabel}>
+            <span aria-hidden="true">✕ </span>Breaks {b.label}
+          </div>
+          <div className={styles.stakeDetail}>{b.detail}</div>
+          {fixes.some((f) => f.ruleId === b.id) && (
+            <div className={styles.stakeFixes}>
+              {fixes
+                .filter((f) => f.ruleId === b.id)
+                .map((f) => (
+                  <button key={f.key} className={styles.stakeFix} onClick={() => st.applyRuleFix(f)}>
+                    {ruleFixLabel(f)}
+                  </button>
+                ))}
+            </div>
+          )}
+        </div>
+      ))}
+      {holdsUp.map((h) => (
+        <div key={h.id} className={`${styles.stake} ${styles.stakeHolds}`}>
+          <div className={styles.stakeLabel}>
+            <span aria-hidden="true">◆ </span>Holds up {h.label}
+            {enforced.has(h.id) && <span className={styles.stakeEnforced}> · enforced</span>}
+          </div>
+          <div className={styles.stakeDetail}>
+            {enforced.has(h.id)
+              ? `Deleting it would break the rule (${h.detail}), so the delete will be blocked.`
+              : `Delete it and the rule breaks (${h.detail}).`}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+});
+
+/**
+ * What deleting this link — or a whole multi-selection — would do to the declared
+ * rules, before you press Delete: which held rules break, whether it's the group
+ * that holds one up ("neither firewall alone; both together"), and whether an
+ * enforced rule means the delete will be blocked. Hidden until a rule is declared.
+ */
+const DeleteStakes = memo(
+  DeleteStakesImpl,
+  // A fresh ids array per parent render is the same selection: compare by content.
+  (a, b) => a.noun === b.noun && a.ids.length === b.ids.length && a.ids.every((id, i) => id === b.ids[i]),
+);
+
+function DeleteStakesImpl({ ids, noun }: { ids: readonly string[]; noun: string }) {
+  // Re-read after each validation pass — not per drag frame or keystroke (`rev`).
+  useProjectStore((s) => s.ruleCheckRev);
+  const invariants = useProjectStore((s) => s.invariantsEnabled);
+  const customRules = useProjectStore((s) => s.customRules);
+  const enforced = useProjectStore((s) => s.rulesEnforced);
+  if (invariants.size === 0 && customRules.length === 0) return null;
+  const st = useProjectStore.getState();
+  // Preview what Delete would really remove: locked things stay put.
+  const { deviceIds, linkIds, objectIds } = st.deletable(ids);
+  const locked = ids.length - deviceIds.length - linkIds.length - objectIds.length;
+  const stakes = deleteStakes([...deviceIds, ...linkIds], st.ruleContext(), { invariants, customRules });
+  return (
+    <div className={styles.group} aria-label="Declared rules">
+      <div className={styles.groupTitle}>Rules</div>
+      {locked > 0 && (
+        <div className={styles.stakeNone}>
+          {locked === ids.length
+            ? `Locked, so Delete leaves ${ids.length === 1 ? 'it' : 'them'} in place.`
+            : `${locked} locked — Delete leaves ${locked === 1 ? 'it' : 'them'}; this counts only the rest.`}
+        </div>
+      )}
+      {stakes.length === 0 && locked < ids.length && (
+        <div className={styles.stakeNone}>Deleting {noun} breaks no declared rule.</div>
+      )}
+      {stakes.map((st) => (
+        <div key={st.id} className={`${styles.stake} ${styles.stakeHolds}`}>
+          <div className={styles.stakeLabel}>
+            <span aria-hidden="true">◆ </span>Deleting {noun} breaks {st.label}
+            {enforced.has(st.id) && <span className={styles.stakeEnforced}> · enforced</span>}
+          </div>
+          <div className={styles.stakeDetail}>
+            {st.detail}
+            {st.together && ' — none of them alone holds it up; together they do'}
+            {enforced.has(st.id) ? '. The delete will be blocked.' : '.'}
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -602,6 +722,8 @@ function LinkInspector({ link }: { link: Link }) {
           />
         </Field>
       </div>
+
+      <DeleteStakes ids={[link.id]} noun="this link" />
       <div className={styles.group}>
         <div className={styles.groupTitle}>Connector</div>
         <Field label="Line">
@@ -1010,10 +1132,13 @@ export function Inspector() {
   } else {
     head = `${ids.length} selected`;
     body = (
-      <div className={styles.empty}>
-        {ids.length} objects selected. Press Delete to remove them, or drag to move
-        together. Per-field multi-edit comes later.
-      </div>
+      <>
+        <div className={styles.empty}>
+          {ids.length} objects selected. Press Delete to remove them, or drag to move
+          together. Per-field multi-edit comes later.
+        </div>
+        <DeleteStakes ids={ids} noun="these" />
+      </>
     );
   }
 
