@@ -63,6 +63,9 @@ const TYPE_LABEL: Record<DeviceType, string> = {
   generic: 'Node',
 };
 
+/** Every device type, in palette order (the keys of the label table). */
+export const DEVICE_TYPES = Object.keys(TYPE_LABEL) as DeviceType[];
+
 export function defaultDeviceName(type: DeviceType): string {
   return TYPE_LABEL[type];
 }

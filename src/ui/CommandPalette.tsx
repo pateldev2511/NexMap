@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { NexIcon } from './icons/NexIcon';
 import { firstSelectable, nextSelectable } from './commandPaletteNav';
-import { rankCommands } from './commandPaletteSearch';
+import { paletteResults } from './commandPaletteSearch';
 
 export interface PaletteCommand {
   id: string;
@@ -34,9 +34,16 @@ const GROUP_ORDER = ['Suggested', 'Build', 'Connect', 'Address', 'Resilience', '
  */
 export function CommandPalette({
   commands,
+  intent,
   onClose,
 }: {
   commands: PaletteCommand[];
+  /**
+   * Commands read out of the query itself ("every camera lives in CCTV" → declare
+   * that rule). They lead the results while searching — what you typed IS the
+   * command — and never appear for an empty query.
+   */
+  intent?: (query: string) => PaletteCommand[];
   onClose: () => void;
 }) {
   const [q, setQ] = useState('');
@@ -47,8 +54,9 @@ export function CommandPalette({
     inputRef.current?.focus();
   }, []);
 
-  // Ranked: literal matches (prefix, word-start, substring) beat loose ones.
-  const filtered = useMemo(() => (q.trim() ? rankCommands(commands, q) : commands), [q, commands]);
+  // Ranked: literal matches (prefix, word-start, substring) beat loose ones, and a
+  // command read out of the query itself leads them all.
+  const filtered = useMemo(() => paletteResults(commands, q, intent), [q, commands, intent]);
 
   // For the empty query, re-order commands by group so the list reads as a menu,
   // and expose the section boundaries. `ordered` drives BOTH render and keyboard

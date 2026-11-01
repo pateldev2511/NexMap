@@ -7,6 +7,7 @@ import { IsoIcon } from './IsoIcon';
 import { isoProjectPx, type IsoTile } from './iso';
 import { NodeInfoCard } from './NodeInfoCard';
 import { clampIconScale, DEFAULT_LABEL_HEIGHT } from './nodeCard';
+import { HoldsBadge, RuleBadge } from './RuleBadge';
 import styles from './Canvas.module.css';
 
 interface IsoDeviceNodeProps {
@@ -17,6 +18,12 @@ interface IsoDeviceNodeProps {
   tile: IsoTile;
   validTarget?: boolean;
   hasIssue?: boolean;
+  /** Breaks a declared rule (Conductor invariant) → rule badge. */
+  breaksRule?: boolean;
+  /** How many met declared rules can't lose this device (0/absent → none). */
+  holdsUp?: number;
+  /** At least one rule it holds up is enforced (a delete would be blocked). */
+  holdsEnforced?: boolean;
   onPointerDown: (e: React.PointerEvent, id: string) => void;
   onLabelDoubleClick?: (e: React.MouseEvent, id: string) => void;
   onActivate?: (id: string) => void;
@@ -35,6 +42,9 @@ function IsoDeviceNodeImpl({
   tile,
   validTarget,
   hasIssue,
+  breaksRule,
+  holdsUp = 0,
+  holdsEnforced = false,
   onPointerDown,
   onLabelDoubleClick,
   onActivate,
@@ -43,7 +53,9 @@ function IsoDeviceNodeImpl({
   const typeName = defaultDeviceName(device.type);
   const ariaLabel = `${device.name || typeName}, ${typeName}${
     device.managementIp ? `, ${device.managementIp}` : ''
-  }${device.locked ? ', locked' : ''}`;
+  }${device.locked ? ', locked' : ''}${breaksRule ? ', breaks a declared rule' : ''}${
+    holdsUp > 0 ? (holdsEnforced ? ', holds up an enforced rule' : ', holds up a declared rule') : ''
+  }`;
   const showLabel = scale >= LOD_LABEL_HIDE;
   const detailed = scale >= LOD_GLYPH_ONLY;
   const { x, y, width, height } = device;
@@ -138,6 +150,12 @@ function IsoDeviceNodeImpl({
           <path d="M0 -3.8v4.3" />
           <circle className={styles.issueDot} cx={0} cy={3.4} r={1} />
         </g>
+      )}
+      {breaksRule && detailed && (
+        <RuleBadge x={c.x - iconSize * 0.46} y={iconCy - iconSize * 0.45} />
+      )}
+      {holdsUp > 0 && detailed && (
+        <HoldsBadge x={c.x - iconSize * 0.46} y={iconCy + iconSize * 0.3} count={holdsUp} enforced={holdsEnforced} />
       )}
     </g>
   );

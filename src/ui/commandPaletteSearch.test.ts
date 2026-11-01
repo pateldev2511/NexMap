@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fuzzy, matchScore, rankCommands } from './commandPaletteSearch';
+import { fuzzy, matchScore, paletteResults, rankCommands } from './commandPaletteSearch';
 
 describe('matchScore', () => {
   it('scores prefix < word-start < substring < hint < subsequence', () => {
@@ -44,5 +44,21 @@ describe('fuzzy', () => {
   it('matches in-order subsequences only', () => {
     expect(fuzzy('harden the design', 'hdd')).toBe(true);
     expect(fuzzy('harden the design', 'ddh')).toBe(false);
+  });
+});
+
+describe('paletteResults', () => {
+  const cmds = [{ label: 'Harden the design' }, { label: 'Restore 1 declared rule' }];
+  const intent = (q: string) => (q.startsWith('every') ? [{ label: `Declare rule: ${q}` }] : []);
+
+  it('leads with the intent command, then ranked matches', () => {
+    expect(paletteResults(cmds, 'every camera lives in CCTV', intent)[0]!.label).toBe(
+      'Declare rule: every camera lives in CCTV',
+    );
+    expect(paletteResults(cmds, 'restore', intent).map((c) => c.label)).toEqual(['Restore 1 declared rule']);
+  });
+
+  it('never consults intent for an empty query', () => {
+    expect(paletteResults(cmds, ' ', () => [{ label: 'nope' }])).toEqual(cmds);
   });
 });

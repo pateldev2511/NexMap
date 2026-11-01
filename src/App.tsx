@@ -19,6 +19,21 @@ import { AboutDialog } from './ui/dialogs/AboutDialog';
 import { OutlineDialog } from './ui/dialogs/OutlineDialog';
 import { UpdateToast } from './ui/UpdateToast';
 import { CommandPalette, type PaletteCommand } from './ui/CommandPalette';
+import {
+  countedDevices,
+  customRuleLabel,
+  evaluateCustomRules,
+  findRestated,
+  hasMinimum,
+  isCustomRuleRestorable,
+  namingCanGenerate,
+  violationTodo,
+} from '@/model/invariants';
+import { parseRuleIntent } from '@/model/ruleIntent';
+import { suggestRules } from '@/model/ruleSuggest';
+import { loadRulesFile, saveRulesFile } from '@/ui/rulesFileActions';
+import { ruleFixes } from '@/model/ruleStakes';
+import type { CustomRuleSpec } from '@/model/types';
 import { keyboardRouter } from './input/router';
 import { useQuietChrome } from './ui/useQuietChrome';
 import { ValidationAnnouncer } from './ui/ValidationAnnouncer';
@@ -564,7 +579,10 @@ export function App() {
               const invariants = st().invariantsAll();
               const invEnabled = st().invariantsEnabled;
               const invViolations = st().invariantViolations;
-              const restorableIds = new Set(invariants.filter((i) => i.restorable).map((i) => i.id));
+              const restorableIds = new Set([
+                ...invariants.filter((i) => i.restorable).map((i) => i.id),
+                ...st().customRules.filter(isCustomRuleRestorable).map((r) => r.id),
+              ]);
               const brokenRestorable = invViolations.filter((v) => restorableIds.has(v.id)).length;
               const ruleCommands: PaletteCommand[] = invariants.map((inv) => {
                 const on = invEnabled.has(inv.id);
@@ -572,10 +590,82 @@ export function App() {
                 return {
                   id: `rule-${inv.id}`,
                   label: `${on ? 'Retract' : 'Declare'} rule: ${inv.label}`,
-                  hint: !on ? 'not declared' : v ? `${v.objectIds.length} to fix` : 'met',
+                  hint: !on ? 'not declared' : v ? violationTodo(v) : 'met',
                   group: 'Rules',
                   run: () => st().toggleInvariant(inv.id),
                 };
+              });
+              // Authored rules too: retract one by name (re-declare by typing it again).
+              for (const r of st().customRules) {
+                const v = invViolations.find((x) => x.id === r.id);
+                ruleCommands.push({
+                  id: `rule-custom-${r.id}`,
+                  label: `Retract rule: ${customRuleLabel(r)}`,
+                  hint: v ? violationTodo(v) : 'met',
+                  group: 'Rules',
+                  run: () => st().removeCustomRule(r.id),
+                });
+              }
+              // What the design already does, offered as rules to lock in.
+              for (const sg of suggestRules(
+                st().ruleContext(),
+                { invariants: invEnabled, customRules: st().customRules },
+              )) {
+                ruleCommands.push({
+                  id: `rule-suggest-${sg.key}`,
+                  label: `Lock in rule: ${sg.label}`,
+                  hint: 'true now',
+                  group: 'Rules',
+                  run: () =>
+                    sg.builtInId
+                      ? st().toggleInvariant(sg.builtInId)
+                      : st().addCustomRule(sg.rule!.kind, sg.rule!.fromRole, sg.rule!.target, sg.rule!.min),
+                });
+              }
+              // Quick fixes for broken connectivity / isolation rules, by name — and all
+              // of them at once when there's more than one.
+              const fixes = ruleFixes(
+                st().ruleContext(),
+                { invariants: invEnabled, customRules: st().customRules },
+                { max: 20 },
+              );
+              if (fixes.length > 1) {
+                ruleCommands.push({
+                  id: 'rule-fix-all',
+                  label: `Apply all ${fixes.length} rule fixes`,
+                  hint: 'one undo step',
+                  group: 'Rules',
+                  run: () => st().applyAllRuleFixes(),
+                });
+              }
+              for (const f of fixes) {
+                ruleCommands.push({
+                  id: `rule-fix-${f.key}`,
+                  label:
+                    f.kind === 'connect'
+                      ? `Connect ${f.deviceName} to ${f.targetName}`
+                      : `Cut ${f.linkLabel}`,
+                  hint: `fixes ${f.ruleLabel}`,
+                  group: 'Rules',
+                  run: () => st().applyRuleFix(f),
+                });
+              }
+              // Carry rules between designs.
+              if (invEnabled.size + st().customRules.length > 0) {
+                ruleCommands.push({
+                  id: 'rules-save',
+                  label: 'Save rules as file…',
+                  hint: '.nexrules',
+                  group: 'Rules',
+                  run: saveRulesFile,
+                });
+              }
+              ruleCommands.push({
+                id: 'rules-load',
+                label: 'Load rules from a file…',
+                hint: '.nexrules or .nexmap',
+                group: 'Rules',
+                run: loadRulesFile,
               });
               if (brokenRestorable > 0) {
                 ruleCommands.unshift({
@@ -761,8 +851,71 @@ export function App() {
               ];
               const cmds: PaletteCommand[] =
                 mode === 'rack' ? generic : [...generic.slice(0, 5), ...networkOnly, ...generic.slice(5)];
+              // Declare a rule by saying it: when the query reads as a custom rule
+              // ("every camera lives in CCTV"), offer it first, with a live preview of
+              // what it would flag. An identical rule already declared is shown, disabled.
+              const ruleIntent = (q: string): PaletteCommand[] => {
+                const roles = [
+                  ...new Set(st().devicesAll().map((d) => d.role?.trim()).filter((r): r is string => !!r)),
+                ];
+                const subnetRefs = st()
+                  .subnetsAll()
+                  .flatMap((sn) => (sn.name?.trim() ? [sn.name.trim(), sn.cidr] : [sn.cidr]));
+                const r = parseRuleIntent(q, roles, subnetRefs);
+                if (!r) return [];
+                const spec: CustomRuleSpec = {
+                  id: 'intent-preview',
+                  kind: r.kind,
+                  fromRole: r.fromRole,
+                  toRole: r.kind === 'placement' || r.kind === 'count' || r.kind === 'naming' ? '' : r.target,
+                  min: r.min,
+                  ...(r.kind === 'placement' ? { subnet: r.target } : {}),
+                  ...(r.kind === 'naming' ? { pattern: r.target } : {}),
+                };
+                const same = (a: string | undefined, b: string | undefined) =>
+                  (a ?? '').trim().toLowerCase() === (b ?? '').trim().toLowerCase();
+                const exists = st().customRules.some(
+                  (x) =>
+                    x.kind === spec.kind &&
+                    same(x.fromRole, spec.fromRole) &&
+                    same(x.toRole, spec.toRole) &&
+                    same(x.subnet, spec.subnet) &&
+                    (x.pattern ?? '') === (spec.pattern ?? '') &&
+                    x.min === spec.min,
+                );
+                const preview = evaluateCustomRules([spec], st().ruleContext())[0];
+                // Same rule, new number ("at least 3 firewalls" over "at least 2"):
+                // offer to change the declared one instead of adding a second.
+                const restated = !exists && hasMinimum(spec.kind) ? findRestated(st().customRules, spec) : undefined;
+                return [
+                  {
+                    id: 'intent-rule',
+                    label: restated
+                      ? `Change rule: ${customRuleLabel(spec)} (was ${restated.min})`
+                      : `Declare rule: ${customRuleLabel(spec)}`,
+                    // "met now" only when the rule actually checks something: a role no
+                    // device carries yet is vacuously met, so say so (catches typos too).
+                    // A count rule isn't vacuous with none present — it's short.
+                    hint: exists
+                      ? 'already declared'
+                      : r.kind === 'naming'
+                        ? countedDevices(r.fromRole, st().devicesAll()).length === 0
+                          ? `no “${r.fromRole}” devices yet`
+                          : preview
+                            ? `${violationTodo(preview)}${namingCanGenerate(r.target) ? ' — Restore can rename' : ''}`
+                            : 'met now'
+                      : r.kind !== 'count' && !roles.some((x) => x.toLowerCase() === r.fromRole.toLowerCase())
+                        ? `no “${r.fromRole}” devices yet`
+                        : preview
+                          ? violationTodo(preview)
+                          : 'met now',
+                    disabled: exists,
+                    run: () => st().addCustomRule(r.kind, r.fromRole, r.target, r.min),
+                  },
+                ];
+              };
               return (
-                <CommandPalette commands={cmds} onClose={() => setShowPalette(false)} />
+                <CommandPalette commands={cmds} intent={ruleIntent} onClose={() => setShowPalette(false)} />
               );
             })()}
           <input

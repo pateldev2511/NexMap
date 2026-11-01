@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useProjectStore } from '@/store/projectStore';
+import { useProjectStore, type ProjectStore } from '@/store/projectStore';
 import { loadDocument } from '@/model/migrate';
 import { SCHEMA_VERSION } from '@/model/schema';
 import {
@@ -43,6 +43,24 @@ const AUTOSAVE_DEBOUNCE_MS = 800;
 function fmtTime(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+/** The slice of store state the saved document is built from. */
+type DocumentState = Pick<ProjectStore, 'rev' | 'invariantsEnabled' | 'customRules' | 'rulesEnforced'>;
+
+/**
+ * Whether a store update changed what gets saved. The diagram bumps `rev`; the
+ * declared rules (schema v6/v7) live beside the model and change without a rev
+ * bump, so they're compared by reference too — otherwise declaring a rule wasn't
+ * autosaved until the next diagram edit.
+ */
+export function documentChanged(s: DocumentState, prev: DocumentState): boolean {
+  return (
+    s.rev !== prev.rev ||
+    s.invariantsEnabled !== prev.invariantsEnabled ||
+    s.customRules !== prev.customRules ||
+    s.rulesEnforced !== prev.rulesEnforced
+  );
 }
 
 /**
@@ -97,10 +115,10 @@ export function usePersistence(): Persistence {
     };
   }, []);
 
-  // Debounced autosave on any model change, gated on the writer role.
+  // Debounced autosave on any document change, gated on the writer role.
   useEffect(() => {
     const unsub = useProjectStore.subscribe((s, prev) => {
-      if (s.rev === prev.rev) return;
+      if (!documentChanged(s, prev)) return;
       if (readOnlyRef.current) return;
       if (timerRef.current) clearTimeout(timerRef.current);
       setStatus('saving');

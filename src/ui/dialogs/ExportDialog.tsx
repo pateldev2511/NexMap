@@ -19,6 +19,7 @@ const FORMATS: { key: ExportFormat; label: string }[] = [
   { key: 'zip', label: 'ZIP package' },
   { key: 'csv-inventory', label: 'CSV · Inventory' },
   { key: 'csv-links', label: 'CSV · Links' },
+  { key: 'csv-rules', label: 'CSV · Rules' },
 ];
 
 type Scope = 'all' | 'selection';
@@ -48,6 +49,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const isImage = format === 'png' || format === 'jpg' || format === 'svg';
   const supportsTransparent = format === 'png' || format === 'svg';
   const isCsv = format.startsWith('csv');
+  const declaredRules = useProjectStore((s) => s.invariantsEnabled.size + s.customRules.length);
 
   // Scope the scene to the selection if requested.
   const scene = useMemo(() => {
@@ -111,11 +113,21 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         health: highlightHealth ? store().health : null,
         modern,
       };
+      const doc = store().getDocument();
       const outcome = await runExport(
         {
           ...scene,
           projectName,
-          docJson: JSON.stringify(store().getDocument(), null, 2),
+          docJson: JSON.stringify(doc, null, 2),
+          // Rules describe the whole design, so they're never cut to the export scope.
+          rules: {
+            devices: doc.devices,
+            links: doc.links,
+            subnets: doc.subnets,
+            rackCables: doc.rackCables,
+            invariants: doc.invariants,
+            customRules: doc.customRules,
+          },
         },
         opts,
       );
@@ -141,6 +153,8 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const countSummary = `${counts.devices} device${counts.devices === 1 ? '' : 's'}, ${counts.links} link${
     counts.links === 1 ? '' : 's'
   }, ${counts.objects} object${counts.objects === 1 ? '' : 's'}`;
+  const rulesNote =
+    declaredRules === 0 ? '' : ` + ${declaredRules} declared rule${declaredRules === 1 ? '' : 's'}, checked on the whole design`;
 
   return (
     <div className={styles.overlay} onClick={onClose}>
@@ -197,11 +211,16 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
           )}
 
           <div className={styles.mapGrid}>
-            <label>Scope</label>
-            <select value={scope} onChange={(e) => setScope(e.target.value as Scope)}>
-              <option value="all">Entire diagram</option>
-              <option value="selection">Selection only ({selection.size})</option>
-            </select>
+            {/* Rules describe the whole design, so the rules report has no scope. */}
+            {format !== 'csv-rules' && (
+              <>
+                <label>Scope</label>
+                <select value={scope} onChange={(e) => setScope(e.target.value as Scope)}>
+                  <option value="all">Entire diagram</option>
+                  <option value="selection">Selection only ({selection.size})</option>
+                </select>
+              </>
+            )}
 
             {isRaster && (
               <>
@@ -309,13 +328,17 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
           </div>
 
           <div className={styles.summary}>
-            {isCsv
+            {format === 'csv-rules'
+              ? declaredRules === 0
+                ? 'No rules declared yet — declare some in the Rules tab (or type one in ⌘K).'
+                : `Exports ${declaredRules} declared rule${declaredRules === 1 ? '' : 's'} with status and, for each broken one, every offender and why — checked against the whole design.`
+              : isCsv
               ? `Exports the ${format === 'csv-inventory' ? 'device inventory' : 'link list'} as CSV.`
               : format === 'zip'
-                ? `Bundles .nexmap + PNG + SVG + PDF + CSVs + validation report (${countSummary}).`
+                ? `Bundles .nexmap + PNG + SVG + PDF + CSVs + validation report (${countSummary}${rulesNote}).`
                 : format === 'html'
-                  ? `A single self-contained .html file with a pan/zoom viewer — opens in any browser, 100% local, no NexMap needed (${countSummary}).`
-                  : `Exports ${scope === 'selection' ? 'the selection' : 'the whole diagram'} (${countSummary}).`}
+                  ? `A single self-contained .html file with a pan/zoom viewer — opens in any browser, 100% local, no NexMap needed (${countSummary}${rulesNote}).`
+                  : `Exports ${scope === 'selection' ? 'the selection' : 'the whole diagram'} (${countSummary}${format === 'pdf' ? rulesNote : ''}).`}
           </div>
           {msg && (
             <div

@@ -86,9 +86,16 @@ describe('custom rule persistence + evaluation (schema v7)', () => {
   it('removes an authored rule', () => {
     s().addCustomRule('connectivity', 'access', 'core', 2);
     const id = s().customRules[0]!.id;
+    const before = s().customRules;
     s().removeCustomRule(id);
     expect(s().customRules).toHaveLength(0);
     expect(s().invariantViolations.some((v) => v.id === id)).toBe(false);
+    expect(s().flash).toBe('Retracted Every “access” connects to ≥2 “core”.');
+    // An unknown id is a no-op: no state churn, so autosave doesn't fire for nothing.
+    const after = s().customRules;
+    s().removeCustomRule('nope');
+    expect(s().customRules).toBe(after);
+    expect(before).not.toBe(after);
   });
 
   it('authors an isolation rule and flags a guest that can reach internal', () => {
@@ -103,5 +110,27 @@ describe('custom rule persistence + evaluation (schema v7)', () => {
     expect(rule.kind).toBe('isolation');
     const viol = s().invariantViolations.find((v) => v.id === rule.id);
     expect(viol?.objectIds).toEqual([guest]);
+  });
+
+  it('round-trips a placement rule with its subnet ref', () => {
+    const cam = s().addDeviceAt('server', 0, 0);
+    s().updateDevice(cam, {}, { role: 'camera', managementIp: '10.10.0.5' });
+    s().addCustomRule('placement', 'camera', 'CCTV', 0);
+    const doc = s().getDocument();
+    expect(doc.customRules[0]).toMatchObject({ kind: 'placement', fromRole: 'camera', subnet: 'CCTV' });
+
+    s().newProject(NOW);
+    s().loadDoc(doc);
+    expect(s().customRules[0]).toMatchObject({ kind: 'placement', subnet: 'CCTV' });
+    expect(s().invariantViolations.some((v) => v.id === doc.customRules[0]!.id)).toBe(true);
+  });
+});
+
+describe('declaring from a suggestion', () => {
+  it('a built-in says what it did, like an authored rule', () => {
+    s().toggleInvariant('every-device-named');
+    expect(s().flash).toBe('Declared Every device is named — met.');
+    s().toggleInvariant('every-device-named');
+    expect(s().flash).toBe('Retracted Every device is named.');
   });
 });

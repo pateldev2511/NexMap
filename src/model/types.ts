@@ -432,17 +432,30 @@ export interface ProjectMeta {
  * and can round-trip future content without dropping it.
  */
 /**
- * An authored, parameterized invariant (schema v7). Two kinds:
+ * An authored, parameterized invariant (schema v7). Kinds:
  *  - 'connectivity': "every `fromRole` connects to at least `min` `toRole`"
  *  - 'isolation':    "no `fromRole` may reach any `toRole`" (path-level, `min` unused)
+ *  - 'placement':    "every `fromRole` lives in `subnet`"
+ *  - 'count':        "at least `min` `fromRole`" (role or device type)
  * The shape leaves room for more; an unknown kind is preserved and skipped.
  */
 export interface CustomRuleSpec {
   id: string;
-  kind: 'connectivity' | 'isolation';
+  kind: 'connectivity' | 'isolation' | 'placement' | 'count' | 'naming';
+  /** The role the rule is about (count, naming: matches a device's role OR its type). */
   fromRole: string;
+  /** Target role (connectivity/isolation); unused ('') for placement and count. */
   toRole: string;
+  /** Connectivity: minimum neighbors. Count: minimum devices. Else 0. */
   min: number;
+  /** Placement only: the subnet a role must live in, by name or exact CIDR. */
+  subnet?: string;
+  /**
+   * Naming only: the name template, e.g. "FW-#" — `#` stands for a number, `*` for
+   * anything; the rest is literal. Additive (no schema bump): older builds keep the
+   * rule and report it "not checked".
+   */
+  pattern?: string;
 }
 
 export interface NexMapDocument {
@@ -467,6 +480,12 @@ export interface NexMapDocument {
   invariants: string[];
   /** Authored, parameterized rules (role-based connectivity, schema v7). */
   customRules: CustomRuleSpec[];
+  /**
+   * Ids of declared rules (built-in or authored) the design enforces: an edit that
+   * would break one is taken back. Optional and additive — no schema bump; a build
+   * that predates it opens the file fine and simply doesn't enforce.
+   */
+  enforcedRules?: string[];
   // Forward-declared, unused yet — preserved verbatim on load→save.
   interfaces: unknown[];
   assets: unknown[];

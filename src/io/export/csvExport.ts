@@ -9,6 +9,7 @@
 import { stripPrefix } from '@/lib/ipcidr';
 import { defaultDeviceName } from '@/model/schema';
 import type { Device, Link } from '@/model/types';
+import { buildRulesReport, type RulesReportInput } from './rulesReport';
 
 const FORMULA_TRIGGER = /^[=+\-@\t\r]/;
 
@@ -70,4 +71,22 @@ export function exportLinksCsv(links: Link[], devices: Device[]): string {
     l.bandwidth ?? '',
   ]);
   return toCsv(headers, rows);
+}
+
+/** What the rules report reads: the WHOLE design plus its declared rules. */
+export type { RulesReportInput } from './rulesReport';
+
+/**
+ * The declared rules as an audit trail: one row per rule that's met, one row per
+ * offender of a broken rule (with the same reason the Rules panel shows). See
+ * rulesReport.ts for why it's always the whole design.
+ */
+export function exportRulesCsv(input: RulesReportInput): string {
+  const rows: string[][] = [];
+  for (const e of buildRulesReport(input)) {
+    if (e.status === 'not checked') rows.push([e.label, e.kind, e.status, '', 'rule from a newer NexMap']);
+    else if (e.offenders.length === 0) rows.push([e.label, e.kind, e.status, '', e.detail ?? '']);
+    else for (const o of e.offenders) rows.push([e.label, e.kind, e.status, o.name, o.reason]);
+  }
+  return toCsv(['rule', 'kind', 'status', 'object', 'reason'], rows);
 }

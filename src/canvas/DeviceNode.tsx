@@ -5,6 +5,7 @@ import { defaultDeviceName } from '@/model/schema';
 import { deviceVisual, LOD_GLYPH_ONLY, LOD_LABEL_HIDE } from './deviceVisuals';
 import { FlatIcon } from './FlatIcon';
 import { NodeInfoCard } from './NodeInfoCard';
+import { HoldsBadge, RuleBadge } from './RuleBadge';
 import { clampIconScale, DEFAULT_LABEL_HEIGHT } from './nodeCard';
 import styles from './Canvas.module.css';
 
@@ -17,6 +18,12 @@ interface DeviceNodeProps {
   validTarget?: boolean;
   /** Carries an error/critical validation issue → badge. */
   hasIssue?: boolean;
+  /** Breaks a declared rule (Conductor invariant) → rule badge. */
+  breaksRule?: boolean;
+  /** How many met declared rules can't lose this device (0/absent → none). */
+  holdsUp?: number;
+  /** At least one rule it holds up is enforced (a delete would be blocked). */
+  holdsEnforced?: boolean;
   onPointerDown: (e: React.PointerEvent, id: string) => void;
   /** Double-click the on-top name label → edit it inline. */
   onLabelDoubleClick?: (e: React.MouseEvent, id: string) => void;
@@ -35,6 +42,9 @@ function DeviceNodeImpl({
   scale,
   validTarget,
   hasIssue,
+  breaksRule,
+  holdsUp = 0,
+  holdsEnforced = false,
   onPointerDown,
   onLabelDoubleClick,
   onActivate,
@@ -47,7 +57,9 @@ function DeviceNodeImpl({
   const typeName = defaultDeviceName(device.type);
   const ariaLabel = `${device.name || typeName}, ${typeName}${
     device.managementIp ? `, ${device.managementIp}` : ''
-  }${device.locked ? ', locked' : ''}`;
+  }${device.locked ? ', locked' : ''}${breaksRule ? ', breaks a declared rule' : ''}${
+    holdsUp > 0 ? (holdsEnforced ? ', holds up an enforced rule' : ', holds up a declared rule') : ''
+  }`;
   const showLabel = scale >= LOD_LABEL_HIDE;
   const detailed = scale >= LOD_GLYPH_ONLY;
   const { width, height } = device;
@@ -128,6 +140,8 @@ function DeviceNodeImpl({
           <circle className={styles.issueDot} cx={0} cy={3.4} r={1} />
         </g>
       )}
+      {breaksRule && detailed && <RuleBadge x={cx - iconSize * 0.46} y={cy - iconSize * 0.45} />}
+      {holdsUp > 0 && detailed && <HoldsBadge x={cx - iconSize * 0.46} y={cy + iconSize * 0.3} count={holdsUp} enforced={holdsEnforced} />}
     </g>
   );
 }

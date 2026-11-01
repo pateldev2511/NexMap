@@ -88,11 +88,31 @@ import {
   evaluateCustomRules,
   createConnectivityRule,
   createIsolationRule,
+  createPlacementRule,
+  createCountRule,
+  customRuleLabel,
+  planPlacement,
+  placementRef,
+  clampRuleMin,
+  nextStandardName,
+  createNamingRule,
+  namingCanGenerate,
+  planNaming,
+  findRestated,
+  hasMinimum,
+  planPortRetag,
+  placementTargetName,
+  placementTargetProblem,
+  planCount,
+  violationTodo,
   BUILT_IN_INVARIANTS,
   type Invariant,
+  type InvariantContext,
   type InvariantViolation,
 } from '@/model/invariants';
 import { planPruneDanglingLinks, planClearDanglingIfaces } from '@/model/integrity';
+import { mergeRules, readRulesFile, sanitizeStoredRule } from '@/io/rulesFile';
+import { blockedMessage, brokeMessage, evaluateDeclared, ruleFixes, type RuleFix, ruleSupports as computeRuleSupports, type RuleSupport } from '@/model/ruleStakes';
 import { buildTemplateObjects } from '@/model/templates';
 import { History } from './history';
 import {
@@ -116,6 +136,8 @@ import {
   UpdateDeviceCommand,
   UpdateLayerCommand,
   UpdateLinkCommand,
+  SetRulesCommand,
+  type RulesState,
   UpdateObjectCommand,
   UpdateRackCableCommand,
   UpdateRackCommand,
@@ -167,8 +189,28 @@ let pendingCamera: { tx: number; ty: number; scale: number } | null = null;
  * can fall back to content-bounds placement. Module-scoped to avoid render loops.
  */
 let currentViewCenter: { x: number; y: number } | null = null;
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+/** Whether a history step changed the rules (see commitRules) — by command, not label text. */
+const isRulesStep = (command: Command | null) => command instanceof SetRulesCommand;
 /** A saved view applies temporary visibility without mutating saved layer state. */
 let activeViewHiddenLayers: Set<string> | null = null;
+/**
+ * Rule guard: the declared rules' last settled verdict — which were broken, under
+ * which declared set, as of which history step. A later settled step that breaks a
+ * rule that held says so (see runValidation). Transient, never saved.
+ */
+let ruleGuard: {
+  key: string;
+  epoch: number;
+  seq: number;
+  broken: Set<string>;
+  /** Where to revert to if the next settled step breaks an enforced rule. */
+  cp: { pushes: number; travels: number };
+} | null = null;
+/** Last "held up by" result and the design facts it was computed from (see supportsFor). */
+let supportsCache: { key: string; value: Map<string, RuleSupport[]> } | null = null;
+/** The guard's own banner, so it can retract itself once its rules hold again. */
+let guardFlash: { text: string; ids: string[] } | null = null;
 
 function deviceBox(d: Device): Box {
   return { x: d.x, y: d.y, width: d.width, height: d.height };
@@ -293,8 +335,22 @@ export interface ProjectStore {
   invariantsEnabled: Set<string>;
   /** Authored role-based rules (schema v7). */
   customRules: CustomRuleSpec[];
+  /** Declared rule ids whose breaking edits Conductor takes back (see toggleEnforced). */
+  rulesEnforced: Set<string>;
+  /**
+   * Bumped by every validation pass. Rule readers in the UI (Inspector stakes, the
+   * Rules tab's why-list and suggestions) key on this, not `rev`, so dragging or
+   * typing doesn't re-evaluate every rule per frame — they refresh when validation
+   * does (debounced 300 ms after an edit, immediately after a rule change).
+   */
+  ruleCheckRev: number;
   /** Declared invariants not currently met (built-in + custom), with validation. */
   invariantViolations: InvariantViolation[];
+  /**
+   * For each met declared rule, the devices it can't lose (deleting any one breaks
+   * it) — the Rules tab's "held up by" and the canvas's load-bearing mark.
+   */
+  ruleSupports: Map<string, RuleSupport[]>;
   canUndo: boolean;
   canRedo: boolean;
   dirty: boolean;
@@ -639,7 +695,8 @@ export interface ProjectStore {
    * assign-gateways). Returns how many changes the fixer made; the rule then
    * re-evaluates and shows whatever it couldn't safely close (e.g. an external
    * SPOF, or a subnet with no in-range router). Undoable in one step via the
-   * underlying action. No-op (0) for an unknown or non-restorable id.
+   * underlying action. An authored placement rule's id re-addresses its offenders
+   * into the rule's subnet. No-op (0) for an unknown or non-restorable id.
    */
   restoreInvariant(id: string): number;
   /**
@@ -659,6 +716,48 @@ export interface ProjectStore {
   addCustomRule(kind: CustomRuleSpec['kind'], fromRole: string, toRole: string, min: number): void;
   /** Remove an authored rule by id. */
   removeCustomRule(id: string): void;
+  /**
+   * Enforce a declared rule (or stop): while enforced, a settled edit that would
+   * break it is taken back with a banner saying why. Undo/redo only warn. One undo
+   * step; saved with the design.
+   */
+  toggleEnforced(id: string): void;
+  /**
+   * Apply one quick fix (see ruleStakes.ruleFixes): draw the suggested link, or cut
+   * the suggested one through the same delete as the Delete key (locks, enforced
+   * rules and the edit guard all apply). One undo step; says what it did, or nothing
+   * if a lock or an enforced rule kept it from happening (that path says why).
+   */
+  applyRuleFix(fix: RuleFix): void;
+  /**
+   * Apply every quick fix there is, re-planning after each (so later fixes see
+   * earlier ones), as ONE undo step. Skips links a lock protects. Returns how many
+   * fixes it made; says what it did.
+   */
+  applyAllRuleFixes(): number;
+  /**
+   * Which of `ids` a delete would actually remove: locked devices/objects, and
+   * anything on a locked layer, are protected. deleteSelection and the Inspector's
+   * delete preview both use this, so they agree.
+   */
+  deletable(ids: readonly string[]): { deviceIds: string[]; linkIds: string[]; objectIds: string[] };
+  /**
+   * What the declared rules are checked against: devices, links, subnets and rack
+   * patch cables (port evidence for VLAN rules). Every rule reader uses this so the
+   * Rules tab, Inspector, ⌘K and exports can't disagree.
+   */
+  ruleContext(): InvariantContext;
+  /**
+   * Merge rules read from a rules file or a `.nexmap` design (see io/rulesFile) into
+   * this design's, as one undoable step; says what was added, changed and already
+   * declared, or why nothing could be read. `fileName` is only for the message.
+   */
+  importRules(text: string, fileName: string): void;
+  /**
+   * Raise or lower a count/connectivity rule's minimum in place (≥1). Saying a rule
+   * again with a new number ("at least 3 firewalls") lands here via addCustomRule.
+   */
+  setCustomRuleMin(id: string, min: number): void;
   /** On-demand redundancy: count edge-disjoint paths between two devices (opt-in, not debounced). */
   checkRedundancy(sourceId: string, targetId: string): number;
   loadDoc(doc: NexMapDocument): void;
@@ -875,13 +974,359 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     });
   }
 
+  /**
+   * Change the declared rules as one undoable step (⌘Z / ⌘⇧Z cover rules like any
+   * edit). `label` names the step: "Declare …", "Retract …", "Change …".
+   */
+  function commitRules(label: string, after: Partial<RulesState>): void {
+    const before: RulesState = {
+      invariants: get().invariantsEnabled,
+      customRules: get().customRules,
+      enforced: get().rulesEnforced,
+    };
+    const invariants = after.invariants ?? before.invariants;
+    const customRules = after.customRules ?? before.customRules;
+    // A pending edit is judged under the rules it was made under, not the new ones.
+    history.commitCoalesceBoundary();
+    judgePendingEdit();
+    // A rule that's no longer declared can't stay enforced.
+    const declared = new Set([...invariants, ...customRules.map((r) => r.id)]);
+    const enforced = new Set([...(after.enforced ?? before.enforced)].filter((id) => declared.has(id)));
+    const next: RulesState = { invariants, customRules, enforced };
+    history.commitCoalesceBoundary();
+    history.dispatch(new SetRulesCommand(label, before, next, writeRules), model);
+    history.commitCoalesceBoundary();
+    set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo });
+  }
+
+  /** The rules command's writer: rules change the document (schema v6+) → dirty. */
+  function writeRules(r: RulesState): void {
+    set({
+      invariantsEnabled: new Set(r.invariants),
+      customRules: [...r.customRules],
+      rulesEnforced: new Set(r.enforced),
+      dirty: true,
+    });
+  }
+
+  /** Identity of the declared rule set (rules are immutable; add/remove changes ids). */
+  function declaredKey(): string {
+    // min is part of a rule's identity here: tightening one is a rule change, not an edit.
+    return `${[...get().invariantsEnabled].sort().join(',')}|${get()
+      .customRules.map((r) => `${r.id}:${r.min}`)
+      .join(',')}`;
+  }
+
+  /**
+   * Rule guard. Once an edit settles (not mid-typing), compare the declared rules'
+   * verdict with the last settled one: rules that held and now don't get a banner
+   * naming the step ("That edit broke …. ⌘Z puts it back."). Declaring or retracting
+   * a rule, or opening another document, re-baselines silently. A guard banner whose
+   * rules all hold again (the typo got finished) clears itself.
+   */
+  function guardRules(violations: readonly InvariantViolation[]): {
+    flash?: string | null;
+    /** Take back everything since this checkpoint: it broke an enforced rule. */
+    revert?: { pushes: number; travels: number };
+    /** If it can't be taken back (history moved another way): warn instead, and re-baseline. */
+    unblocked?: { flash: string; ids: string[] };
+  } {
+    const broken = new Set(violations.map((v) => v.id));
+    if (!history.editOpen) {
+      const key = declaredKey();
+      const prev = ruleGuard;
+      ruleGuard = { key, epoch: history.epoch, seq: history.seq, broken, cp: history.checkpoint() };
+      if (prev && prev.key === key && prev.epoch === history.epoch && prev.seq !== history.seq) {
+        const broke = violations.filter((v) => !prev.broken.has(v.id));
+        // Enforced rules hold the line against forward edits; an undo/redo is time
+        // travel the user asked for, so it only warns.
+        const enforced = broke.filter((v) => get().rulesEnforced.has(v.id));
+        if (enforced.length > 0 && history.last.kind === 'do') {
+          // The new baseline (already set) only stands if the revert fails; runValidation
+          // puts `prev` back once the edit is taken back.
+          return {
+            flash: blockedMessage(enforced, history.last),
+            revert: prev.cp,
+            unblocked: { flash: brokeMessage(broke, history.last), ids: broke.map((v) => v.id) },
+          };
+        }
+        if (broke.length > 0) {
+          const text = brokeMessage(broke, history.last);
+          guardFlash = { text, ids: broke.map((v) => v.id) };
+          return { flash: text };
+        }
+      }
+    }
+    if (guardFlash && get().flash === guardFlash.text && guardFlash.ids.every((id) => !broken.has(id))) {
+      guardFlash = null;
+      return { flash: null };
+    }
+    return {};
+  }
+
+  /**
+   * A new device's name: the declared naming standard's next free name ("FW-4") when
+   * one covers it, else `fallback()`. `extra` reserves names for devices being made
+   * in the same step (Harden's twins).
+   */
+  function nameForNew(
+    device: { type: string; role?: string },
+    fallback: () => string,
+    extra: readonly string[] = [],
+  ): string {
+    const taken = [...[...model.devices.values()].map((d) => d.name), ...extra];
+    return nextStandardName(get().customRules, device, taken) ?? fallback();
+  }
+
+  /**
+   * "Held up by", cached. It's quadratic for the SPOF rule and depends only on the
+   * rules, each device's type, role and name, and which devices are linked — not on
+   * positions or addresses — so dragging or re-addressing reuses the last answer.
+   */
+  function supportsFor(ctx: InvariantContext, brokenNow: ReadonlySet<string>): Map<string, RuleSupport[]> {
+    const rules = { invariants: get().invariantsEnabled, customRules: get().customRules };
+    if (rules.invariants.size === 0 && rules.customRules.length === 0) return new Map();
+    const key = [
+      [...rules.invariants].sort().join(','),
+      rules.customRules.map((r) => `${r.id}:${r.kind}:${r.fromRole}:${r.toRole}:${r.min}`).join(','),
+      ctx.devices.map((d) => `${d.id}:${d.type}:${d.role ?? ''}:${d.name}`).join('|'),
+      ctx.links.map((l) => `${l.sourceId}>${l.targetId}`).join('|'),
+    ].join('#');
+    if (supportsCache?.key === key) return supportsCache.value;
+    const value = computeRuleSupports(ctx, rules, brokenNow);
+    supportsCache = { key, value };
+    return value;
+  }
+
+  /** The design the rules are checked against (see `ruleContext`). */
+  function ruleCtx(): InvariantContext {
+    return {
+      devices: [...model.devices.values()],
+      links: [...model.links.values()],
+      subnets: [...model.subnets.values()],
+      rackCables: [...model.rackCables.values()],
+    };
+  }
+
+  /**
+   * Judge an edit the rule guard hasn't seen yet (still inside the 300 ms
+   * validation debounce) before anything re-baselines it — otherwise an edit that
+   * broke an enforced rule could slip into the baseline unchecked.
+   */
+  function judgePendingEdit(): void {
+    if (ruleGuard && ruleGuard.epoch === history.epoch && ruleGuard.seq !== history.seq && !history.editOpen) {
+      get().runValidation();
+    }
+  }
+
+  /** Settle the guard on the current design without a banner (before a step that reports itself). */
+  function settleRuleGuard(): void {
+    judgePendingEdit();
+    const ctx = ruleCtx();
+    const declared = { invariants: get().invariantsEnabled, customRules: get().customRules };
+    ruleGuard = {
+      key: declaredKey(),
+      epoch: history.epoch,
+      seq: history.seq,
+      broken: new Set(evaluateDeclared(ctx, declared).map((v) => v.id)),
+      cp: history.checkpoint(),
+    };
+  }
+
+  /**
+   * Restore an authored placement rule: move each offending device's management IP
+   * into the rule's subnet, in one undoable step. 0 for any other id. Refuses (and
+   * says why) when the subnet ref names no subnet or several.
+   */
+  function restorePlacement(id: string): number {
+    const rule = get().customRules.find((r) => r.id === id);
+    if (rule?.kind !== 'placement') return 0;
+    const devices = [...model.devices.values()];
+    const subnets = [...model.subnets.values()];
+    const plan = planPlacement(rule, devices, subnets);
+    // A VLAN rule's layer-2 half: ports that put the role on another VLAN get retagged.
+    const retags = planPortRetag(rule, devices, [...model.links.values()], [...model.rackCables.values()]);
+    const label = customRuleLabel(rule);
+    const problem = plan.unplaced.length > 0 ? (placementTargetProblem(rule.subnet, subnets) ?? 'the subnet is full') : null;
+    if (plan.assignments.length === 0 && retags.length === 0) {
+      if (problem) set({ flash: `Couldn’t restore ${label} — ${problem}.` });
+      return 0;
+    }
+    const cmds: Command[] = plan.assignments.map((a) => {
+      const d = model.devices.get(a.deviceId)!;
+      return new UpdateDeviceCommand(a.deviceId, { managementIp: d.managementIp }, { managementIp: a.ip });
+    });
+    // Interface tags are a device's `interfaces` array: one update per device.
+    const ifaceTags = new Map<string, Map<string, number>>();
+    for (const { tag, vlan } of retags) {
+      if ('linkId' in tag.on) {
+        const l = model.links.get(tag.on.linkId)!;
+        cmds.push(new UpdateLinkCommand(l.id, { vlan: l.vlan }, { vlan: String(vlan) }));
+      } else {
+        const m = ifaceTags.get(tag.on.deviceId) ?? ifaceTags.set(tag.on.deviceId, new Map()).get(tag.on.deviceId)!;
+        m.set(tag.on.ifaceId, vlan);
+      }
+    }
+    for (const [deviceId, tags] of ifaceTags) {
+      const existing = model.devices.get(deviceId)!.interfaces ?? [];
+      const next = existing.map((i) => (tags.has(i.id) ? { ...i, vlan: tags.get(i.id)! } : i));
+      cmds.push(new UpdateDeviceCommand(deviceId, { interfaces: existing }, { interfaces: next }));
+    }
+    history.dispatch(transaction(`Restore: ${label}`, cmds), model);
+    history.commitCoalesceBoundary();
+    const n = plan.assignments.length;
+    const parts: string[] = [];
+    if (n > 0) {
+      parts.push(`Re-addressed ${n} device${n === 1 ? '' : 's'} into ${placementTargetName(rule.subnet, subnets)}`);
+    }
+    if (retags.length > 0) {
+      const where = retags.slice(0, 2).map((r) => r.tag.where).join(', ');
+      const more = retags.length > 2 ? ` and ${retags.length - 2} more` : '';
+      const verb = n > 0 ? 'retagged' : 'Retagged';
+      parts.push(`${verb} ${retags.length} port${retags.length === 1 ? '' : 's'} to VLAN ${retags[0]!.vlan} (${where}${more})`);
+    }
+    const left = plan.unplaced.length;
+    const leftNote = left > 0 ? ` — ${left} not re-addressed: ${problem}` : '';
+    set({
+      rev: get().rev + 1,
+      canUndo: history.canUndo,
+      canRedo: history.canRedo,
+      dirty: true,
+      flash: `${parts.join(' and ')}${leftNote}.`,
+    });
+    get().runValidation();
+    return n + retags.length;
+  }
+
+  /**
+   * Build twins (not yet dispatched): each a copy of `src` — type and role, never the
+   * IP (a duplicate address is a real error) — placed beside it, nudged clear of the
+   * others in this batch, and wired to `neighborIds`. Shared by the SPOF fix and the
+   * count-rule restore so both make the same kind of backup.
+   */
+  function buildTwins(steps: readonly { src: Device; neighborIds: readonly string[] }[]): {
+    cmds: Command[];
+    twins: Device[];
+  } {
+    const layer = firstLayerId();
+    const { width: W, height: H } = DEFAULT_DEVICE_SIZE;
+    const GAP = W + 40;
+    const cmds: Command[] = [];
+    const twins: Device[] = [];
+    // Twins placed this batch aren't in the model yet, so freeSpotNear (which only
+    // avoids committed devices) can't see them — track their boxes and nudge clear.
+    const reserved: { x: number; y: number }[] = [];
+    for (const { src, neighborIds } of steps) {
+      let c = freeSpotNear({ x: src.x + src.width / 2 + 128, y: src.y + src.height / 2 });
+      for (
+        let guard = 0;
+        guard < 48 && reserved.some((r) => Math.abs(r.x - c.x) < GAP && Math.abs(r.y - c.y) < H + 24);
+        guard++
+      ) {
+        c = freeSpotNear({ x: c.x + GAP, y: c.y });
+      }
+      reserved.push(c);
+      const name = nameForNew(
+        src,
+        () =>
+          uniqueName(src.name.trim() || defaultDeviceName(src.type), [
+            ...[...model.devices.values()].map((d) => d.name),
+            ...twins.map((t) => t.name),
+          ]),
+        twins.map((t) => t.name),
+      );
+      const twin = createDevice(src.type, c.x - W / 2, c.y - H / 2, layer, {
+        name,
+        ...(src.role ? { role: src.role } : {}),
+      });
+      twins.push(twin);
+      cmds.push(new AddDeviceCommand(twin));
+      for (const nId of neighborIds) cmds.push(new AddLinkCommand(createLink(twin.id, nId, layer)));
+    }
+    return { cmds, twins };
+  }
+
+  /**
+   * Restore an authored naming rule: rename each offender to the template with the
+   * next free number, in reading order (see planNaming), in one undoable step. 0 for
+   * any other id. Refuses, and says why, when the template has no single `#` to fill
+   * in (a `*`, or several `#`).
+   */
+  function restoreNaming(id: string): number {
+    const rule = get().customRules.find((r) => r.id === id);
+    if (rule?.kind !== 'naming') return 0;
+    const label = customRuleLabel(rule);
+    if (!namingCanGenerate(rule.pattern)) {
+      set({ flash: `Couldn’t restore ${label} — Conductor can only fill in one “#” (no “*”), so rename these yourself.` });
+      return 0;
+    }
+    const plan = planNaming(rule, [...model.devices.values()]);
+    if (plan.renames.length === 0) return 0;
+    const cmds: Command[] = plan.renames.map((r) => {
+      const d = model.devices.get(r.deviceId)!;
+      return new UpdateDeviceCommand(r.deviceId, { name: d.name }, { name: r.name });
+    });
+    history.dispatch(transaction(`Restore: ${label}`, cmds), model);
+    history.commitCoalesceBoundary();
+    const n = plan.renames.length;
+    const shown = plan.renames.slice(0, 3).map((r) => r.name).join(', ');
+    set({
+      rev: get().rev + 1,
+      canUndo: history.canUndo,
+      canRedo: history.canRedo,
+      dirty: true,
+      flash: `Renamed ${n} device${n === 1 ? '' : 's'} to fit “${rule.pattern}”: ${shown}${n > 3 ? ', …' : ''}.`,
+    });
+    get().runValidation();
+    return n;
+  }
+
+  /**
+   * Restore an authored count rule: copy the best-connected counted device until
+   * there are enough (see planCount), in one undoable step. 0 for any other id.
+   * Refuses, and says why, when there's nothing to copy yet.
+   */
+  function restoreCount(id: string): number {
+    const rule = get().customRules.find((r) => r.id === id);
+    if (rule?.kind !== 'count') return 0;
+    const plan = planCount(rule, [...model.devices.values()], [...model.links.values()]);
+    const label = customRuleLabel(rule);
+    const src = plan.sourceId ? model.devices.get(plan.sourceId) : undefined;
+    if (!src) {
+      if (plan.copies > 0) {
+        set({ flash: `Couldn’t restore ${label} — there’s no “${rule.fromRole.trim()}” to copy yet. Add one first.` });
+      }
+      return 0;
+    }
+    const { cmds, twins } = buildTwins(
+      Array.from({ length: plan.copies }, () => ({ src, neighborIds: plan.neighborIds })),
+    );
+    history.dispatch(transaction(`Restore: ${label}`, cmds), model);
+    for (const t of twins) index.insert(t.id, deviceBox(t));
+    history.commitCoalesceBoundary();
+    const n = twins.length;
+    set({
+      rev: get().rev + 1,
+      selection: new Set(twins.map((t) => t.id)),
+      canUndo: history.canUndo,
+      canRedo: history.canRedo,
+      dirty: true,
+      flash: `Added ${n} “${rule.fromRole.trim()}” (cop${n === 1 ? 'y' : 'ies'} of ${src.name.trim() || src.type}, wired the same; unaddressed).`,
+    });
+    get().runValidation();
+    return n;
+  }
+
   return {
     rev: 0,
     selection: new Set<string>(),
     issues: [],
     invariantsEnabled: new Set<string>(),
     customRules: [],
+    rulesEnforced: new Set<string>(),
+    ruleCheckRev: 0,
     invariantViolations: [],
+    ruleSupports: new Map(),
     health: {
       issues: [],
       score: 100,
@@ -911,7 +1356,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     },
 
     addDeviceAt(type, x, y) {
-      const device = createDevice(type, x, y, firstLayerId());
+      const standard = nextStandardName(get().customRules, { type }, [...model.devices.values()].map((d) => d.name));
+      const device = createDevice(type, x, y, firstLayerId(), standard ? { name: standard } : {});
       history.dispatch(new AddDeviceCommand(device), model);
       index.insert(device.id, deviceBox(device));
       history.commitCoalesceBoundary();
@@ -1341,7 +1787,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     },
 
     addDeviceAndConnect(type, x, y, sourceId) {
-      const device = createDevice(type, x, y, firstLayerId());
+      const standard = nextStandardName(get().customRules, { type }, [...model.devices.values()].map((d) => d.name));
+      const device = createDevice(type, x, y, firstLayerId(), standard ? { name: standard } : {});
       const cmds: Command[] = [new AddDeviceCommand(device)];
       if (model.devices.has(sourceId)) {
         cmds.push(new AddLinkCommand(createLink(sourceId, device.id, firstLayerId())));
@@ -1373,9 +1820,11 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       const { width: W, height: H } = DEFAULT_DEVICE_SIZE;
       // Auto-number duplicates so repeated summons read "Server", "Server 2", …
       // instead of a stack of identical labels.
-      const name = uniqueName(
-        defaultDeviceName(type),
-        [...model.devices.values()].map((d) => d.name),
+      const name = nameForNew({ type }, () =>
+        uniqueName(
+          defaultDeviceName(type),
+          [...model.devices.values()].map((d) => d.name),
+        ),
       );
       const device = createDevice(type, center.x - W / 2, center.y - H / 2, layer, { name });
       const cmds: Command[] = [new AddDeviceCommand(device)];
@@ -1580,9 +2029,11 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         const { width: W, height: H } = DEFAULT_DEVICE_SIZE;
         const seed = { x: edge.x + edge.width / 2, y: edge.y + edge.height / 2 - 160 };
         const center = freeSpotNear(seed);
-        const name = uniqueName(
-          defaultDeviceName('isp'),
-          [...model.devices.values()].map((dv) => dv.name),
+        const name = nameForNew({ type: 'isp' }, () =>
+          uniqueName(
+            defaultDeviceName('isp'),
+            [...model.devices.values()].map((dv) => dv.name),
+          ),
         );
         createdIsp = createDevice('isp', center.x - W / 2, center.y - H / 2, layer, { name });
         ispId = createdIsp.id;
@@ -1625,10 +2076,13 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       const center = freeSpotNear(seed);
       // An unnamed source would give a twin named "" or " 2" — base it on the type.
       const base = src.name.trim() || defaultDeviceName(src.type);
-      const name = uniqueName(base, [...model.devices.values()].map((d) => d.name));
+      const name = nameForNew(src, () => uniqueName(base, [...model.devices.values()].map((d) => d.name)));
       // Clone type only — NOT the management IP (a duplicate address would be a real
       // error); the twin lands unaddressed, ready for auto-address.
-      const twin = createDevice(src.type, center.x - W / 2, center.y - H / 2, layer, { name });
+      const twin = createDevice(src.type, center.x - W / 2, center.y - H / 2, layer, {
+        name,
+        ...(src.role ? { role: src.role } : {}), // a twin of a "core" is a core
+      });
       const cmds: Command[] = [new AddDeviceCommand(twin)];
       for (const nId of plan.neighborIds) {
         cmds.push(new AddLinkCommand(createLink(twin.id, nId, layer)));
@@ -1678,39 +2132,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         });
         return 0;
       }
-      const layer = firstLayerId();
-      const { width: W, height: H } = DEFAULT_DEVICE_SIZE;
-      const GAP = W + 40;
-      const cmds: Command[] = [];
-      const twins: Device[] = [];
-      // Twins placed this batch aren't in the model yet, so freeSpotNear (which only
-      // avoids committed devices) can't see them — track their boxes and nudge clear.
-      const reserved: { x: number; y: number }[] = [];
-      for (const step of plan.steps) {
-        const src = model.devices.get(step.deviceId);
-        if (!src) continue;
-        let c = freeSpotNear({ x: src.x + src.width / 2 + 128, y: src.y + src.height / 2 });
-        for (
-          let guard = 0;
-          guard < 48 &&
-          reserved.some((r) => Math.abs(r.x - c.x) < GAP && Math.abs(r.y - c.y) < H + 24);
-          guard++
-        ) {
-          c = freeSpotNear({ x: c.x + GAP, y: c.y });
-        }
-        reserved.push(c);
-        const name = uniqueName(src.name.trim() || defaultDeviceName(src.type), [
-          ...[...model.devices.values()].map((d) => d.name),
-          ...twins.map((t) => t.name),
-        ]);
-        // Clone type only — NOT the IP (a duplicate address would be a real error).
-        const twin = createDevice(src.type, c.x - W / 2, c.y - H / 2, layer, { name });
-        twins.push(twin);
-        cmds.push(new AddDeviceCommand(twin));
-        for (const nId of step.neighborIds) {
-          cmds.push(new AddLinkCommand(createLink(twin.id, nId, layer)));
-        }
-      }
+      const { cmds, twins } = buildTwins(
+        plan.steps.flatMap((step) => {
+          const src = model.devices.get(step.deviceId);
+          return src ? [{ src, neighborIds: step.neighborIds }] : [];
+        }),
+      );
       if (twins.length === 0) return 0;
       history.dispatch(transaction('Harden the design', cmds), model);
       for (const t of twins) index.insert(t.id, deviceBox(t));
@@ -2773,6 +3200,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       // Close the current coalescing window so the next field edit is its own undo.
       history.commitCoalesceBoundary();
       set({ canUndo: history.canUndo, canRedo: history.canRedo });
+      // The edit just settled: if the rule guard hasn't judged it yet, do it now
+      // (no rev change follows a blur, so the debounced pass won't).
+      if (ruleGuard && ruleGuard.seq !== history.seq) get().runValidation();
     },
 
     markSaved() {
@@ -2782,25 +3212,18 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     deleteSelection() {
       const ids = [...get().selection];
       if (ids.length === 0) return;
-      // Locked devices/objects, and anything on a locked layer, are protected.
-      const layerLocked = (lid: string) => model.layers.get(lid)?.locked ?? false;
-      const deviceIds = ids.filter((id) => {
-        const d = model.devices.get(id);
-        return d && !d.locked && !layerLocked(d.layerId);
-      });
-      const linkIds = ids.filter((id) => {
-        const l = model.links.get(id);
-        return l && !layerLocked(l.layerId);
-      });
-      const objectIds = ids.filter((id) => {
-        const o = model.objects.get(id);
-        return o && !o.locked && !layerLocked(o.layerId);
-      });
+      const { deviceIds, linkIds, objectIds } = get().deletable(ids);
       if (deviceIds.length === 0 && linkIds.length === 0 && objectIds.length === 0)
         return;
+      // Say at once which declared rules this delete breaks (only ones that held
+      // before), so losing the second firewall isn't silent: settle the rule guard on
+      // the design as it stands, delete, and let validation report the difference.
+      history.commitCoalesceBoundary();
+      settleRuleGuard();
       commit(new DeleteCommand(deviceIds, linkIds, objectIds), { reindex: true });
       history.commitCoalesceBoundary();
       set({ selection: new Set() });
+      get().runValidation();
     },
 
     select(ids, additive = false) {
@@ -2884,6 +3307,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     undo() {
       if (history.undo(model)) {
+        // Rule steps change nothing on the canvas — say what came back or went.
+        if (isRulesStep(history.last.command)) set({ flash: `Undid: ${history.last.label}.` });
         rebuildIndex();
         activeViewHiddenLayers = null;
         const activeLayerId = model.layers.has(get().activeLayerId)
@@ -2903,6 +3328,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     redo() {
       if (history.redo(model)) {
+        if (isRulesStep(history.last.command)) set({ flash: `Redid: ${history.last.label}.` });
         rebuildIndex();
         activeViewHiddenLayers = null;
         const activeLayerId = model.layers.has(get().activeLayerId)
@@ -2935,12 +3361,44 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       const health = analyzeHealth(devices, links);
       // Declared rules re-evaluate on the same pass (built-in + authored custom);
       // disabled/empty ones cost nothing.
-      const invCtx = { devices, links, subnets: [...model.subnets.values()] };
+      const invCtx = { ...ruleCtx(), devices, links };
       const invariantViolations = [
         ...evaluateInvariants(invCtx, get().invariantsEnabled),
         ...evaluateCustomRules(get().customRules, invCtx),
       ];
-      set({ issues, health, invariantViolations });
+      // What each met rule depends on: one remove-and-re-check per device, so only
+      // when something is declared — and only when something it depends on changed.
+      const ruleSupports = supportsFor(invCtx, new Set(invariantViolations.map((v) => v.id)));
+      const baseline = ruleGuard;
+      const guard = guardRules(invariantViolations);
+      if (guard.revert && history.revertTo(guard.revert, model)) {
+        // Take the edit back, re-check the design as it now stands, then say why.
+        ruleGuard = baseline;
+        rebuildIndex();
+        set({
+          rev: get().rev + 1,
+          canUndo: history.canUndo,
+          canRedo: history.canRedo,
+          selection: new Set([...get().selection].filter((id) => model.devices.has(id) || model.links.has(id) || model.objects.has(id))),
+        });
+        get().runValidation();
+        set({ flash: guard.flash ?? null });
+        return;
+      }
+      if (guard.unblocked) guardFlash = { text: guard.unblocked.flash, ids: guard.unblocked.ids };
+      set({
+        issues,
+        health,
+        invariantViolations,
+        ruleSupports,
+        ruleCheckRev: get().ruleCheckRev + 1,
+        // No guard verdict → leave whatever banner is up alone.
+        ...(guard.revert
+          ? { flash: guard.unblocked?.flash ?? null }
+          : guard.flash !== undefined
+            ? { flash: guard.flash }
+            : {}),
+      });
     },
 
     invariantsAll() {
@@ -2951,10 +3409,13 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       const next = new Set(get().invariantsEnabled);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      const label = BUILT_IN_INVARIANTS.find((i) => i.id === id)?.label ?? id;
       // Declaring/retracting a rule changes the document (schema v6) → dirty, so
-      // autosave and Save persist it.
-      set({ invariantsEnabled: next, dirty: true });
+      // autosave and Save persist it; and it's one undo step.
+      commitRules(`${next.has(id) ? 'Declare' : 'Retract'} ${label}`, { invariants: next });
       get().runValidation();
+      const v = get().invariantViolations.find((x) => x.id === id);
+      set({ flash: next.has(id) ? `Declared ${label} — ${v ? violationTodo(v) : 'met'}.` : `Retracted ${label}.` });
     },
 
     restoreInvariant(id) {
@@ -2970,23 +3431,39 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         case 'every-subnet-has-gateway':
           return get().assignGateways();
         default:
-          return 0;
+          return restorePlacement(id) || restoreCount(id) || restoreNaming(id);
       }
     },
 
     restoreAllInvariants() {
-      // Dependency order: harden mints twins; then name + address them (incl. the
-      // new twins); then adopt gateways once devices are addressed. Re-reading the
-      // violations each step lets a rule a twin just broke get mended in this pass.
+      // Dependency order: count rules and harden mint copies; then name them; then placement rules
+      // home their roles into the declared subnets (an unaddressed device lands
+      // there directly); then address whatever's left; then adopt gateways once
+      // devices are addressed. Re-reading the violations each step lets a rule a
+      // twin just broke get mended in this pass.
+      const ofKind = (kind: string) =>
+        get()
+          .customRules.filter((r) => r.kind === kind)
+          .map((r) => r.id);
+      const placements = ofKind('placement');
+      const counts = ofKind('count');
+      const namings = ofKind('naming');
+      const declared = (id: string) =>
+        get().invariantsEnabled.has(id) || placements.includes(id) || counts.includes(id) || namings.includes(id);
       const ORDER = [
+        ...counts,
         'no-single-point-of-failure',
+        // Naming standards before the generic "every device is named", so a fresh twin
+        // gets "FW-3", not "Firewall 2".
+        ...namings,
         'every-device-named',
+        ...placements,
         'every-device-addressed',
         'every-subnet-has-gateway',
       ];
       let total = 0;
       for (const id of ORDER) {
-        if (!get().invariantsEnabled.has(id)) continue;
+        if (!declared(id)) continue;
         if (get().invariantViolations.some((v) => v.id === id)) {
           total += get().restoreInvariant(id);
         }
@@ -3003,16 +3480,215 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     addCustomRule(kind, fromRole, toRole, min) {
       const from = fromRole.trim();
       const to = toRole.trim();
+      // Saying a declared rule again with a new number changes it, not stacks a twin.
+      const restated = hasMinimum(kind)
+        ? findRestated(get().customRules, { kind, fromRole: from, toRole: kind === 'count' ? '' : to })
+        : undefined;
+      if (restated) {
+        get().setCustomRuleMin(restated.id, min);
+        return;
+      }
+      // The same placement, isolation or naming rule twice is one rule.
+      const twin = hasMinimum(kind)
+        ? undefined
+        : findRestated(get().customRules, {
+            kind,
+            fromRole: from,
+            toRole: kind === 'isolation' ? to : '',
+            ...(kind === 'placement' ? { subnet: placementRef(to) } : {}),
+            ...(kind === 'naming' ? { pattern: to } : {}),
+          });
+      if (twin) {
+        set({ flash: `${customRuleLabel(twin)} is already declared.` });
+        return;
+      }
       const rule =
         kind === 'isolation'
           ? createIsolationRule(from, to)
-          : createConnectivityRule(from, to, Math.max(1, Math.round(min)));
-      set({ customRules: [...get().customRules, rule], dirty: true });
+          : kind === 'placement'
+            ? createPlacementRule(from, to) // `toRole` carries the subnet ref
+            : kind === 'naming'
+              ? createNamingRule(from, to) // `toRole` carries the name template
+            : kind === 'count'
+              ? createCountRule(from, clampRuleMin('count', min))
+              : createConnectivityRule(from, to, clampRuleMin('connectivity', min));
+      commitRules(`Declare ${customRuleLabel(rule)}`, { customRules: [...get().customRules, rule] });
       get().runValidation();
+      const v = get().invariantViolations.find((x) => x.id === rule.id);
+      set({ flash: `Declared ${customRuleLabel(rule)} — ${v ? violationTodo(v) : 'met'}.` });
+    },
+
+    importRules(text, fileName) {
+      const read = readRulesFile(text);
+      if (!read.ok) {
+        set({ flash: `Couldn’t load rules from “${fileName}” — ${read.error}.` });
+        return;
+      }
+      const m = mergeRules(
+        { invariants: get().invariantsEnabled, customRules: get().customRules, enforced: get().rulesEnforced },
+        read,
+      );
+      const total = m.added + m.changed + m.same;
+      if (m.added + m.changed + m.newlyEnforced === 0) {
+        set({ flash: `All ${plural(total, 'rule')} in “${fileName}” are already declared.` });
+        return;
+      }
+      commitRules(`Import rules from “${fileName}”`, m.next);
+      get().runValidation();
+      const parts = [
+        m.added > 0 ? `${m.added} added` : '',
+        m.changed > 0 ? `${m.changed} changed to the file’s minimum` : '',
+        m.same > 0 ? `${m.same} already declared` : '',
+        m.newlyEnforced > 0 ? `${m.newlyEnforced} now enforced` : '',
+      ].filter(Boolean);
+      const unmet = get().invariantViolations.length;
+      set({
+        flash: `Loaded ${plural(total, 'rule')} from “${fileName}”: ${parts.join(', ')} — ${
+          unmet === 0 ? 'all met' : `${unmet} not met`
+        }.`,
+      });
+    },
+
+    setCustomRuleMin(id, min) {
+      const old = get().customRules.find((r) => r.id === id);
+      const next = clampRuleMin(old?.kind ?? 'count', min);
+      if (!old || !hasMinimum(old.kind) || !Number.isFinite(next)) return;
+      if (next === old.min) {
+        set({ flash: `${customRuleLabel(old)} is already declared.` });
+        return;
+      }
+      const rule = { ...old, min: next };
+      commitRules(`Change ${customRuleLabel(old)} to ${next}`, {
+        customRules: get().customRules.map((r) => (r.id === id ? rule : r)),
+      });
+      get().runValidation();
+      const v = get().invariantViolations.find((x) => x.id === id);
+      set({
+        flash: `${next > old.min ? 'Tightened' : 'Loosened'} to ${customRuleLabel(rule)} (was ${old.min}) — ${
+          v ? violationTodo(v) : 'met'
+        }.`,
+      });
+    },
+
+    ruleContext() {
+      return ruleCtx();
+    },
+
+    applyRuleFix(fix) {
+      if (fix.kind === 'connect') {
+        const id = get().connect(fix.deviceId, fix.targetId);
+        get().runValidation();
+        if (id && model.links.has(id)) {
+          set({ flash: `Connected ${fix.deviceName} to ${fix.targetName}. ⌘Z takes the link back.` });
+        }
+        return;
+      }
+      if (!model.links.has(fix.linkId)) return;
+      get().select([fix.linkId]);
+      get().deleteSelection();
+      get().runValidation();
+      if (!model.links.has(fix.linkId)) set({ flash: `Cut ${fix.linkLabel}. ⌘Z puts the link back.` });
+    },
+
+    applyAllRuleFixes() {
+      const rules = { invariants: get().invariantsEnabled, customRules: get().customRules };
+      let ctx = ruleCtx();
+      const cmds: Command[] = [];
+      const done: string[] = [];
+      const skip = new Set<string>();
+      // Plan on a working copy: one fix, re-plan, the next — so the second uplink is
+      // chosen knowing about the first. Bounded so a fix that doesn't stick can't spin.
+      for (let i = 0; i < 100; i++) {
+        // Close breaches before wiring: cuts first, then uplinks. Only plan as far as
+        // the next usable fix (skipped ones are why `max` grows), then re-plan.
+        const next = (kind: RuleFix['kind']) =>
+          ruleFixes(ctx, rules, { kind, max: skip.size + 1 }).find((f) => !skip.has(f.key));
+        const fix = next('cut') ?? next('connect');
+        if (!fix) break;
+        if (fix.kind === 'connect') {
+          const link = createLink(fix.deviceId, fix.targetId, firstLayerId());
+          cmds.push(new AddLinkCommand(link));
+          ctx = { ...ctx, links: [...ctx.links, link] };
+          done.push(`connected ${fix.deviceName} to ${fix.targetName}`);
+        } else {
+          if (get().deletable([fix.linkId]).linkIds.length === 0) {
+            skip.add(fix.key); // on a locked layer: leave it, say nothing changed
+            continue;
+          }
+          cmds.push(new DeleteCommand([], [fix.linkId], []));
+          ctx = { ...ctx, links: ctx.links.filter((l) => l.id !== fix.linkId) };
+          done.push(`cut ${fix.linkLabel}`);
+        }
+      }
+      if (cmds.length === 0) {
+        set({ flash: 'No quick fixes to apply — the broken rules need a choice Conductor won’t make for you.' });
+        return 0;
+      }
+      history.commitCoalesceBoundary();
+      settleRuleGuard();
+      history.dispatch(transaction(`Apply ${cmds.length} rule fix${cmds.length === 1 ? '' : 'es'}`, cmds), model);
+      history.commitCoalesceBoundary();
+      rebuildIndex();
+      set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
+      get().runValidation();
+      // An enforced rule may have taken it back (that banner stands); otherwise say what changed.
+      if (history.last.kind === 'do') {
+        const shown = done.slice(0, 3).join('; ');
+        const more = done.length > 3 ? `; and ${done.length - 3} more` : '';
+        const left = get().invariantViolations.length;
+        set({
+          flash: `Applied ${cmds.length} fix${cmds.length === 1 ? '' : 'es'}: ${shown}${more}. ${
+            left === 0 ? 'Every declared rule is met.' : `${left} rule${left === 1 ? '' : 's'} still not met.`
+          } ⌘Z undoes all of it.`,
+        });
+      }
+      return cmds.length;
+    },
+
+    deletable(ids) {
+      // Locked devices/objects, and anything on a locked layer, are protected.
+      const layerLocked = (lid: string) => model.layers.get(lid)?.locked ?? false;
+      return {
+        deviceIds: ids.filter((id) => {
+          const d = model.devices.get(id);
+          return !!d && !d.locked && !layerLocked(d.layerId);
+        }),
+        linkIds: ids.filter((id) => {
+          const l = model.links.get(id);
+          return !!l && !layerLocked(l.layerId);
+        }),
+        objectIds: ids.filter((id) => {
+          const o = model.objects.get(id);
+          return !!o && !o.locked && !layerLocked(o.layerId);
+        }),
+      };
+    },
+
+    toggleEnforced(id) {
+      const builtIn = BUILT_IN_INVARIANTS.find((i) => i.id === id);
+      const custom = get().customRules.find((r) => r.id === id);
+      const declared = builtIn ? get().invariantsEnabled.has(id) : !!custom;
+      if (!declared) return;
+      const label = builtIn ? builtIn.label : customRuleLabel(custom!);
+      const next = new Set(get().rulesEnforced);
+      const on = !next.has(id);
+      if (on) next.add(id);
+      else next.delete(id);
+      commitRules(`${on ? 'Enforce' : 'Stop enforcing'} ${label}`, { enforced: next });
+      get().runValidation();
+      const broken = get().invariantViolations.some((v) => v.id === id);
+      set({
+        flash: on
+          ? `Enforcing ${label}: an edit that would break it gets taken back${broken ? ' (it’s broken now; it holds the line once it’s met)' : ''}.`
+          : `No longer enforcing ${label}: edits that break it are flagged, not taken back.`,
+      });
     },
 
     removeCustomRule(id) {
-      set({ customRules: get().customRules.filter((r) => r.id !== id), dirty: true });
+      const rule = get().customRules.find((r) => r.id === id);
+      if (!rule) return;
+      commitRules(`Retract ${customRuleLabel(rule)}`, { customRules: get().customRules.filter((r) => r.id !== id) });
+      set({ flash: `Retracted ${customRuleLabel(rule)}.` });
       get().runValidation();
     },
 
@@ -3026,6 +3702,15 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     },
 
     loadDoc(doc) {
+      // Read the rules first, defensively: they're hand-editable JSON, and a bad
+      // field must not throw after the model below has already been swapped in.
+      const strings = (x: unknown): string[] =>
+        Array.isArray(x) ? x.filter((v): v is string => typeof v === 'string') : [];
+      const loadedInvariants = new Set<string>(strings(doc.invariants));
+      const loadedCustomRules = (Array.isArray(doc.customRules) ? doc.customRules : [])
+        .map(sanitizeStoredRule)
+        .filter((r): r is CustomRuleSpec => r !== null);
+      const loadedEnforced = strings(doc.enforcedRules);
       model = fromDocument(doc);
       baseDoc = doc;
       history.clear();
@@ -3033,8 +3718,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       resetIssueIds();
       activeViewHiddenLayers = null;
       pendingCamera = null;
-      const loadedInvariants = new Set<string>(doc.invariants ?? []);
-      const loadedCustomRules = doc.customRules ?? [];
       set({
         rev: get().rev + 1,
         selection: new Set(),
@@ -3049,12 +3732,11 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         // design's own and evaluate them against the just-loaded model.
         invariantsEnabled: loadedInvariants,
         customRules: loadedCustomRules,
+        rulesEnforced: new Set(
+          loadedEnforced.filter((id) => loadedInvariants.has(id) || loadedCustomRules.some((r) => r.id === id)),
+        ),
         invariantViolations: (() => {
-          const ctx = {
-            devices: [...model.devices.values()],
-            links: [...model.links.values()],
-            subnets: [...model.subnets.values()],
-          };
+          const ctx = ruleCtx();
           return [
             ...evaluateInvariants(ctx, loadedInvariants),
             ...evaluateCustomRules(loadedCustomRules, ctx),
@@ -3078,6 +3760,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         ...toDocument(model, baseDoc),
         invariants: [...get().invariantsEnabled],
         customRules: get().customRules,
+        enforcedRules: [...get().rulesEnforced],
       };
     },
 

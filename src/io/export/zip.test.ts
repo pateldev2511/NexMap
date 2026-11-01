@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validationReport } from './zip';
+import { packageTextFiles, validationReport } from './zip';
 import {
   createDevice,
   createLink,
@@ -52,5 +52,31 @@ describe('validationReport', () => {
     expect(report).toContain('VLAN');
     expect(report).toContain('overlap');
     expect(report).toContain('outside rack capacity');
+  });
+});
+
+describe('packageTextFiles', () => {
+  const base = {
+    devices: [],
+    links: [],
+    objects: [],
+    vlans: [],
+    subnets: [],
+    racks: [],
+    projectName: 'P',
+    docJson: '{}',
+  };
+  const rules = (invariants: string[]) => ({ devices: [], links: [], subnets: [], invariants, customRules: [] });
+
+  it('bundles the editable file, CSVs and validation report', () => {
+    expect(Object.keys(packageTextFiles(base)).sort()).toEqual(
+      ['inventory.csv', 'links.csv', 'project.nexmap', 'validation-report.txt'].sort(),
+    );
+  });
+
+  it('adds rules.csv only when the design declares rules', () => {
+    expect(packageTextFiles({ ...base, rules: rules([]) })['rules.csv']).toBeUndefined();
+    const out = packageTextFiles({ ...base, rules: rules(['every-device-named']) });
+    expect(out['rules.csv']).toBe('rule,kind,status,object,reason\r\nEvery device is named,built-in,met,,');
   });
 });

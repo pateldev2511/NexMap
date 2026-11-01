@@ -1,9 +1,22 @@
-import { useState } from 'react';
+import { Fragment, memo, useState } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import { getPanelOpen, setPanelOpen } from '@/lib/prefs';
 import { NexIcon } from '@/ui/icons/NexIcon';
-import { defaultDeviceName } from '@/model/schema';
-import { customRuleLabel } from '@/model/invariants';
+import { DEVICE_TYPES, defaultDeviceName } from '@/model/schema';
+import { suggestRules } from '@/model/ruleSuggest';
+import { ruleFixes, ruleFixLabel, type RuleSupport } from '@/model/ruleStakes';
+import { loadRulesFile, saveRulesFile } from '@/ui/rulesFileActions';
+import {
+  countedDevices,
+  customRuleLabel,
+  explainOffenders,
+  hasMinimum,
+  isCustomRuleRestorable,
+  resolveSubnetRef,
+  violationTodo,
+  vlanRefId,
+} from '@/model/invariants';
+import type { CustomRuleSpec } from '@/model/types';
 import { severityRank } from '@/model/validate';
 import type { Device, Link, Rack, Subnet, ValidationIssue, Vlan } from '@/model/types';
 import { stripPrefix } from '@/lib/ipcidr';
@@ -579,7 +592,7 @@ function ValidationList({ issues }: { issues: ValidationIssue[] }) {
 /**
  * Rules — declarative invariants. Each row is a goal the design can declare; once
  * declared, Conductor shows live whether it's met and, if not, lets you jump to
- * the offending objects. (Restoring a violated rule with a fixer is slice 2.)
+ * the offending objects, and restore it when Conductor has a safe remedy.
  */
 function RulesPanel() {
   useProjectStore((s) => s.rev); // re-evaluate on model change
@@ -588,19 +601,46 @@ function RulesPanel() {
   const toggleInvariant = useProjectStore((s) => s.toggleInvariant);
   const restoreInvariant = useProjectStore((s) => s.restoreInvariant);
   const restoreAllInvariants = useProjectStore((s) => s.restoreAllInvariants);
+  const customRules = useProjectStore((s) => s.customRules);
   const select = useProjectStore((s) => s.select);
   const invariants = useProjectStore.getState().invariantsAll();
   const byId = new Map(violations.map((v) => [v.id, v]));
-  const declared = enabled.size;
-  const restorableById = new Map(invariants.map((inv) => [inv.id, inv.restorable]));
+  const declared = enabled.size + customRules.length;
+  const restorableById = new Map<string, boolean>([
+    ...invariants.map((inv) => [inv.id, inv.restorable] as const),
+    ...customRules.map((r) => [r.id, isCustomRuleRestorable(r)] as const),
+  ]);
   const restorableViolations = violations.filter((v) => restorableById.get(v.id)).length;
+  // For each met rule, the devices it can't lose (computed with validation).
+  const supports = useProjectStore((s) => s.ruleSupports);
+  // Which broken rules have their "why" list open. Opening also selects the offenders.
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (id: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   return (
     <div className={styles.rules}>
-      <div className={styles.rulesIntro}>
-        {declared === 0
-          ? 'Declare a rule and Conductor holds your design to it as you edit.'
-          : `${declared} rule${declared === 1 ? '' : 's'} declared · ${violations.length} not met`}
+      <div className={`${styles.rulesIntro} ${styles.rulesIntroRow}`}>
+        <span>
+          {declared === 0
+            ? 'Declare a rule and Conductor holds your design to it as you edit.'
+            : `${declared} rule${declared === 1 ? '' : 's'} declared · ${violations.length} not met`}
+        </span>
+        <span className={styles.rulesFileActions}>
+          {declared > 0 && (
+            <button onClick={saveRulesFile} title="Download these rules to load into another design">
+              Save rules as file
+            </button>
+          )}
+          <button onClick={loadRulesFile} title="Take the rules from a .nexrules file or another .nexmap design">
+            Load rules…
+          </button>
+        </span>
       </div>
       {restorableViolations > 1 && (
         <div className={styles.restoreAllRow}>
@@ -616,66 +656,165 @@ function RulesPanel() {
           </button>
         </div>
       )}
+      <QuickFixAllRow />
       {invariants.map((inv) => {
         const on = enabled.has(inv.id);
         const v = byId.get(inv.id);
+        const expanded = !!v && on && open.has(inv.id);
+        const held = on && !v ? supports.get(inv.id) : undefined;
         return (
-          <div key={inv.id} className={styles.ruleRow}>
-            <label className={styles.ruleToggle} title={on ? 'Retract this rule' : 'Declare this rule'}>
-              <input type="checkbox" checked={on} onChange={() => toggleInvariant(inv.id)} />
-            </label>
-            <div className={styles.ruleText}>
-              <div className={styles.ruleLabel}>{inv.label}</div>
-              <div className={styles.ruleDesc}>{inv.description}</div>
-            </div>
-            <div className={styles.ruleStatus}>
-              {!on ? (
-                <span className={styles.ruleOff}>not declared</span>
-              ) : v ? (
-                <div className={styles.ruleActions}>
-                  <button
-                    className={styles.ruleCount}
-                    onClick={() => select(v.objectIds)}
-                    title="Select the objects that break this rule"
-                  >
-                    {v.objectIds.length} to fix
-                  </button>
-                  {inv.restorable && (
+          <Fragment key={inv.id}>
+            <div className={styles.ruleRow}>
+              <label className={styles.ruleToggle} title={on ? 'Retract this rule' : 'Declare this rule'}>
+                <input type="checkbox" checked={on} onChange={() => toggleInvariant(inv.id)} />
+              </label>
+              <div className={styles.ruleText}>
+                <div className={styles.ruleLabel}>{inv.label}</div>
+                <div className={styles.ruleDesc}>{inv.description}</div>
+              </div>
+              {on && <EnforceToggle id={inv.id} label={inv.label} />}
+              <div className={styles.ruleStatus}>
+                {!on ? (
+                  <span className={styles.ruleOff}>not declared</span>
+                ) : v ? (
+                  <div className={styles.ruleActions}>
                     <button
-                      className={styles.ruleRestore}
-                      onClick={() => restoreInvariant(inv.id)}
-                      title="Let Conductor restore this rule"
+                      className={styles.ruleCount}
+                      onClick={() => {
+                        select(v.objectIds);
+                        toggle(inv.id);
+                      }}
+                      aria-expanded={expanded}
+                      title="Select the objects that break this rule, and show why"
                     >
-                      Restore
+                      {violationTodo(v)} {expanded ? '▾' : '▸'}
                     </button>
-                  )}
-                </div>
-              ) : (
-                <span className={styles.ruleMet}>
-                  <NexIcon name="check" /> met
-                </span>
-              )}
+                    {inv.restorable && (
+                      <button
+                        className={styles.ruleRestore}
+                        onClick={() => restoreInvariant(inv.id)}
+                        title="Let Conductor restore this rule"
+                      >
+                        Restore
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <MetStatus supports={held} open={open.has(inv.id)} onToggle={() => toggle(inv.id)} />
+                )}
+              </div>
             </div>
-          </div>
+            {expanded && <OffenderList violationId={inv.id} objectIds={v.objectIds} />}
+            {held && open.has(inv.id) && <SupportList supports={held} />}
+          </Fragment>
         );
       })}
-      <CustomRulesSection />
+      <CustomRulesSection open={open} toggle={toggle} supports={supports} />
+      <SuggestedRules />
     </div>
   );
 }
 
 /**
- * Custom rules — authored, role-based connectivity invariants. List the design's
- * rules with live status and a remove control, and offer a compact author row:
- * "Every <role> connects to ≥<n> <role>". Not auto-restorable (Conductor won't
- * invent which links to draw), so these flag only.
+ * Suggested rules — what the design already does, offered as rules to lock in
+ * (see ruleSuggest.ts). Each is true right now; declaring it makes Conductor hold
+ * the line when a later edit would break it. Hidden when there's nothing to offer.
  */
-function CustomRulesSection() {
+/**
+ * "N quick fixes … Apply all": links to draw and links to cut for the rules Restore
+ * won't touch. Its own component so the planning runs once per validation pass,
+ * not on every drag frame the Rules panel re-renders for.
+ */
+const QuickFixAllRow = memo(function QuickFixAllRow() {
+  useProjectStore((s) => s.ruleCheckRev);
+  const violations = useProjectStore((s) => s.invariantViolations);
+  const enabled = useProjectStore((s) => s.invariantsEnabled);
+  const customRules = useProjectStore((s) => s.customRules);
+  const applyAllRuleFixes = useProjectStore((s) => s.applyAllRuleFixes);
+  const quickFixes =
+    violations.length > 0
+      ? ruleFixes(useProjectStore.getState().ruleContext(), { invariants: enabled, customRules }, { max: 50 }).length
+      : 0;
+  if (quickFixes < 2) return null;
+  return (
+    <div className={styles.restoreAllRow}>
+      <span className={styles.restoreAllLabel}>{quickFixes} quick fixes for broken connectivity and isolation rules</span>
+      <button
+        className={styles.ruleRestore}
+        onClick={() => applyAllRuleFixes()}
+        title="Draw and cut every suggested link, as one undo step"
+      >
+        Apply all
+      </button>
+    </div>
+  );
+});
+
+const SuggestedRules = memo(function SuggestedRules() {
+  // Re-suggest after each validation pass — not per drag frame or keystroke (`rev`).
+  useProjectStore((s) => s.ruleCheckRev);
+  const enabled = useProjectStore((s) => s.invariantsEnabled);
+  const customRules = useProjectStore((s) => s.customRules);
+  const toggleInvariant = useProjectStore((s) => s.toggleInvariant);
+  const addCustomRule = useProjectStore((s) => s.addCustomRule);
+  const st = useProjectStore.getState();
+  const suggestions = suggestRules(
+    st.ruleContext(),
+    { invariants: enabled, customRules },
+  );
+  if (suggestions.length === 0) return null;
+  return (
+    <div className={styles.customRules}>
+      <div className={styles.customHeader}>Suggested from your design</div>
+      {suggestions.map((sg) => (
+        <div key={sg.key} className={styles.ruleRow}>
+          <div className={styles.ruleText}>
+            <div className={styles.ruleLabel}>{sg.label}</div>
+            <div className={styles.ruleDesc}>True now. Lock it in so an edit can't quietly break it.</div>
+          </div>
+          <div className={styles.ruleStatus}>
+            <button
+              className={styles.ruleRestore}
+              onClick={() =>
+                sg.builtInId
+                  ? toggleInvariant(sg.builtInId)
+                  : addCustomRule(sg.rule!.kind, sg.rule!.fromRole, sg.rule!.target, sg.rule!.min)
+              }
+              title="Declare this rule"
+            >
+              Lock in
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+});
+
+/**
+ * Custom rules — authored, role-based invariants. List the design's rules with
+ * live status and a remove control, and offer a compact author row: "Every <role>
+ * connects to ≥<n> <role>" / "must not reach <role>" / "lives in <subnet>" /
+ * "at least <n> <role>". Placement (re-addressing) and count (twinning) are
+ * restorable; Conductor won't invent or cut links, so connectivity and isolation
+ * flag only.
+ */
+function CustomRulesSection({
+  open,
+  toggle,
+  supports,
+}: {
+  open: ReadonlySet<string>;
+  toggle: (id: string) => void;
+  supports: ReadonlyMap<string, RuleSupport[]>;
+}) {
   useProjectStore((s) => s.rev); // re-evaluate on model change
   const customRules = useProjectStore((s) => s.customRules);
   const violations = useProjectStore((s) => s.invariantViolations);
   const addCustomRule = useProjectStore((s) => s.addCustomRule);
   const removeCustomRule = useProjectStore((s) => s.removeCustomRule);
+  const setCustomRuleMin = useProjectStore((s) => s.setCustomRuleMin);
+  const restoreInvariant = useProjectStore((s) => s.restoreInvariant);
   const select = useProjectStore((s) => s.select);
   const byId = new Map(violations.map((v) => [v.id, v]));
   const roles = [
@@ -687,15 +826,49 @@ function CustomRulesSection() {
         .filter((r): r is string => !!r),
     ),
   ];
-  const [kind, setKind] = useState<'connectivity' | 'isolation'>('connectivity');
+  const subnets = useProjectStore.getState().subnetsAll();
+  const subnetRefs = [...new Set(subnets.map((s) => s.name?.trim() || s.cidr))];
+  // "VLAN n" targets for the placement form, labelled with the VLAN's name.
+  const vlanNames = new Map(useProjectStore.getState().vlansAll().map((v) => [v.vlanId, v.name.trim()]));
+  const vlanRefs = [...new Set(subnets.map((s) => s.vlanId).filter((id): id is number => !!id))].sort((a, b) => a - b);
+  const describe = (r: CustomRuleSpec): string => {
+    if (r.kind === 'placement') {
+      const vlan = vlanRefId(r.subnet);
+      const targets = resolveSubnetRef(r.subnet, subnets);
+      const n = targets.length;
+      if (vlan !== null) {
+        return n === 0
+          ? `No subnet is on VLAN ${vlan} yet`
+          : n === 1
+            ? `Management IP in “${targets[0]!.name?.trim() || targets[0]!.cidr}”, and any tagged port on VLAN ${vlan}`
+            : `Management IP in any of VLAN ${vlan}’s ${n} subnets, and any tagged port on VLAN ${vlan}`;
+      }
+      return n === 0 ? `No subnet named “${(r.subnet ?? '').trim()}” yet` : 'Management IP sits in this subnet';
+    }
+    if (r.kind === 'naming') {
+      return `Names fit “${(r.pattern ?? '').trim()}” · # is a number, * anything · by role or device type`;
+    }
+    return r.kind === 'isolation'
+      ? 'No path through links'
+      : r.kind === 'count'
+        ? `${countedDevices(r.fromRole, useProjectStore.getState().devicesAll()).length} now · by role or device type`
+        : 'Role-based connectivity';
+  };
+  const [kind, setKind] = useState<CustomRuleSpec['kind']>('connectivity');
   const [fromRole, setFromRole] = useState('');
   const [toRole, setToRole] = useState('');
   const [min, setMin] = useState('2');
+  const counting = kind === 'count';
+  const naming = kind === 'naming';
+  // Count and naming rules pick devices by role OR type.
+  const byKind = counting || naming;
   const canAdd =
-    fromRole.trim() !== '' && toRole.trim() !== '' && (kind === 'isolation' || Number(min) >= 1);
+    fromRole.trim() !== '' &&
+    (counting || toRole.trim() !== '') &&
+    (kind !== 'connectivity' && !counting ? true : Number(min) >= 1);
   const submit = () => {
     if (!canAdd) return;
-    addCustomRule(kind, fromRole, toRole, Number(min));
+    addCustomRule(kind, fromRole, counting ? '' : toRole, Number(min));
     setFromRole('');
     setToRole('');
     setMin('2');
@@ -706,44 +879,110 @@ function CustomRulesSection() {
       <div className={styles.customHeader}>Custom rules</div>
       {customRules.map((r) => {
         const v = byId.get(r.id);
+        const expanded = !!v && open.has(r.id);
+        const held = v ? undefined : supports.get(r.id);
         return (
-          <div key={r.id} className={styles.ruleRow}>
-            <div className={styles.ruleText}>
-              <div className={styles.ruleLabel}>{customRuleLabel(r)}</div>
-              <div className={styles.ruleDesc}>Role-based connectivity</div>
+          <Fragment key={r.id}>
+            <div className={styles.ruleRow}>
+              <div className={styles.ruleText}>
+                <div className={styles.ruleLabel}>
+                  {customRuleLabel(r)}
+                  {hasMinimum(r.kind) && (
+                    <span className={styles.ruleStep}>
+                      <button
+                        onClick={() => setCustomRuleMin(r.id, r.min - 1)}
+                        disabled={r.min <= 1}
+                        aria-label={`Lower the minimum to ${r.min - 1}`}
+                        title="Loosen: one fewer"
+                      >
+                        −
+                      </button>
+                      <button
+                        onClick={() => setCustomRuleMin(r.id, r.min + 1)}
+                        aria-label={`Raise the minimum to ${r.min + 1}`}
+                        title="Tighten: one more"
+                      >
+                        +
+                      </button>
+                    </span>
+                  )}
+                </div>
+                <div className={styles.ruleDesc}>{describe(r)}</div>
+              </div>
+              <EnforceToggle id={r.id} label={customRuleLabel(r)} />
+              <div className={styles.ruleStatus}>
+                {v ? (
+                  <div className={styles.ruleActions}>
+                    {v.shortfall !== undefined ? (
+                      // Broken by absence: nothing to select or explain, just the gap.
+                      <span className={styles.ruleCount} title={`${v.shortfall} more needed`}>
+                        {violationTodo(v)}
+                      </span>
+                    ) : (
+                      <button
+                        className={styles.ruleCount}
+                        onClick={() => {
+                          select(v.objectIds);
+                          toggle(r.id);
+                        }}
+                        aria-expanded={expanded}
+                        title="Select the objects that break this rule, and show why"
+                      >
+                        {violationTodo(v)} {expanded ? '▾' : '▸'}
+                      </button>
+                    )}
+                    {isCustomRuleRestorable(r) && (
+                      <button
+                        className={styles.ruleRestore}
+                        onClick={() => restoreInvariant(r.id)}
+                        title={
+                          r.kind === 'count'
+                            ? 'Add copies of an existing one, wired the same'
+                            : r.kind === 'naming'
+                              ? `Rename them to “${r.pattern}”, next free number first`
+                              : vlanRefId(r.subnet) !== null
+                              ? `Re-address into VLAN ${vlanRefId(r.subnet)} and retag ports on another VLAN`
+                              : 'Re-address these devices into the subnet'
+                        }
+                      >
+                        Restore
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <MetStatus supports={held} open={open.has(r.id)} onToggle={() => toggle(r.id)} />
+                )}
+              </div>
+              <button
+                className={styles.ruleRemove}
+                onClick={() => removeCustomRule(r.id)}
+                title="Remove this rule"
+                aria-label="Remove rule"
+              >
+                ×
+              </button>
             </div>
-            <div className={styles.ruleStatus}>
-              {v ? (
-                <button
-                  className={styles.ruleCount}
-                  onClick={() => select(v.objectIds)}
-                  title="Select the objects that break this rule"
-                >
-                  {v.objectIds.length} to fix
-                </button>
-              ) : (
-                <span className={styles.ruleMet}>
-                  <NexIcon name="check" /> met
-                </span>
-              )}
-            </div>
-            <button
-              className={styles.ruleRemove}
-              onClick={() => removeCustomRule(r.id)}
-              title="Remove this rule"
-              aria-label="Remove rule"
-            >
-              ×
-            </button>
-          </div>
+            {expanded && <OffenderList violationId={r.id} objectIds={v.objectIds} />}
+            {held && open.has(r.id) && <SupportList supports={held} />}
+          </Fragment>
         );
       })}
       <div className={styles.customAdd}>
-        <span className={styles.customAddLabel}>Every</span>
+        <span className={styles.customAddLabel}>{counting ? 'At least' : 'Every'}</span>
+        {counting && (
+          <input
+            className={styles.customNum}
+            type="number"
+            min={1}
+            value={min}
+            onChange={(e) => setMin(e.target.value)}
+            aria-label="minimum"
+          />
+        )}
         <input
-          list="nx-roles"
+          list={byKind ? 'nx-kinds' : 'nx-roles'}
           className={styles.customInput}
-          placeholder="role"
+          placeholder={byKind ? 'role or type' : 'role'}
           value={fromRole}
           onChange={(e) => setFromRole(e.target.value)}
           aria-label="from role"
@@ -751,11 +990,14 @@ function CustomRulesSection() {
         <select
           className={styles.customKind}
           value={kind}
-          onChange={(e) => setKind(e.target.value as 'connectivity' | 'isolation')}
+          onChange={(e) => setKind(e.target.value as CustomRuleSpec['kind'])}
           aria-label="rule kind"
         >
           <option value="connectivity">connects to ≥</option>
           <option value="isolation">must not reach</option>
+          <option value="placement">lives in subnet / VLAN</option>
+          <option value="count">exist (count)</option>
+          <option value="naming">is named like</option>
         </select>
         {kind === 'connectivity' && (
           <input
@@ -767,14 +1009,16 @@ function CustomRulesSection() {
             aria-label="minimum"
           />
         )}
-        <input
-          list="nx-roles"
-          className={styles.customInput}
-          placeholder="role"
-          value={toRole}
-          onChange={(e) => setToRole(e.target.value)}
-          aria-label="to role"
-        />
+        {!counting && (
+          <input
+            list={kind === 'placement' ? 'nx-subnets' : naming ? undefined : 'nx-roles'}
+            className={styles.customInput}
+            placeholder={kind === 'placement' ? 'subnet or VLAN n' : naming ? 'FW-# (# = number)' : 'role'}
+            value={toRole}
+            onChange={(e) => setToRole(e.target.value)}
+            aria-label={kind === 'placement' ? 'subnet' : naming ? 'name pattern' : 'to role'}
+          />
+        )}
         <button className={styles.ruleRestore} disabled={!canAdd} onClick={submit}>
           Add
         </button>
@@ -783,10 +1027,150 @@ function CustomRulesSection() {
             <option key={r} value={r} />
           ))}
         </datalist>
+        <datalist id="nx-kinds">
+          {[...new Set([...roles, ...DEVICE_TYPES])].map((r) => (
+            <option key={r} value={r} />
+          ))}
+        </datalist>
+        <datalist id="nx-subnets">
+          {subnetRefs.map((r) => (
+            <option key={r} value={r} />
+          ))}
+          {vlanRefs.map((id) => (
+            <option key={`vlan-${id}`} value={`VLAN ${id}`}>
+              {vlanNames.get(id) || `VLAN ${id}`}
+            </option>
+          ))}
+        </datalist>
       </div>
     </div>
   );
 }
+
+/**
+ * Enforce a declared rule: while on, an edit that would break it is taken back
+ * (see the store's rule guard). A lock that reads pressed/unpressed, not just colour.
+ */
+function EnforceToggle({ id, label }: { id: string; label: string }) {
+  const on = useProjectStore((s) => s.rulesEnforced.has(id));
+  const toggleEnforced = useProjectStore((s) => s.toggleEnforced);
+  return (
+    <button
+      className={`${styles.ruleEnforce} ${on ? styles.ruleEnforceOn : ''}`}
+      onClick={() => toggleEnforced(id)}
+      aria-pressed={on}
+      aria-label={`Enforce ${label}`}
+      title={on ? 'Enforced: edits that would break this rule are taken back. Click to only flag them.' : 'Enforce: take back any edit that would break this rule'}
+    >
+      <NexIcon name="lock" />
+      {on && <span>enforced</span>}
+    </button>
+  );
+}
+
+/**
+ * A met rule's status: "met", plus — when some devices can't be lost without
+ * breaking it — "held up by N", which selects them and lists what each delete
+ * would leave.
+ */
+function MetStatus({
+  supports,
+  open,
+  onToggle,
+}: {
+  supports: readonly RuleSupport[] | undefined;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const select = useProjectStore((s) => s.select);
+  return (
+    <div className={styles.ruleActions}>
+      <span className={styles.ruleMet}>
+        <NexIcon name="check" /> met
+      </span>
+      {supports && supports.length > 0 && (
+        <button
+          className={styles.ruleHeld}
+          onClick={() => {
+            select(supports.map((s) => s.deviceId));
+            onToggle();
+          }}
+          aria-expanded={open}
+          title="Select the devices this rule can't lose, and show what deleting each would leave"
+        >
+          held up by {supports.length} {open ? '▾' : '▸'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** The devices under a met rule: delete any one and the rule breaks. */
+function SupportList({ supports }: { supports: readonly RuleSupport[] }) {
+  const focusObject = useProjectStore((s) => s.focusObject);
+  return (
+    <ul className={styles.why} aria-label="Devices this rule depends on">
+      {supports.map((s) => (
+        <li key={s.deviceId}>
+          <button className={styles.whyRow} onClick={() => focusObject(s.deviceId)} title="Show on the canvas">
+            <span className={styles.whyName}>{s.name}</span>
+            <span className={styles.whyReason}>Delete it and the rule breaks ({s.detail})</span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * The "why" under a broken rule: each offender with what about it breaks the rule
+ * ("10.10.0.21 is in “Office”, not “CCTV”"). Clicking one focuses it on the canvas.
+ */
+const OffenderList = memo(function OffenderList({
+  violationId,
+  objectIds,
+}: {
+  violationId: string;
+  objectIds: string[];
+}) {
+  // Reasons and fixes follow each validation pass — not every drag frame (`rev`).
+  useProjectStore((s) => s.ruleCheckRev);
+  const customRules = useProjectStore((s) => s.customRules);
+  const invariants = useProjectStore((s) => s.invariantsEnabled);
+  const focusObject = useProjectStore((s) => s.focusObject);
+  const st = useProjectStore.getState();
+  const ctx = st.ruleContext();
+  const offenders = explainOffenders(violationId, objectIds, ctx, customRules);
+  // A connectivity rule's fix is a link, an isolation rule's a cut: offer the ones that
+  // close the gap without breaking anything else that holds. You click; Conductor
+  // never rewires on its own. Same fixes as the Inspector and ⌘K (ruleFixes).
+  const applyRuleFix = useProjectStore((s) => s.applyRuleFix);
+  const fixes = ruleFixes(ctx, { invariants, customRules }, { ruleId: violationId });
+  return (
+    <ul className={styles.why} aria-label="Why this rule is broken">
+      {offenders.map((o) => (
+        <li key={o.id} className={styles.whyItem}>
+          <button className={styles.whyRow} onClick={() => focusObject(o.id)} title="Show on the canvas">
+            <span className={styles.whyName}>{o.name}</span>
+            <span className={styles.whyReason}>{o.reason}</span>
+          </button>
+          {fixes
+            .filter((f) => f.deviceId === o.id)
+            .map((f) => (
+              <button
+                key={f.key}
+                className={styles.whyFix}
+                onClick={() => applyRuleFix(f)}
+                title={f.kind === 'connect' ? `Draw a link from ${o.name} to ${f.targetName}` : `Delete the link ${f.linkLabel}`}
+              >
+                {ruleFixLabel(f)}
+              </button>
+            ))}
+        </li>
+      ))}
+    </ul>
+  );
+});
 
 function HealthPanel({ devices }: { devices: Device[] }) {
   const health = useProjectStore((s) => s.health);

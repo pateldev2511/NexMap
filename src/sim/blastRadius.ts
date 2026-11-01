@@ -49,6 +49,11 @@ const EGRESS_RANK: Partial<Record<DeviceType, number>> = {
   'load-balancer': 1,
 };
 
+/** Whether a device type can stand as egress (see `egressNodes`). */
+export function isEgressType(type: DeviceType): boolean {
+  return (EGRESS_RANK[type] ?? 0) > 0;
+}
+
 /** Undirected adjacency, skipping self-loops, dangling endpoints, and `exclude`d nodes. */
 function buildAdjacency(
   devices: Device[],
