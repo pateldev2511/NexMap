@@ -236,19 +236,32 @@ export function nearestFreeU(
   depth: Depth = 'full',
   ignoreId?: string,
   mount: Mount = 'rack',
+  depthMm?: number,
 ): number | null {
   if (span < 1 || span > rack.ruHeight) return null;
   const maxRu = rack.ruHeight - span + 1;
   // The mount matters: a rail item (0U PDU) fits where rack-mount gear can't,
-  // so probing with a hardcoded 'rack' would falsely report a full rack.
+  // so probing with a hardcoded 'rack' would falsely report a full rack. So does a
+  // recorded depth: without it the search judges back-to-back pairs by category and
+  // turns down a U the placement itself would accept.
   const fits = (ru: number) =>
-    ru >= 1 && ru <= maxRu && canFit(rack, occupants, { ru, ruSpan: span, mount, side, bay, depth }, ignoreId).ok;
+    ru >= 1 &&
+    ru <= maxRu &&
+    canFit(rack, occupants, { ru, ruSpan: span, mount, side, bay, depth, ...(depthMm ? { depthMm } : {}) }, ignoreId).ok;
   const start = Math.max(1, Math.min(maxRu, Math.round(target)));
   for (let d = 0; d <= rack.ruHeight; d++) {
     if (fits(start - d)) return start - d;
     if (d > 0 && fits(start + d)) return start + d;
   }
   return null;
+}
+
+/**
+ * A rail item that runs its rack's full height (a full-height PDU or vertical manager).
+ * Its span is the rack's height, so it follows the rack: resized, or moved to another.
+ */
+export function isFullHeightRail(device: Device, rack: Pick<Rack, 'id' | 'ruHeight'>): boolean {
+  return device.rackId === rack.id && device.mount === 'rail' && (device.ru ?? 1) === 1 && (device.ruSpan ?? 1) === rack.ruHeight;
 }
 
 /**

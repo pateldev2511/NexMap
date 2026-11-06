@@ -157,3 +157,17 @@ describe('planMount', () => {
     expect(plan.noRoom).toHaveLength(1);
   });
 });
+
+describe('review fixes', () => {
+  it('a hyphenated letter suffix is part of the model: a 9800-80 is not the 9800-L', () => {
+    const [eighty, el] = parsePartsList('Cisco Catalyst 9800-80\nCisco Catalyst 9800-L');
+    expect(eighty!.catalog?.model).not.toBe('Catalyst 9800-L');
+    expect(el!.catalog?.model).toBe('Catalyst 9800-L');
+  });
+
+  it('a speed in the description is not a quantity', () => {
+    expect(parsePartsList('10 GbE switch')[0]!.qty).toBe(1);
+    expect(parsePartsList('10 GigE switch')[0]!.qty).toBe(1);
+    expect(parsePartsList('2 Dell R750')[0]!.qty).toBe(2);
+  });
+});

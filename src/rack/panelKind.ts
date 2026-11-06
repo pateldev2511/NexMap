@@ -45,8 +45,10 @@ export function panelKindFor(type: DeviceType): PanelKind {
 
 /**
  * Is this device a horizontal cable manager? Its type is 'generic', so new ones are marked
- * (`rackAccessory`); unmarked ones from older designs are known by their stock names
- * ("Cable manager 2", a template's "cm-01") unless marked 'none'.
+ * (`rackAccessory`). Unmarked ones are known only by a stock name — "Cable manager 2" or
+ * a template's "cm-01" — unless marked 'none'. Older designs named library-placed managers
+ * like any generic unit ("Node 3"), so those can't be told apart: mark them in the
+ * inspector's Accessory field.
  */
 export function isCableManager(device: Pick<Device, 'type' | 'name' | 'rackAccessory'>): boolean {
   if (device.rackAccessory) return device.rackAccessory === 'cable-manager';

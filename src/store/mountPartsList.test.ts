@@ -84,3 +84,20 @@ describe('mountPartsList', () => {
   });
 });
 
+describe('full-height rail items follow their rack', () => {
+  it('resizing a rack resizes its full-height PDUs, in the same undo step', () => {
+    const rackId = s().addRack('MDF');
+    const rack = () => s().racksAll().find((r) => r.id === rackId)!;
+    const h = rack().ruHeight;
+    s().mountPartsList(rackId, 'full height PDU\nmetered PDU');
+    const spans = () => s().devicesAll().filter((d) => d.rackId === rackId).map((d) => d.ruSpan);
+    expect(spans()).toEqual([h, 6]);
+    s().updateRack(rackId, { ruHeight: h }, { ruHeight: 40 });
+    expect(spans()).toEqual([40, 6]); // the short strip keeps its span
+    s().runValidation();
+    expect(s().issues.filter((i) => i.code === 'rack-ru-overflow')).toEqual([]);
+    s().undo();
+    expect(rack().ruHeight).toBe(h);
+    expect(spans()).toEqual([h, 6]);
+  });
+});

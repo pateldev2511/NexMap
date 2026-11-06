@@ -51,7 +51,7 @@ import {
   FRAME_PAD,
   RACK_GUTTER,
 } from './rackLayout';
-import { isFullDepth, slotOf, canFit, nearestFreeU, type Slot } from './rackModel';
+import { isFullDepth, isFullHeightRail, slotOf, canFit, nearestFreeU, nearestFreeRail, type Slot } from './rackModel';
 import { rackBudget, occupiedUnits } from './rackBudget';
 import { deviceFaceParts, deviceOppositeFaceParts, devicePortLayout, rackShellParts, RACK_ART_DEFS } from './rackDeviceArt';
 import { deviceColorBy, type ColorByMode } from './rackColorBy';
@@ -474,17 +474,24 @@ export function RackRow({
             break;
           }
           const rack = t.col.rack;
-          const sl = d.slot;
+          // A full-height rail item takes the target rack's height (as the commit does).
+          const fromRack = racks.find((r) => r.id === d.fromRackId);
+          const moving = devices.find((x) => x.id === d.deviceId);
+          const sl = fromRack && moving && isFullHeightRail(moving, fromRack) ? { ...d.slot, ruSpan: rack.ruHeight } : d.slot;
           // Validate with the SAME predicate the commit uses (canFit on the
           // device's own side/bay/depth/mount — the move KEEPS its side, so
           // hovered-face occupancy would lie about full-depth and rail gear).
           const uMax = rack.ruHeight - sl.ruSpan + 1;
           const u = Math.max(1, Math.min(t.u, Math.max(1, uMax)));
           const occupants = devices.filter((x) => x.rackId === rack.id);
-          const fit = canFit(rack, occupants, { ...sl, ru: u }, d.deviceId);
+          // A rail item lands in whichever channel has room nearest (as the commit does),
+          // so the preview asks the same question rather than checking its own channel.
+          const alt = sl.mount === 'rail'
+            ? nearestFreeRail(rack, occupants, sl.ruSpan, u, sl.side, 'full', d.deviceId)?.ru ?? null
+            : nearestFreeU(rack, occupants, sl.ruSpan, u, sl.side, sl.bay, sl.depth, d.deviceId, sl.mount, sl.depthMm);
+          const fit = sl.mount === 'rail' ? { ok: alt === u } : canFit(rack, occupants, { ...sl, ru: u }, d.deviceId);
           let reason: string | null = null;
           if (!fit.ok) {
-            const alt = nearestFreeU(rack, occupants, sl.ruSpan, u, sl.side, sl.bay, sl.depth, d.deviceId, sl.mount);
             reason = alt != null ? `U${u} blocked — will land at U${alt}` : `no room in ${rack.name}`;
           }
           // Preview draws in the column of the device's OWN side (where it

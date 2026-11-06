@@ -28,7 +28,7 @@ import { analyzeCabling } from './rackHealth';
 import { rackBudget, fleetBudget } from './rackBudget';
 import { cordsIntoPdu, isPdu, nextPduFeed, powerFeedAnalysis } from './rackPower';
 import { planPowerCords, powerCordCsv } from './powerCords';
-import { slotOf, canFit, nearestFreeU, nearestFreeRail, railChannel, isFullDepth, orderRacks, type FitResult } from './rackModel';
+import { slotOf, canFit, nearestFreeU, nearestFreeRail, railChannel, isFullDepth, isFullHeightRail, orderRacks, type FitResult } from './rackModel';
 import { RACK_DEVICE_PRESETS, RACK_PRESET_GROUPS, presetSpan, type RackDevicePreset } from './rackDevicePresets';
 import { cableLanes, managerSpanLabel, routeLabel } from './cableLanes';
 import { isCableManager } from './panelKind';
@@ -169,7 +169,7 @@ export function RackDesigner() {
   const [newType, setNewType] = useState<string>(DEFAULT_RACK_PRESET.id);
   const [reject, setReject] = useState<RejectInfo | null>(null);
   const [side, setSideState] = useState<'front' | 'rear'>('front');
-  const [bay, setBay] = useState<'full' | 'left' | 'right'>('full');
+  const [bayPick, setBay] = useState<'full' | 'left' | 'right'>('full');
   const [selCable, setSelCable] = useState<string | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
   const [showParts, setShowParts] = useState(false);
@@ -258,10 +258,10 @@ export function RackDesigner() {
     if (!rack || !armed) return null;
     const span = presetSpan(armed, rack.ruHeight);
     const target = Math.min(21, rack.ruHeight);
-    if ((armed.mount ?? 'rack') === 'rail') return nearestFreeRail(rack, inRack, span, target, side, bay)?.ru ?? null;
+    if ((armed.mount ?? 'rack') === 'rail') return nearestFreeRail(rack, inRack, span, target, side, bayPick)?.ru ?? null;
     const depth = isFullDepth(armed.type) ? 'full' : 'shallow';
-    return nearestFreeU(rack, inRack, span, target, side, bay, depth);
-  }, [armed, bay, inRack, rack, side]);
+    return nearestFreeU(rack, inRack, span, target, side, bayPick, depth);
+  }, [armed, bayPick, inRack, rack, side]);
 
   /** Switch faces and drop any selection that belongs to the face we're leaving. */
   function setSide(next: 'front' | 'rear') {
@@ -393,6 +393,9 @@ export function RackDesigner() {
   /** Shared by click-to-place AND drag-and-drop: validate, then create + mount, or reject. */
   function placePreset(preset: RackDevicePreset, u: number) {
     if (!rack) return;
+    // The bay / channel picker shows only while a preset is armed, so it applies only to
+    // that preset; anything else (a library drag) fills the bay or picks a channel itself.
+    const bay = armed?.key === preset.key ? bayPick : 'full';
     const span = presetSpan(preset, rack.ruHeight);
     const mount = preset.mount ?? 'rack';
     const depth = isFullDepth(preset.type) ? 'full' : 'shallow';
@@ -479,7 +482,7 @@ export function RackDesigner() {
         u: ru,
         span: slot.ruSpan,
         reason: rejectReason(fit, slot.mount),
-        pulseU: nearestFreeU(rack, others, slot.ruSpan, ru, slot.side, slot.bay, slot.depth, undefined, slot.mount),
+        pulseU: nearestFreeU(rack, others, slot.ruSpan, ru, slot.side, slot.bay, slot.depth, undefined, slot.mount, slot.depthMm),
       });
       announce(`Move rejected: ${rejectReason(fit, slot.mount)}`);
       window.setTimeout(() => setReject(null), REJECT_FLASH_MS);
@@ -676,14 +679,18 @@ export function RackDesigner() {
     const d = devices.find((x) => x.id === deviceId);
     const target = racks.find((r) => r.id === targetRackId);
     if (!d || !target || d.rackId === targetRackId) return false;
-    const sl = slotOf(d);
+    const from = racks.find((r) => r.id === d.rackId);
+    // A full-height rail item takes the target rack's height, not its old one.
+    const sl = { ...slotOf(d), ...(from && isFullHeightRail(d, from) ? { ruSpan: target.ruHeight } : {}) };
     const occ = devices.filter((x) => x.rackId === targetRackId);
     // A pointer drag (row view) says WHERE the user pointed; the panel's
     // "Move to rack" control has no cursor, so it keeps the device's old U.
     const wanted = Math.max(1, Math.min(preferredU ?? sl.ru, target.ruHeight - sl.ruSpan + 1));
     // A rail item takes whichever channel of the target rack has room nearest.
     const railSpot = sl.mount === 'rail' ? nearestFreeRail(target, occ, sl.ruSpan, wanted, sl.side) : null;
-    const u = sl.mount === 'rail' ? railSpot?.ru ?? null : nearestFreeU(target, occ, sl.ruSpan, wanted, sl.side, sl.bay, sl.depth);
+    const u = sl.mount === 'rail'
+      ? railSpot?.ru ?? null
+      : nearestFreeU(target, occ, sl.ruSpan, wanted, sl.side, sl.bay, sl.depth, undefined, 'rack', sl.depthMm);
     const showReject = (reason: string) => {
       announce(`Move rejected: ${reason}`);
       setReject({ u: wanted, span: sl.ruSpan, reason, pulseU: null });
@@ -880,16 +887,16 @@ export function RackDesigner() {
               </button>
               {armed && (armed.mount ?? 'rack') === 'rack' && (
                 <div className={styles.seg} title="Half-width bay: two devices share one U">
-                  <button className={bay === 'full' ? styles.on : ''} onClick={() => setBay('full')}>Full</button>
-                  <button className={bay === 'left' ? styles.on : ''} onClick={() => setBay('left')}>L</button>
-                  <button className={bay === 'right' ? styles.on : ''} onClick={() => setBay('right')}>R</button>
+                  <button className={bayPick === 'full' ? styles.on : ''} onClick={() => setBay('full')}>Full</button>
+                  <button className={bayPick === 'left' ? styles.on : ''} onClick={() => setBay('left')}>L</button>
+                  <button className={bayPick === 'right' ? styles.on : ''} onClick={() => setBay('right')}>R</button>
                 </div>
               )}
               {armed && armed.mount === 'rail' && (
                 <div className={styles.seg} title="Rail channel: each face has a left and a right 0U channel">
-                  <button className={bay === 'full' ? styles.on : ''} onClick={() => setBay('full')}>Auto</button>
-                  <button className={bay === 'left' ? styles.on : ''} onClick={() => setBay('left')}>L</button>
-                  <button className={bay === 'right' ? styles.on : ''} onClick={() => setBay('right')}>R</button>
+                  <button className={bayPick === 'full' ? styles.on : ''} onClick={() => setBay('full')}>Auto</button>
+                  <button className={bayPick === 'left' ? styles.on : ''} onClick={() => setBay('left')}>L</button>
+                  <button className={bayPick === 'right' ? styles.on : ''} onClick={() => setBay('right')}>R</button>
                 </div>
               )}
             </>

@@ -33,7 +33,7 @@ import { bayOrigin, BAY_W } from '@/rack/rackLayout';
 import { DEFAULT_LEADER } from '@/model/leader';
 import { calloutRowsOrPlaceholder } from '@/model/callout';
 import { titleBlockBlocks, legendBlocks, legendEntries } from '@/model/docBlocks';
-import { canFit, isFullDepth, nearestFreeRail, type FitResult, type Slot } from '@/rack/rackModel';
+import { canFit, isFullDepth, isFullHeightRail, nearestFreeRail, type FitResult, type Slot } from '@/rack/rackModel';
 import { checkConnect, pruneCablesForInterfaces } from '@/rack/rackCables';
 import { presetByKey, presetSpan } from '@/rack/rackDevicePresets';
 import { catalogById, planCatalogDepths } from '@/rack/rackCatalog';
@@ -3886,6 +3886,21 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       return r.id;
     },
     updateRack(id, before, after) {
+      // A full-height rail item (PDU, vertical manager) follows its rack's new height.
+      const rack = model.racks.get(id);
+      const h = after.ruHeight;
+      const follow = rack && h != null && h !== rack.ruHeight
+        ? [...model.devices.values()].filter((d) => isFullHeightRail(d, rack))
+        : [];
+      if (follow.length > 0) {
+        commit(
+          transaction('Resize rack', [
+            new UpdateRackCommand(id, before, after),
+            ...follow.map((d) => new UpdateDeviceCommand(d.id, { ruSpan: d.ruSpan }, { ruSpan: h })),
+          ]),
+        );
+        return;
+      }
       commit(new UpdateRackCommand(id, before, after));
     },
     deleteRack(id) {

@@ -2283,7 +2283,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
 
       <MiniMap
         viewRect={
-          projection === 'flat' && size.w > 0
+          projection !== 'iso' && size.w > 0
             ? {
                 x: -viewport.tx / viewport.scale,
                 y: -viewport.ty / viewport.scale,

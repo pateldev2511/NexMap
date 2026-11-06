@@ -46,7 +46,7 @@ function splitQty(line: string): { qty: number; rest: string } {
     /^\s*(\d{1,4})\s*[-:]\s+(.+)$/,
     /^\s*\((\d{1,4})\)\s*(.+)$/,
     // "2 Dell R750" — but not "24 port switch" / "2 U shelf" (that number describes the item).
-    /^\s*(\d{1,3})\s+(?!(?:port|ports|u|ru|gb?|tb)\b)([a-z].*)$/i,
+    /^\s*(\d{1,3})\s+(?!(?:port|ports|u|ru|gb?|gbe|gige|tb)\b)([a-z].*)$/i,
   ];
   for (const re of patterns) {
     const m = line.match(re);
@@ -64,14 +64,30 @@ function splitQty(line: string): { qty: number; rest: string } {
  * digits) — "48-port Cat6 patch", "USW-Pro-48" — also needs its vendor named, or every
  * generic "24-port patch panel" would become a Panduit.
  */
+/**
+ * A model's number-bearing tokens. A letter-only suffix joined to a number by a hyphen
+ * stays on it ("9800-L" → "9800l"), so a 9800-80 isn't taken for the 9800-L.
+ */
+function modelTokens(model: string): string[] {
+  const out: string[] = [];
+  for (const word of model.split(/\s+/)) {
+    const segs = word.split(/[^A-Za-z0-9]+/).filter(Boolean);
+    const merged: string[] = [];
+    for (const seg of segs) {
+      const prev = merged[merged.length - 1];
+      if (!/\d/.test(seg) && prev != null && /\d/.test(prev)) merged[merged.length - 1] = prev + seg;
+      else merged.push(seg);
+    }
+    out.push(...merged.map(norm).filter((tok) => /\d/.test(tok) && tok.length >= 2));
+  }
+  return out;
+}
+
 function matchCatalog(text: string): CatalogModel | undefined {
   const t = norm(text);
   let best: { m: CatalogModel; score: number } | undefined;
   for (const m of RACK_CATALOG) {
-    const tokens = m.model
-      .split(/[^A-Za-z0-9]+/)
-      .map(norm)
-      .filter((tok) => /\d/.test(tok) && tok.length >= 2);
+    const tokens = modelTokens(m.model);
     if (tokens.length === 0 || !tokens.every((tok) => t.includes(tok))) continue;
     const distinctive = tokens.some((tok) => /\d{3}/.test(tok));
     if (!distinctive && !t.includes(norm(m.vendor))) continue;

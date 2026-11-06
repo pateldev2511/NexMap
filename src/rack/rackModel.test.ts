@@ -11,6 +11,7 @@ import {
   nearestFreeU,
   nearestFreeRail,
   railChannel,
+  isFullHeightRail,
   isFullDepth,
   orderRacks,
   type Slot,
@@ -275,5 +276,23 @@ describe('nearestFreeU — pulse next to where the user aimed', () => {
   it('returns null when nothing fits anywhere', () => {
     const full = Array.from({ length: 42 }, (_, i) => dev({ ru: i + 1 }));
     expect(nearestFreeU(r, full, 1, 20)).toBeNull();
+  });
+});
+
+describe('review fixes', () => {
+  it('nearestFreeU judges back-to-back pairs by recorded depth when it has one', () => {
+    const r = rack({ ruHeight: 4, depthMm: 900 });
+    const rear = dev({ id: 'rear', ru: 1, ruSpan: 4, side: 'rear', type: 'server', depthMm: 400 });
+    // Category rule: two full-depth chassis clash. Millimetres: 400 + 400 fits in 900.
+    expect(nearestFreeU(r, [rear], 1, 2, 'front', 'full', 'full')).toBeNull();
+    expect(nearestFreeU(r, [rear], 1, 2, 'front', 'full', 'full', undefined, 'rack', 400)).toBe(2);
+  });
+
+  it('a full-height rail item is one at U1 spanning its whole rack', () => {
+    const r = rack({ ruHeight: 42 });
+    expect(isFullHeightRail(dev({ mount: 'rail', ru: 1, ruSpan: 42 }), r)).toBe(true);
+    expect(isFullHeightRail(dev({ mount: 'rail', ru: 1, ruSpan: 6 }), r)).toBe(false);
+    expect(isFullHeightRail(dev({ mount: 'rack', ru: 1, ruSpan: 42 }), r)).toBe(false);
+    expect(isFullHeightRail(dev({ mount: 'rail', ru: 1, ruSpan: 42, rackId: 'other' }), r)).toBe(false);
   });
 });
