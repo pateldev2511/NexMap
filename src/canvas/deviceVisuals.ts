@@ -117,9 +117,9 @@ export function deviceGradient(type: DeviceType): DeviceGradient {
  */
 const DEVICE_ICONS: Record<DeviceType, string> = {
   router:
-    '<circle cx="12" cy="12" r="3.2"/><path d="M12 4v4.8M12 15.2V20M4 12h4.8M15.2 12H20"/><path d="M6.2 6.2l3.4 3.4M14.4 14.4l3.4 3.4M17.8 6.2l-3.4 3.4M9.6 14.4l-3.4 3.4"/>',
+    '<rect x="3" y="10" width="18" height="8" rx="1.5"/><path d="M7 10V4M17 10V4"/><circle cx="6.8" cy="14" r="1" fill="#fff" stroke="none"/><circle cx="9.8" cy="14" r="1" fill="#fff" stroke="none"/><path d="M13.5 14h4"/>',
   switch:
-    '<rect x="3" y="6" width="18" height="10" rx="2"/><path d="M7 16v3M12 16v3M17 16v3"/><rect x="6" y="9" width="2" height="2" rx=".4" fill="#fff" stroke="none"/><rect x="11" y="9" width="2" height="2" rx=".4" fill="#fff" stroke="none"/><rect x="16" y="9" width="2" height="2" rx=".4" fill="#fff" stroke="none"/>',
+    '<rect x="3" y="10" width="18" height="6" rx="1.5"/><rect x="5.5" y="12" width="2" height="2" rx=".4" fill="#fff" stroke="none"/><rect x="9" y="12" width="2" height="2" rx=".4" fill="#fff" stroke="none"/><rect x="12.5" y="12" width="2" height="2" rx=".4" fill="#fff" stroke="none"/><rect x="16" y="12" width="2" height="2" rx=".4" fill="#fff" stroke="none"/>',
   firewall:
     '<path d="M12 3.5l7 2.7v5.5c0 4.6-3 7.4-7 8.8-4-1.4-7-4.2-7-8.8V6.2z"/><path d="M6 10h12M6.5 14h11M9 6.8V10M15 10v4M10 14v4"/>',
   'access-point':
@@ -127,31 +127,31 @@ const DEVICE_ICONS: Record<DeviceType, string> = {
   'wireless-controller':
     '<rect x="4" y="13" width="16" height="6" rx="1.5"/><path d="M7 10a7 7 0 0 1 10 0"/><path d="M9.5 7.2a10 10 0 0 1 5 0"/><circle cx="8" cy="16" r="1" fill="#fff" stroke="none"/><circle cx="12" cy="16" r="1" fill="#fff" stroke="none"/><circle cx="16" cy="16" r="1" fill="#fff" stroke="none"/>',
   server:
-    '<rect x="4" y="4" width="16" height="5.5" rx="1.2"/><rect x="4" y="10.8" width="16" height="5.5" rx="1.2"/><rect x="4" y="17.5" width="16" height="2.5" rx="1.2"/><circle cx="7.5" cy="6.8" r=".8" fill="#fff" stroke="none"/><circle cx="7.5" cy="13.5" r=".8" fill="#fff" stroke="none"/><path d="M11 6.8h5M11 13.5h5"/>',
+    '<rect x="6" y="3.5" width="12" height="17" rx="1.5"/><path d="M6 9.2h12M6 14.8h12"/><circle cx="8.6" cy="6.4" r=".8" fill="#fff" stroke="none"/><circle cx="8.6" cy="12" r=".8" fill="#fff" stroke="none"/><circle cx="8.6" cy="17.6" r=".8" fill="#fff" stroke="none"/><path d="M11.2 6.4h4.2M11.2 12h4.2M11.2 17.6h4.2"/>',
   storage:
-    '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v11.5c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/><path d="M5 11.8c0 1.7 3.1 3 7 3s7-1.3 7-3"/><path d="M5 16.5c0 1.7 3.1 3 7 3s7-1.3 7-3"/>',
+    '<ellipse cx="12" cy="7.2" rx="6.5" ry="2.2"/><path d="M5.5 7.2v9.6c0 1.2 2.9 2.2 6.5 2.2s6.5-1 6.5-2.2V7.2"/><path d="M5.5 12c0 1.2 2.9 2.2 6.5 2.2s6.5-1 6.5-2.2"/>',
   'load-balancer':
-    '<circle cx="5" cy="12" r="2.2"/><circle cx="19" cy="6" r="2"/><circle cx="19" cy="12" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7.2 12H11M11 12V6h6M11 12h6M11 12v6h6"/><path d="M14.5 4.5 17 6l-2.5 1.5M14.5 10.5 17 12l-2.5 1.5M14.5 16.5 17 18l-2.5 1.5"/>',
+    '<circle cx="5.2" cy="12" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="19" cy="12" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7.2 12H11M11 12V6h6M11 12h6M11 12v6h6"/><path d="M14.5 4.5 17 6l-2.5 1.5M14.5 10.5 17 12l-2.5 1.5M14.5 16.5 17 18l-2.5 1.5"/>',
   'end-user':
     '<rect x="3.5" y="5" width="17" height="11" rx="1.5"/><path d="M8.5 20h7M12 16v4"/><path d="M7 8h10"/>',
   printer:
     '<path d="M7 8V4h10v4"/><rect x="4" y="8" width="16" height="7.5" rx="1.5"/><rect x="7" y="14" width="10" height="6"/><path d="M8.5 17h7"/><circle cx="17" cy="11.5" r=".9" fill="#fff" stroke="none"/>',
-  iot: '<rect x="7" y="7" width="10" height="10" rx="1.5"/><rect x="10" y="10" width="4" height="4" rx=".8"/><path d="M10 7V4M14 7V4M10 20v-3M14 20v-3M7 10H4M7 14H4M20 10h-3M20 14h-3"/>',
+  iot: '<rect x="7" y="7" width="10" height="10" rx="1.5"/><rect x="10" y="10" width="4" height="4" rx=".4"/><path d="M10 7V4M14 7V4M10 20v-3M14 20v-3M7 10H4M7 14H4M20 10h-3M20 14h-3"/>',
   isp: '<circle cx="12" cy="12" r="8"/><path d="M4 12h16"/><path d="M12 4c2.1 2.1 3.2 4.8 3.2 8s-1.1 5.9-3.2 8M12 4c-2.1 2.1-3.2 4.8-3.2 8s1.1 5.9 3.2 8"/><path d="M6.5 7.5h11M6.5 16.5h11"/>',
   cloud:
-    '<path d="M7 18h10a4 4 0 0 0 .3-8 5.2 5.2 0 0 0-9.9-1.5A3.6 3.6 0 0 0 7 18z"/><circle cx="10" cy="14" r="1" fill="#fff" stroke="none"/><circle cx="14" cy="14" r="1" fill="#fff" stroke="none"/><path d="M11 14h2"/>',
-  vm: '<rect x="4" y="6" width="13" height="13" rx="2"/><path d="M7 3h13v13"/><path d="M10 10l4 2.5-4 2.5z" fill="#fff" stroke="none"/>',
+    '<path d="M7.5 17.5h9a3.6 3.6 0 0 0 .3-7.2 4.8 4.8 0 0 0-9.1-1.3A3.3 3.3 0 0 0 7.5 17.5z"/><circle cx="10" cy="13.8" r="1" fill="#fff" stroke="none"/><circle cx="14" cy="13.8" r="1" fill="#fff" stroke="none"/><path d="M11 13.8h2"/>',
+  vm: '<rect x="3.5" y="5" width="17" height="11.5" rx="1.5"/><path d="M3.5 8.5h17"/><circle cx="5.9" cy="6.75" r=".6" fill="#fff" stroke="none"/><circle cx="7.9" cy="6.75" r=".6" fill="#fff" stroke="none"/><path d="M10.5 10.3l4 2.2-4 2.2z" fill="#fff" stroke="none"/><path d="M12 16.5v3M8.5 19.5h7"/>',
   container:
     '<path d="M12 3.5 18 7v7l-6 3.5L6 14V7z"/><path d="M6 7l6 3.5L18 7M12 10.5v7"/><path d="M4 15.5 12 20l8-4.5"/>',
   rack: '<rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M8 3v18M16 3v18M5 8h14M5 13h14M5 18h14"/><circle cx="10.5" cy="5.5" r=".7" fill="#fff" stroke="none"/><circle cx="10.5" cy="10.5" r=".7" fill="#fff" stroke="none"/><circle cx="10.5" cy="15.5" r=".7" fill="#fff" stroke="none"/>',
   'patch-panel':
     '<rect x="3" y="7.5" width="18" height="9" rx="1.5"/><path d="M3 12h18"/><rect x="6" y="10" width="2" height="2" rx=".4" fill="#fff" stroke="none"/><rect x="11" y="10" width="2" height="2" rx=".4" fill="#fff" stroke="none"/><rect x="16" y="10" width="2" height="2" rx=".4" fill="#fff" stroke="none"/><rect x="8.5" y="13" width="2" height="2" rx=".4" fill="#fff" stroke="none"/><rect x="13.5" y="13" width="2" height="2" rx=".4" fill="#fff" stroke="none"/>',
-  ups: '<rect x="4" y="7" width="15" height="10" rx="1.5"/><path d="M19 10v4"/><path d="M12.5 8.8 9.7 13h3.4l-2 4.2"/><path d="M6.5 19.5h10"/>',
+  ups: '<rect x="6" y="4" width="12" height="16" rx="1.5"/><path d="M13 8 10.2 12.6h3.4L11 17"/><circle cx="8.6" cy="6.6" r=".8" fill="#fff" stroke="none"/>',
   camera:
-    '<path d="M4 9.5h4l1.3-2h5.4l1.3 2h4v8h-16z"/><circle cx="12" cy="13.5" r="3"/><circle cx="12" cy="13.5" r="1" fill="#fff" stroke="none"/>',
+    '<path d="M5.5 18a6.5 6.5 0 0 1 13 0z"/><path d="M8 18v2h8v-2"/><circle cx="12" cy="15.2" r="2"/><circle cx="12" cy="15.2" r=".8" fill="#fff" stroke="none"/>',
   vpc: '<rect x="3" y="5" width="18" height="14" rx="2.5" stroke-dasharray="3 2"/><path d="M8 12h8M12 8v8"/><circle cx="8" cy="12" r="1" fill="#fff" stroke="none"/><circle cx="12" cy="8" r="1" fill="#fff" stroke="none"/><circle cx="16" cy="12" r="1" fill="#fff" stroke="none"/><circle cx="12" cy="16" r="1" fill="#fff" stroke="none"/>',
   'cloud-subnet':
-    '<rect x="3" y="5" width="18" height="14" rx="2.5" stroke-dasharray="2 2"/><path d="M3 12h18M12 5v14"/><rect x="6.5" y="8" width="3" height="2.5" rx=".5" fill="#fff" stroke="none"/><rect x="14.5" y="14" width="3" height="2.5" rx=".5" fill="#fff" stroke="none"/>',
+    '<rect x="3" y="5" width="18" height="14" rx="2.5" stroke-dasharray="2 2"/><path d="M3 12h18M12 5v14"/><rect x="6.5" y="8" width="3" height="2.5" rx=".4" fill="#fff" stroke="none"/><rect x="14.5" y="14" width="3" height="2.5" rx=".4" fill="#fff" stroke="none"/>',
   'internet-gateway':
     '<circle cx="9.5" cy="12" r="6"/><path d="M3.5 12h8M10 6c1.5 1.6 2.3 3.6 2.3 6s-.8 4.4-2.3 6M14 12h6M17.8 9.8 20 12l-2.2 2.2"/>',
   'nat-gateway':
@@ -161,10 +161,10 @@ const DEVICE_ICONS: Record<DeviceType, string> = {
   'security-group':
     '<path d="M12 3.5l7 2.7v5.5c0 4.6-3 7.4-7 8.8-4-1.4-7-4.2-7-8.8V6.2z"/><circle cx="12" cy="12" r="2.3"/><path d="M12 9.7V7.5M12 16.5v-2.2M9.7 12H7.5M16.5 12h-2.2"/>',
   'vpn-gateway':
-    '<rect x="6" y="11" width="12" height="8" rx="1.5"/><path d="M9 11V8a3 3 0 0 1 6 0v3"/><path d="M4 15h2M18 15h2M12 19v2"/>',
-  k8s: '<path d="M12 3.5 19 7.5v8l-7 4-7-4v-8z"/><circle cx="12" cy="11.5" r="2.5"/><path d="M12 3.5v5.5M18.9 7.5l-4.7 2.7M18.9 15.5l-4.7-2.7M12 19.5V14M5.1 15.5l4.7-2.7M5.1 7.5l4.7 2.7"/>',
+    '<rect x="6.5" y="11" width="11" height="8" rx="1.5"/><path d="M9 11V8.5a3 3 0 0 1 6 0V11"/><circle cx="12" cy="14.4" r="1.2" fill="#fff" stroke="none"/><path d="M12 15.4v1.6"/>',
+  k8s: '<path d="M12 3.5l7 3.6v7.4l-7 3.6-7-3.6V7.1z"/><circle cx="12" cy="10.8" r="2.5"/><path d="M12 3.5v4.8M19 7.1l-4.6 2.5M19 14.5l-4.6-2.5M12 18.1v-4.8M5 14.5l4.6-2.5M5 7.1l4.6 2.5"/>',
   'managed-db':
-    '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v11.5c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/><path d="M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/><path d="M9.4 17.5l1.7 1.6 3.6-3.7"/>',
+    '<ellipse cx="12" cy="7.2" rx="6.5" ry="2.2"/><path d="M5.5 7.2v9.6c0 1.2 2.9 2.2 6.5 2.2s6.5-1 6.5-2.2V7.2"/><path d="M9.4 14.2l1.8 1.8 3.6-3.8"/>',
   'object-storage':
     '<path d="M5 7h14l-1.5 12h-11z"/><path d="M5 7l1-3h12l1 3"/><path d="M8 11h8M8.5 15h7"/>',
   generic:

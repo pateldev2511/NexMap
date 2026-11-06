@@ -150,6 +150,31 @@ describe('devicePortLayout — faceplate realism (W2)', () => {
     expect(new Set(outlets.map((o) => o.y)).size).toBeGreaterThanOrEqual(6); // stacked vertically
     expect(new Set(outlets.map((o) => o.x)).size).toBe(1); // single column
   });
+
+  it('a PDU strip too short for its outlets draws fewer, never a negative-height one', () => {
+    const pdu: Device = {
+      id: 'p', kind: 'device', type: 'ups', name: 'PDU 1', mount: 'rail',
+      x: 0, y: 0, width: 16, height: 30, layerId: 'L',
+      interfaces: Array.from({ length: 8 }, (_, i) => ({ id: `o${i}`, name: `C13-${i}` })),
+    };
+    const svg = join(deviceFaceParts(pdu, { x: 50, y: 5, w: 16, h: 30 }));
+    expect(svg).not.toMatch(/(height|width)="-/);
+    const outlets = [...svg.matchAll(/<rect\b[^>]*fill="#161c24"[^>]*>/g)];
+    expect(outlets.length).toBeGreaterThan(0);
+    expect(outlets.length).toBeLessThan(8);
+  });
+
+  it('a rail-mounted cable manager draws a finger duct per U, not PDU outlets', () => {
+    const vm: Device = {
+      id: 'v', kind: 'device', type: 'generic', name: 'Vertical manager 1', mount: 'rail',
+      rackAccessory: 'cable-manager', ruSpan: 8,
+      x: 0, y: 0, width: 16, height: 240, layerId: 'L', interfaces: [],
+    };
+    const svg = join(deviceFaceParts(vm, { x: 500, y: 40, w: 16, h: 240 }));
+    const fingers = [...svg.matchAll(/<rect\b[^>]*height="4"[^>]*>/g)];
+    expect(fingers).toHaveLength(8);
+    expect(svg).not.toContain('url(#rkLedG)'); // no PDU breaker LED
+  });
 });
 
 function dev(type: DeviceType, over: Partial<Device> = {}): Device {

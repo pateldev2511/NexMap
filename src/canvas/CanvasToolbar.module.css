@@ -48,6 +48,11 @@
   color: var(--accent-fg);
 }
 
+/* An icon-only tool (no key chip) — same hit height, a tighter footprint. */
+.tool.compact {
+  padding: 5px 7px;
+}
+
 .key {
   font-size: 10px;
   opacity: 0.6;

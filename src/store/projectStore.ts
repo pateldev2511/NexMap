@@ -33,12 +33,12 @@ import { bayOrigin, BAY_W } from '@/rack/rackLayout';
 import { DEFAULT_LEADER } from '@/model/leader';
 import { calloutRowsOrPlaceholder } from '@/model/callout';
 import { titleBlockBlocks, legendBlocks, legendEntries } from '@/model/docBlocks';
-import { canFit, isFullDepth, type FitResult, type Slot } from '@/rack/rackModel';
+import { canFit, isFullDepth, nearestFreeRail, type FitResult, type Slot } from '@/rack/rackModel';
 import { checkConnect, pruneCablesForInterfaces } from '@/rack/rackCables';
-import { presetByKey } from '@/rack/rackDevicePresets';
-import { catalogById } from '@/rack/rackCatalog';
+import { presetByKey, presetSpan } from '@/rack/rackDevicePresets';
+import { catalogById, planCatalogDepths } from '@/rack/rackCatalog';
 import { estimateCableLengthFt } from '@/rack/cableLength';
-import { proposePowerBalance } from '@/rack/rackPower';
+import { cordsIntoPdu, isPdu, nextPduFeed, proposePowerBalance } from '@/rack/rackPower';
 import { pickBulkPatch } from '@/rack/rackBulk';
 import { rackFieldsFromPreset, rackPresetById, DEFAULT_RACK_PRESET } from '@/rack/rackTypes';
 import type { RackTemplate } from '@/rack/rackTemplates';
@@ -112,6 +112,8 @@ import {
 } from '@/model/invariants';
 import { planPruneDanglingLinks, planClearDanglingIfaces } from '@/model/integrity';
 import { mergeRules, readRulesFile, sanitizeStoredRule } from '@/io/rulesFile';
+import { parsePartsList, planMount } from '@/rack/partsList';
+import { PATCH_COLOR, planPatches } from '@/rack/patchPlan';
 import { blockedMessage, brokeMessage, evaluateDeclared, ruleFixes, type RuleFix, ruleSupports as computeRuleSupports, type RuleSupport } from '@/model/ruleStakes';
 import { buildTemplateObjects } from '@/model/templates';
 import { History } from './history';
@@ -149,7 +151,11 @@ import {
 
 export type CanvasMode = 'select' | 'pan' | 'connect' | 'lasso' | 'text' | 'shape';
 export type AlignEdge = 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom';
-export type Projection = 'flat' | 'iso';
+/**
+ * How the canvas is drawn. `blueprint` is the drafting-sheet skin: flat geometry
+ * (every `=== 'iso'` check treats it as flat), drawn in one ink on blue paper.
+ */
+export type Projection = 'flat' | 'iso' | 'blueprint';
 import { emptyModel, fromDocument, toDocument, type ModelState } from './modelState';
 
 // Module-private mutable internals. Kept outside React state so command mutation
@@ -784,6 +790,18 @@ export interface ProjectStore {
   addRack(name: string): string;
   /** Append a pre-made template's racks+devices to the row in one undoable edit. Returns new rack ids. */
   applyRackTemplate(template: RackTemplate): string[];
+  /**
+   * Mount a pasted parts list into a rack (see rack/partsList): every recognised
+   * line, by quantity, stacked bottom-up heaviest first, as ONE undo step. Names
+   * follow a declared naming standard, else number up ("Switch 3"). Says what was
+   * mounted and what didn't fit or wasn't recognised.
+   */
+  mountPartsList(rackId: string, text: string): { placed: number; noRoom: number; unknown: number };
+  /**
+   * Add a PDU on `feed` to a rack's rear rail (else its front), in whichever channel has
+   * room, as one undo step. Returns the new device id, or null when no channel has room.
+   */
+  addPdu(rackId: string, feed: 'A' | 'B'): string | null;
   updateRack(id: string, before: Partial<Rack>, after: Partial<Rack>): void;
   deleteRack(id: string): void;
   /** Deep-copy a rack with its mounted gear and intra-rack cables. Returns the new id. */
@@ -805,8 +823,18 @@ export interface ProjectStore {
   updateRackCable(id: string, before: Partial<RackCable>, after: Partial<RackCable>): void;
   /** Estimate + fill length (ft) from rack geometry for every cable missing one. Returns count updated. */
   autoLengthRackCables(): number;
+  /**
+   * Patch schedule from the topology: cable every logical link between rack-mounted gear
+   * (free ports, P-### labels, estimated lengths). One undo. Returns cables added.
+   */
+  patchFromTopology(): number;
   /** Rebalance A/B power by flipping single-corded gear to even the load. One undo. Returns devices moved. */
   balancePower(): number;
+  /**
+   * Datasheet depths for devices that name a catalog model but record none (see
+   * planCatalogDepths), so depth-fit can judge them. One undo. Returns devices filled.
+   */
+  fillDepthsFromCatalog(): number;
   /** Stamp allowlisted fields (status/owner/assetTag/warranty/feed) onto many devices in one undo. Returns count changed. */
   bulkUpdateDevices(ids: string[], patch: Partial<Device>): number;
   /** Assign sequential asset tags to many devices in one undo. Returns count changed. */
@@ -3946,12 +3974,17 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
             interfaces,
             rackId: rack.id,
             ru: td.ru,
-            ruSpan: p.span,
+            // The model's real height: a 2U NAS isn't the 4U generic storage preset.
+            ruSpan: catalog?.span ?? presetSpan(p, rack.ruHeight),
             mount: p.mount ?? 'rack',
             side: td.side ?? 'front',
-            bay: 'full',
+            bay: td.bay ?? 'full',
+            ...(isPdu({ type: p.type, mount: p.mount }) ? { powerFeed: nextPduFeed(rack.id, newDevices) } : {}),
+            ...(tr.dualCorded && cordsIntoPdu({ type: p.type, mount: p.mount, name: td.name ?? '', rackAccessory: p.accessory }) ? { powerFeed: 'AB' as const } : {}),
+            ...(p.accessory ? { rackAccessory: p.accessory } : {}),
             ...((catalog?.watts ?? p.watts) ? { watts: catalog?.watts ?? p.watts } : {}),
             ...((catalog?.weightKg ?? p.weightKg) ? { weightKg: catalog?.weightKg ?? p.weightKg } : {}),
+            ...(catalog?.depthMm ? { depthMm: catalog.depthMm } : {}),
           });
           newDevices.push(dev);
           cmds.push(new AddDeviceCommand(dev));
@@ -3964,6 +3997,112 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
       return newRackIds;
     },
+    mountPartsList(rackId, text) {
+      const rack = model.racks.get(rackId);
+      if (!rack) return { placed: 0, noRoom: 0, unknown: 0 };
+      const plan = planMount(rack, [...model.devices.values()], parsePartsList(text));
+      const cmds: Command[] = [];
+      const made: Device[] = [];
+      for (const item of plan.items) {
+        if (item.ru == null) continue;
+        const preset = item.line.preset!;
+        const catalog = item.line.catalog;
+        const base = preset.name ?? defaultDeviceName(preset.type);
+        const name = nameForNew(
+          { type: preset.type },
+          () => uniqueName(base, [...[...model.devices.values()].map((d) => d.name), ...made.map((d) => d.name)]),
+          made.map((d) => d.name),
+        );
+        const watts = catalog?.watts ?? preset.watts;
+        const weightKg = catalog?.weightKg ?? preset.weightKg;
+        const dev = createDevice(preset.type, -9999, -9999, firstLayerId(), {
+          name,
+          ...(catalog ? { vendor: catalog.vendor, model: catalog.model } : {}),
+          interfaces: preset.ports > 0 ? Array.from({ length: preset.ports }, (_, i) => createInterface(preset.portName(i))) : [],
+          rackId: rack.id,
+          ru: item.ru,
+          ruSpan: item.span,
+          mount: item.mount,
+          side: item.side,
+          bay: item.bay,
+          // Each new PDU takes the feed the rack still lacks, so two become A and B.
+          ...(isPdu({ type: preset.type, mount: item.mount }) ? { powerFeed: nextPduFeed(rack.id, [...model.devices.values(), ...made]) } : {}),
+          ...(preset.accessory ? { rackAccessory: preset.accessory } : {}),
+          ...(watts ? { watts } : {}),
+          ...(weightKg ? { weightKg } : {}),
+          ...(catalog?.depthMm ? { depthMm: catalog.depthMm } : {}),
+        });
+        made.push(dev);
+        cmds.push(new AddDeviceCommand(dev));
+      }
+      const result = { placed: made.length, noRoom: plan.noRoom.length, unknown: plan.unknown.length };
+      const tail = [
+        result.noRoom > 0 ? `${result.noRoom} didn't fit` : '',
+        result.unknown > 0 ? `${plural(result.unknown, 'line')} not recognised` : '',
+      ].filter(Boolean);
+      if (cmds.length === 0) {
+        set({ flash: `Nothing mounted${tail.length ? ` — ${tail.join(', ')}` : ''}.` });
+        return result;
+      }
+      history.dispatch(transaction(`Mount parts list into ${rack.name}`, cmds), model);
+      for (const dv of made) index.insert(dv.id, deviceBox(dv));
+      history.commitCoalesceBoundary();
+      set({
+        rev: get().rev + 1,
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+        selection: new Set(made.map((d) => d.id)),
+        flash: `Mounted ${plural(result.placed, 'device')} in ${rack.name}${tail.length ? ` — ${tail.join(', ')}` : ''}. ⌘Z undoes it.`,
+      });
+      get().runValidation();
+      return result;
+    },
+
+    addPdu(rackId, feed) {
+      const rack = model.racks.get(rackId);
+      const preset = presetByKey('pdu');
+      if (!rack || !preset) return null;
+      const occ = [...model.devices.values()].filter((d) => d.rackId === rackId);
+      let spot: { ru: number; bay: 'left' | 'right'; side: 'front' | 'rear' } | null = null;
+      for (const side of ['rear', 'front'] as const) {
+        const r = nearestFreeRail(rack, occ, preset.span, 1, side);
+        if (r) {
+          spot = { ...r, side };
+          break;
+        }
+      }
+      if (!spot) {
+        set({ flash: `No free rail channel in ${rack.name} for another PDU.` });
+        return null;
+      }
+      const dev = createDevice(preset.type, -9999, -9999, firstLayerId(), {
+        name: uniqueName(`PDU ${feed}`, [...model.devices.values()].map((d) => d.name)),
+        interfaces: Array.from({ length: preset.ports }, (_, i) => createInterface(preset.portName(i))),
+        rackId,
+        ru: spot.ru,
+        ruSpan: preset.span,
+        mount: 'rail',
+        side: spot.side,
+        bay: spot.bay,
+        powerFeed: feed,
+        ...(preset.weightKg ? { weightKg: preset.weightKg } : {}),
+      });
+      history.dispatch(transaction(`Add PDU ${feed}`, [new AddDeviceCommand(dev)]), model);
+      index.insert(dev.id, deviceBox(dev));
+      history.commitCoalesceBoundary();
+      set({
+        rev: get().rev + 1,
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+        selection: new Set([dev.id]),
+        flash: `Added ${dev.name} on feed ${feed} — ${spot.side} rail, ${spot.bay} channel, U${spot.ru}.`,
+      });
+      get().runValidation();
+      return dev.id;
+    },
+
     racksAll() {
       return [...model.racks.values()];
     },
@@ -3974,9 +4113,13 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       const rack = model.racks.get(rackId);
       if (!device || !rack) return { ok: false, reason: 'invalid' };
       const occupants = [...model.devices.values()].filter((d) => d.rackId === rackId);
-      // Depth is a property of THIS device's type, not whatever the caller passed — derive it
-      // so a full-depth chassis correctly blocks the opposite face.
-      const candidate: Slot = { ...slot, depth: isFullDepth(device.type) ? 'full' : 'shallow' };
+      // Depth is a property of THIS device (its type, and its recorded mm), not whatever
+      // the caller passed — derive both so the opposite face is judged correctly.
+      const candidate: Slot = {
+        ...slot,
+        depth: isFullDepth(device.type) ? 'full' : 'shallow',
+        depthMm: device.depthMm && device.depthMm > 0 ? device.depthMm : undefined,
+      };
       const fit = canFit(rack, occupants, candidate, deviceId);
       if (!fit.ok) return fit;
       const before: Partial<Device> = {
@@ -4049,6 +4192,47 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       return cmds.length;
     },
 
+    patchFromTopology() {
+      const plan = planPatches(
+        [...model.devices.values()],
+        [...model.links.values()],
+        [...model.rackCables.values()],
+        [...model.racks.values()],
+      );
+      const tail = [
+        plan.notRacked > 0
+          ? `${plan.notRacked} link${plan.notRacked === 1 ? ' has an end' : 's have an end'} outside a rack`
+          : '',
+        ...plan.noFreePort.map((s) => `${s.device.name} is out of free ports`),
+      ].filter(Boolean);
+      if (!plan.items.length) {
+        const why = plan.alreadyPatched > 0 ? 'Every link between racked gear already has a cable' : 'No links between racked gear to patch';
+        set({ flash: `${why}${tail.length ? ` — ${tail.join(', ')}` : ''}.` });
+        return 0;
+      }
+      const cmds: Command[] = plan.items.map(
+        (it) =>
+          new AddRackCableCommand(
+            createRackCable(it.aEnd, it.bEnd, PATCH_COLOR, {
+              label: it.label,
+              ...(it.lengthFt != null ? { lengthFt: it.lengthFt } : {}),
+            }),
+          ),
+      );
+      history.dispatch(transaction('Patch cables from topology', cmds), model);
+      history.commitCoalesceBoundary();
+      const n = plan.items.length;
+      const range = n === 1 ? plan.items[0]!.label : `${plan.items[0]!.label}–${plan.items[n - 1]!.label}`;
+      set({
+        rev: get().rev + 1,
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+        flash: `Patched ${n} link${n === 1 ? '' : 's'} as ${range}${tail.length ? ` — ${tail.join(', ')}` : ''}. ⌘Z undoes it.`,
+      });
+      return n;
+    },
+
     balancePower() {
       const proposal = proposePowerBalance([...model.devices.values()]);
       if (!proposal.flips.length) return 0;
@@ -4059,6 +4243,28 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       history.commitCoalesceBoundary();
       set({ rev: get().rev + 1, canUndo: history.canUndo, canRedo: history.canRedo, dirty: true });
       return cmds.length;
+    },
+
+    fillDepthsFromCatalog() {
+      const fills = planCatalogDepths([...model.devices.values()]);
+      if (!fills.length) {
+        set({ flash: 'No devices to fill — every catalog model already has its depth.' });
+        return 0;
+      }
+      const cmds: Command[] = fills.map(
+        (f) => new UpdateDeviceCommand(f.deviceId, { depthMm: undefined }, { depthMm: f.depthMm }),
+      );
+      history.dispatch(transaction('Fill depths from the catalog', cmds), model);
+      history.commitCoalesceBoundary();
+      const n = fills.length;
+      set({
+        rev: get().rev + 1,
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+        flash: `Filled datasheet depths for ${n} device${n === 1 ? '' : 's'}. ⌘Z undoes it.`,
+      });
+      return n;
     },
 
     bulkUpdateDevices(ids, patch) {

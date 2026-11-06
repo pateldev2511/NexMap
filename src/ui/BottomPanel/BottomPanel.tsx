@@ -398,6 +398,11 @@ function RackTable({ racks, devices }: { racks: Rack[]; devices: Device[] }) {
   const focus = useProjectStore((s) => s.focusObject);
   const set = (r: Rack, key: keyof Rack, val: string | number) =>
     update(r.id, { [key]: r[key] } as Partial<Rack>, { [key]: val } as Partial<Rack>);
+  // An optional limit: blank (or ≤ 0) clears it, so the check simply isn't made.
+  const setLimit = (r: Rack, key: 'depthMm' | 'maxWatts' | 'maxWeightKg', raw: string) => {
+    const n = Number(raw);
+    update(r.id, { [key]: r[key] }, { [key]: raw.trim() === '' || !(n > 0) ? undefined : n });
+  };
   return (
     <div>
       <table className={styles.table}>
@@ -405,6 +410,9 @@ function RackTable({ racks, devices }: { racks: Rack[]; devices: Device[] }) {
           <tr>
             <th>Rack</th>
             <th>RU height</th>
+            <th title="Usable mounting depth, front rail to rear">Depth (mm)</th>
+            <th>Power cap (W)</th>
+            <th>Weight cap (kg)</th>
             <th>Site</th>
             <th>Mounted</th>
             <th>Notes</th>
@@ -424,6 +432,19 @@ function RackTable({ racks, devices }: { racks: Rack[]; devices: Device[] }) {
                     type="number"
                     value={String(r.ruHeight)}
                     onCommit={(v) => set(r, 'ruHeight', Number(v) || 1)}
+                  />
+                </td>
+                <td>
+                  <Cell type="number" value={r.depthMm != null ? String(r.depthMm) : ''} onCommit={(v) => setLimit(r, 'depthMm', v)} />
+                </td>
+                <td>
+                  <Cell type="number" value={r.maxWatts != null ? String(r.maxWatts) : ''} onCommit={(v) => setLimit(r, 'maxWatts', v)} />
+                </td>
+                <td>
+                  <Cell
+                    type="number"
+                    value={r.maxWeightKg != null ? String(r.maxWeightKg) : ''}
+                    onCommit={(v) => setLimit(r, 'maxWeightKg', v)}
                   />
                 </td>
                 <td>

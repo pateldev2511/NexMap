@@ -6,7 +6,8 @@ import { bodyText, setBody } from '@/model/callout';
 import { DEFAULT_LEADER } from '@/model/leader';
 import { NexIcon } from '@/ui/icons/NexIcon';
 import { pickHub } from '@/sim/hub';
-import { useProjectStore, type AlignEdge, type ProjectStore } from '@/store/projectStore';
+import { useProjectStore, type AlignEdge, type Projection, type ProjectStore } from '@/store/projectStore';
+import { BLUEPRINT } from './blueprintArt';
 import { CanvasSearch } from './CanvasSearch';
 import { MiniMap } from './MiniMap';
 import { getConnectMode, getWheelAction } from '@/lib/prefs';
@@ -201,7 +202,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     (e: MachineEvent, mods?: { alt?: boolean; shift?: boolean }) => void
   >(() => {});
   const viewportRef = useRef<Viewport>(initialViewport);
-  const projectionRef = useRef<'flat' | 'iso'>('flat');
+  const projectionRef = useRef<Projection>('flat');
   const altHeld = useRef(false);
   // Set after a right-button drag-pan so the trailing contextmenu is suppressed.
   const suppressMenu = useRef(false);
@@ -1560,12 +1561,15 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   const anyLinkSelected = [...selection].some((id) => !!store().getLink(id));
 
 
-  // One-shot tilt flourish when the projection (flat ↔ iso) flips.
+  // One-shot tilt flourish when the projection (flat ↔ iso) flips. Blueprint is
+  // flat geometry in different ink, so flat ↔ blueprint is a restyle, not a tilt.
   const [flipping, setFlipping] = useState(false);
   const prevProjection = useRef(projection);
   useEffect(() => {
     if (prevProjection.current === projection) return;
+    const tilted = prevProjection.current === 'iso' || projection === 'iso';
     prevProjection.current = projection;
+    if (!tilted) return;
     setFlipping(true);
     const t = setTimeout(() => setFlipping(false), 300);
     return () => clearTimeout(t);
@@ -1581,11 +1585,13 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           : ''
   }${flipping ? ' ' + styles.flip : ''}${flowMode ? ' ' + styles.flowDimmed : ''}`;
   const gridStep = 16 * viewport.scale;
+  const blueprint = projection === 'blueprint';
 
   return (
     <div
       ref={rootRef}
-      className={styles.root}
+      className={`${styles.root}${blueprint ? ' ' + styles.blueprint : ''}`}
+      data-skin={blueprint ? 'blueprint' : undefined}
       data-canvas-surface
       tabIndex={-1} /* programmatic focus target: Escape/menu-close land here */
       onDragOver={(e) => {
@@ -1651,15 +1657,54 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
             markerHeight="7"
             orient="auto-start-reverse"
           >
-            <path d="M0 0 L10 5 L0 10 z" fill="var(--chrome-fg-muted)" />
+            <path d="M0 0 L10 5 L0 10 z" fill={blueprint ? BLUEPRINT.ink : 'var(--chrome-fg-muted)'} />
           </marker>
+          {/* Blueprint sheet: a fine drafting grid (one line per cell) under a
+              heavier rule every five cells, both panning with the scene. */}
+          {blueprint && (
+            <>
+              <pattern
+                id="nexmap-bp-minor"
+                width={gridStep}
+                height={gridStep}
+                patternUnits="userSpaceOnUse"
+                patternTransform={`translate(${viewport.tx} ${viewport.ty})`}
+              >
+                <path
+                  d={`M${gridStep} 0H0V${gridStep}`}
+                  fill="none"
+                  stroke={BLUEPRINT.gridMinor}
+                  strokeWidth={1}
+                />
+              </pattern>
+              <pattern
+                id="nexmap-bp-major"
+                width={gridStep * 5}
+                height={gridStep * 5}
+                patternUnits="userSpaceOnUse"
+                patternTransform={`translate(${viewport.tx} ${viewport.ty})`}
+              >
+                <path
+                  d={`M${gridStep * 5} 0H0V${gridStep * 5}`}
+                  fill="none"
+                  stroke={BLUEPRINT.gridMajor}
+                  strokeWidth={1}
+                />
+              </pattern>
+            </>
+          )}
           {/* ISO stage: a soft floor vignette so the iso view reads as a lit scene. */}
           <radialGradient id="nexmap-iso-stage" cx="50%" cy="40%" r="80%">
             <stop offset="0%" stopColor="#8aa0c8" stopOpacity={0} />
             <stop offset="100%" stopColor="#1e293b" stopOpacity={0.17} />
           </radialGradient>
         </defs>
-        {projection !== 'iso' ? (
+        {blueprint ? (
+          <>
+            <rect x={0} y={0} width="100%" height="100%" fill="url(#nexmap-bp-minor)" />
+            <rect x={0} y={0} width="100%" height="100%" fill="url(#nexmap-bp-major)" />
+          </>
+        ) : projection !== 'iso' ? (
           <rect x={0} y={0} width="100%" height="100%" fill="url(#nexmap-grid)" />
         ) : (
           <rect x={0} y={0} width="100%" height="100%" fill="url(#nexmap-iso-stage)" />
@@ -1930,6 +1975,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
                 breaksRule={ruleIds.has(dev.id)}
                 holdsUp={holdCounts.get(dev.id)}
                 holdsEnforced={holdsEnforced.has(dev.id)}
+                blueprint={blueprint}
                 onPointerDown={onDevicePointerDown}
                 onActivate={onActivateNode}
                 onLabelDoubleClick={onLabelDoubleClick}
@@ -2158,6 +2204,9 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           projection={projection}
           onToggleProjection={() =>
             store().setProjection(projection === 'iso' ? 'flat' : 'iso')
+          }
+          onToggleBlueprint={() =>
+            store().setProjection(projection === 'blueprint' ? 'flat' : 'blueprint')
           }
           onAutoLayout={() => store().autoLayout()}
           flowMode={flowMode}
@@ -2516,7 +2565,7 @@ const LinkLayer = memo(function LinkLayer({
   getDevice: (id: string) => Device | undefined;
   selection: ReadonlySet<string>;
   health: StrokeHealth | null;
-  projection: 'flat' | 'iso';
+  projection: Projection;
   onLinkDown: (e: React.PointerEvent, id: string) => void;
 }) {
   if (import.meta.env.MODE === 'test') {

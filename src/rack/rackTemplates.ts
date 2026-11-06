@@ -21,6 +21,8 @@ export interface TemplateDevice {
   /** Friendly device name (drives auto labels + cable schedule). */
   name?: string;
   side?: Side;
+  /** Rail channel for a 0U item ('left' or 'right'); rack gear fills the bay. */
+  bay?: 'left' | 'right';
   /** Optional vendor/model catalog id for richer specs and model-aware rack art. */
   catalogId?: string;
 }
@@ -29,6 +31,8 @@ export interface TemplateRack {
   name: string;
   /** References a RACK_PRESETS id (rackTypes.ts). */
   rackPresetId: string;
+  /** Every unit that cords into a PDU has redundant supplies, one cord on each feed. */
+  dualCorded?: boolean;
   devices: TemplateDevice[];
 }
 
@@ -42,6 +46,9 @@ export interface RackTemplate {
 
 /** Terse device-row helper. */
 const d = (presetKey: string, ru: number, name?: string, side?: Side, catalogId?: string): TemplateDevice => ({ presetKey, ru, name, side, catalogId });
+/** Full-height A and B feed PDUs: the rear rail's right and left channels. */
+const pduA: TemplateDevice = { presetKey: 'pdu-full', ru: 1, name: 'pdu-a', side: 'rear', bay: 'right' };
+const pduB: TemplateDevice = { presetKey: 'pdu-full', ru: 1, name: 'pdu-b', side: 'rear', bay: 'left' };
 
 export const RACK_TEMPLATES: readonly RackTemplate[] = [
   // ── Home ──────────────────────────────────────────────────────────────────
@@ -49,12 +56,12 @@ export const RACK_TEMPLATES: readonly RackTemplate[] = [
     id: 'home-lab-6u',
     tier: 'home',
     label: 'Home lab (6U)',
-    hint: 'Wall cabinet: patch, switch, router, NAS, UPS',
+    hint: 'Shallow wall cabinet: patch, switch, router, short-depth server, UPS',
     racks: [
       {
         name: 'Home lab', rackPresetId: 'wall-6u', devices: [
           d('patch-24', 6, 'patch-01', undefined, 'panduit-24'), d('sw-8', 5, 'home-sw', undefined, 'netgear-gs724t'), d('router', 4, 'edge-rtr', undefined, 'mikrotik-ccr2004'),
-          d('server-1u', 3, 'nas-01', undefined, 'hpe-dl360-g11'), d('ups', 1, 'ups-01', undefined, 'apc-srt2200'),
+          d('server-1u', 3, 'lab-01', undefined, 'supermicro-5019d'), d('ups', 1, 'ups-01', undefined, 'cyberpower-or600'),
         ],
       },
     ],
@@ -63,13 +70,13 @@ export const RACK_TEMPLATES: readonly RackTemplate[] = [
     id: 'home-media-12u',
     tier: 'home',
     label: 'Home media + NAS (12U)',
-    hint: 'Wall cabinet with firewall, Wi-Fi controller, 4U NAS',
+    hint: 'Wall cabinet with firewall, Wi-Fi controller, NAS, media server',
     racks: [
       {
         name: 'Media rack', rackPresetId: 'wall-12u', devices: [
-          d('patch-24', 12, 'patch-01', undefined, 'panduit-24'), d('sw-16', 11, 'home-sw', undefined, 'ubnt-usw-pro-48'), d('router', 10, 'router-01', undefined, 'cisco-isr4331'),
-          d('firewall', 9, 'fw-01', undefined, 'forti-100f'), d('wlc', 8, 'wifi-01', undefined, 'cisco-c9800-40'), d('storage', 4, 'nas-01', undefined, 'synology-rs3621'),
-          d('server-1u', 3, 'media-01', undefined, 'dell-r650'), d('ups', 1, 'ups-01', undefined, 'apc-srt2200'),
+          d('patch-24', 12, 'patch-01', undefined, 'panduit-24'), d('sw-16', 11, 'home-sw', undefined, 'ubnt-usw-pro-48'), d('router', 10, 'router-01', undefined, 'mikrotik-ccr2004'),
+          d('firewall', 9, 'fw-01', undefined, 'forti-100f'), d('wlc', 8, 'wifi-01', undefined, 'cisco-c9800-l'), d('storage', 7, 'nas-01', undefined, 'synology-rs422'),
+          d('server-1u', 6, 'media-01', undefined, 'supermicro-5019d'), d('ups', 1, 'ups-01', undefined, 'cyberpower-or1500'),
         ],
       },
     ],
@@ -83,10 +90,10 @@ export const RACK_TEMPLATES: readonly RackTemplate[] = [
     racks: [
       {
         name: 'IDF', rackPresetId: 'wall-12u', devices: [
-          d('patch-48', 12, 'patch-01', undefined, 'panduit-48'), d('sw-48', 11, 'access-01', undefined, 'cisco-c9300-48p'), d('sw-48', 10, 'access-02', undefined, 'arista-7050sx3-48'),
-          d('cable-mgr', 9, 'cm-01'), d('router', 8, 'router-01', undefined, 'cisco-isr4331'), d('firewall', 7, 'fw-01', undefined, 'forti-100f'),
-          d('wlc', 6, 'wifi-01', undefined, 'cisco-c9800-40'), d('server-1u', 5, 'srv-01', undefined, 'dell-r650'), d('server-1u', 4, 'srv-02', undefined, 'hpe-dl360-g11'),
-          d('ups', 1, 'ups-01', undefined, 'apc-srt2200'), d('pdu', 1, 'pdu-01', 'rear'),
+          d('patch-48', 12, 'patch-01', undefined, 'panduit-48'), d('sw-48', 11, 'access-01', undefined, 'hpe-aruba-6300m'), d('sw-48', 10, 'access-02', undefined, 'ubnt-usw-pro-48'),
+          d('cable-mgr', 9, 'cm-01'), d('router', 8, 'router-01', undefined, 'mikrotik-ccr2004'), d('firewall', 7, 'fw-01', undefined, 'forti-100f'),
+          d('wlc', 6, 'wifi-01', undefined, 'cisco-c9800-l'), d('server-1u', 5, 'srv-01', undefined, 'supermicro-5019d'), d('server-1u', 4, 'srv-02', undefined, 'supermicro-5019d'),
+          d('ups', 1, 'ups-01', undefined, 'cyberpower-or1500'), d('pdu', 1, 'pdu-01', 'rear'),
         ],
       },
     ],
@@ -98,12 +105,12 @@ export const RACK_TEMPLATES: readonly RackTemplate[] = [
     hint: '24U: core switch, virtualization hosts, SAN, dual UPS',
     racks: [
       {
-        name: 'Server room', rackPresetId: 'std-24u', devices: [
+        name: 'Server room', rackPresetId: 'std-24u-deep', devices: [
           d('patch-48', 24, 'patch-01', undefined, 'panduit-48'), d('patch-48', 23, 'patch-02', undefined, 'panduit-48'), d('cable-mgr', 22, 'cm-01'),
           d('sw-48', 21, 'access-01', undefined, 'cisco-c9300-48p'), d('sw-48', 20, 'access-02', undefined, 'arista-7050sx3-48'), d('sw-core', 18, 'core-01', undefined, 'cisco-n9336c'),
           d('router', 17, 'router-01', undefined, 'cisco-isr4331'), d('firewall', 16, 'fw-01', undefined, 'palo-pa3220'), d('lb', 15, 'lb-01', undefined, 'f5-i2800'),
           d('server-2u', 13, 'esxi-01', undefined, 'dell-r750'), d('server-2u', 11, 'esxi-02', undefined, 'hpe-dl380-g11'), d('storage', 7, 'san-01', undefined, 'dell-me5024'),
-          d('ups', 3, 'ups-02', undefined, 'apc-srt2200'), d('ups', 1, 'ups-01', undefined, 'apc-srt2200'), d('pdu', 1, 'pdu-01', 'rear'),
+          d('ups', 3, 'ups-02', undefined, 'apc-srt2200'), d('ups', 1, 'ups-01', undefined, 'apc-srt2200'), d('pdu-full', 1, 'pdu-01', 'rear'),
         ],
       },
     ],
@@ -116,14 +123,14 @@ export const RACK_TEMPLATES: readonly RackTemplate[] = [
     hint: 'Redundant core + distribution, routers, firewalls, LBs',
     racks: [
       {
-        name: 'Core', rackPresetId: 'std-42u', devices: [
+        name: 'Core', rackPresetId: 'std-42u', dualCorded: true, devices: [
           d('patch-48', 42, 'patch-01', undefined, 'panduit-48'), d('patch-48', 41, 'patch-02', undefined, 'panduit-48'), d('cable-mgr', 40, 'cm-01'),
           d('sw-core', 38, 'core-01', undefined, 'cisco-n9336c'), d('sw-core', 36, 'core-02', undefined, 'cisco-n9336c'), d('cable-mgr', 35, 'cm-02'),
           d('sw-48', 34, 'dist-01', undefined, 'cisco-c9300-48p'), d('sw-48', 33, 'dist-02', undefined, 'arista-7050sx3-48'), d('sw-48', 32, 'dist-03', undefined, 'juniper-ex4300-48t'), d('sw-48', 31, 'dist-04', undefined, 'hpe-aruba-6300m'),
           d('cable-mgr', 30, 'cm-03'), d('router', 29, 'router-01', undefined, 'cisco-asr1001x'), d('router', 28, 'router-02', undefined, 'juniper-mx204'),
           d('firewall', 27, 'fw-01', undefined, 'palo-pa3220'), d('firewall', 26, 'fw-02', undefined, 'forti-100f'), d('lb', 25, 'lb-01', undefined, 'f5-i2800'), d('lb', 24, 'lb-02', undefined, 'f5-i2800'),
           d('server-1u', 23, 'mgmt-01', undefined, 'dell-r650'), d('storage', 18, 'san-01', undefined, 'netapp-fas2750'),
-          d('ups', 3, 'ups-b', undefined, 'apc-srt2200'), d('ups', 1, 'ups-a', undefined, 'apc-srt2200'), d('pdu', 1, 'pdu-a', 'rear'),
+          d('ups', 3, 'ups-b', undefined, 'apc-srt2200'), d('ups', 1, 'ups-a', undefined, 'apc-srt2200'), pduA, pduB,
         ],
       },
     ],
@@ -135,12 +142,12 @@ export const RACK_TEMPLATES: readonly RackTemplate[] = [
     hint: 'Top-of-rack switching, blade chassis, hosts, dual SAN',
     racks: [
       {
-        name: 'Compute', rackPresetId: 'std-42u', devices: [
+        name: 'Compute', rackPresetId: 'std-42u', dualCorded: true, devices: [
           d('patch-48', 42, 'patch-01', undefined, 'panduit-48'), d('sw-48', 41, 'tor-01', undefined, 'arista-7050sx3-48'), d('sw-48', 40, 'tor-02', undefined, 'cisco-c9300-48p'), d('cable-mgr', 39, 'cm-01'),
           d('blade', 33, 'blade-01'), d('blade', 27, 'blade-02'),
           d('server-2u', 25, 'esxi-01', undefined, 'dell-r750'), d('server-2u', 23, 'esxi-02', undefined, 'hpe-dl380-g11'), d('server-2u', 21, 'esxi-03', undefined, 'lenovo-sr650'),
           d('storage', 17, 'san-01', undefined, 'dell-me5024'), d('storage', 13, 'san-02', undefined, 'netapp-fas2750'),
-          d('ups', 3, 'ups-b', undefined, 'apc-srt2200'), d('ups', 1, 'ups-a', undefined, 'apc-srt2200'), d('pdu', 1, 'pdu-a', 'rear'),
+          d('ups', 3, 'ups-b', undefined, 'apc-srt2200'), d('ups', 1, 'ups-a', undefined, 'apc-srt2200'), pduA, pduB,
         ],
       },
     ],

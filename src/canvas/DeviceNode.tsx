@@ -3,6 +3,7 @@ import type { Device } from '@/model/types';
 import { NexIcon } from '@/ui/icons/NexIcon';
 import { defaultDeviceName } from '@/model/schema';
 import { deviceVisual, LOD_GLYPH_ONLY, LOD_LABEL_HIDE } from './deviceVisuals';
+import { BlueprintIcon } from './BlueprintIcon';
 import { FlatIcon } from './FlatIcon';
 import { NodeInfoCard } from './NodeInfoCard';
 import { HoldsBadge, RuleBadge } from './RuleBadge';
@@ -24,6 +25,8 @@ interface DeviceNodeProps {
   holdsUp?: number;
   /** At least one rule it holds up is enforced (a delete would be blocked). */
   holdsEnforced?: boolean;
+  /** Draw in the blueprint skin (drafting ink) instead of the flat art. */
+  blueprint?: boolean;
   onPointerDown: (e: React.PointerEvent, id: string) => void;
   /** Double-click the on-top name label → edit it inline. */
   onLabelDoubleClick?: (e: React.MouseEvent, id: string) => void;
@@ -45,6 +48,7 @@ function DeviceNodeImpl({
   breaksRule,
   holdsUp = 0,
   holdsEnforced = false,
+  blueprint = false,
   onPointerDown,
   onLabelDoubleClick,
   onActivate,
@@ -96,7 +100,9 @@ function DeviceNodeImpl({
         height={iconSize + 6}
         rx={iconSize * 0.24 + 3}
       />
-      {detailed ? (
+      {detailed && blueprint ? (
+        <BlueprintIcon type={device.type} cx={cx} cy={cy} size={iconSize} />
+      ) : detailed ? (
         <FlatIcon
           type={device.type}
           accent={visual.accent}

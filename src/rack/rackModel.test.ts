@@ -9,6 +9,8 @@ import {
   canFit,
   firstFreeU,
   nearestFreeU,
+  nearestFreeRail,
+  railChannel,
   isFullDepth,
   orderRacks,
   type Slot,
@@ -138,6 +140,51 @@ describe('slotsCollide', () => {
   it('two rail items on the same side collide; rail + rack do not', () => {
     expect(slotsCollide(slot({ mount: 'rail' }), slot({ mount: 'rail' }))).toBe(true);
     expect(slotsCollide(slot({ mount: 'rail' }), slot({ mount: 'rack' }))).toBe(false);
+  });
+});
+
+describe('rail channels — left and right per face, by height', () => {
+  const rail = (over: Partial<Slot> = {}) => slot({ mount: 'rail', ruSpan: 6, ...over });
+  it('a legacy full-bay rail item sits in the right channel', () => {
+    expect(railChannel(rail())).toBe('right');
+    expect(railChannel(rail({ bay: 'right' }))).toBe('right');
+    expect(railChannel(rail({ bay: 'left' }))).toBe('left');
+    expect(slotsCollide(rail({ ru: 1 }), rail({ ru: 1, bay: 'right' }))).toBe(true);
+  });
+  it('left and right channels of one face are independent (A and B feeds)', () => {
+    expect(slotsCollide(rail({ ru: 1, bay: 'left' }), rail({ ru: 1, bay: 'right' }))).toBe(false);
+    expect(slotsCollide(rail({ ru: 1, bay: 'left' }), rail({ ru: 1 }))).toBe(false);
+  });
+  it('two items in one channel stack when their U ranges do not overlap', () => {
+    expect(slotsCollide(rail({ ru: 1 }), rail({ ru: 7 }))).toBe(false); // U1–6 and U7–12
+    expect(slotsCollide(rail({ ru: 1 }), rail({ ru: 6 }))).toBe(true); // share U6
+  });
+  it('opposite faces never share a channel', () => {
+    expect(slotsCollide(rail({ ru: 1 }), rail({ ru: 1, side: 'rear' }))).toBe(false);
+  });
+  it('canFit lets a second PDU into the free channel of the same face', () => {
+    const r = rack({ ruHeight: 24 });
+    const pdu = dev({ id: 'p1', ru: 1, ruSpan: 6, mount: 'rail', side: 'rear' });
+    expect(canFit(r, [pdu], rail({ ru: 1, side: 'rear' })).ok).toBe(false);
+    expect(canFit(r, [pdu], rail({ ru: 1, side: 'rear', bay: 'left' })).ok).toBe(true);
+  });
+});
+
+describe('nearestFreeRail', () => {
+  const r = rack({ ruHeight: 24 });
+  const at = (ru: number, bay: 'full' | 'left' | 'right', span = 6) =>
+    dev({ id: `${bay}${ru}`, ru, ruSpan: span, mount: 'rail', side: 'rear', bay });
+  it('prefers the right channel when both are free', () => {
+    expect(nearestFreeRail(r, [], 6, 1, 'rear')).toEqual({ ru: 1, bay: 'right' });
+  });
+  it('falls to the left channel when the right is taken at the target', () => {
+    expect(nearestFreeRail(r, [at(1, 'right')], 6, 1, 'rear')).toEqual({ ru: 1, bay: 'left' });
+  });
+  it('a pinned channel stays pinned, stacking above what is there', () => {
+    expect(nearestFreeRail(r, [at(1, 'right')], 6, 1, 'rear', 'right')).toEqual({ ru: 7, bay: 'right' });
+  });
+  it('returns null when neither channel has room', () => {
+    expect(nearestFreeRail(r, [at(1, 'right', 24), at(1, 'left', 24)], 6, 1, 'rear')).toBeNull();
   });
 });
 

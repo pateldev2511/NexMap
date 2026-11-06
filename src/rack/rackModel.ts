@@ -21,8 +21,10 @@
  * `ru`/`ruSpan` are CANONICAL. The slot adds three qualifiers:
  *   - side: 'front' | 'rear'  — devices on opposite faces never collide.
  *   - bay:  'full' | 'left' | 'right' — two half-width devices share one U.
- *   - mount:'rack' | 'rail'   — rail = 0U side channel (PDU); does not consume U,
- *                                collides only with other rail items on the same side.
+ *   - mount:'rack' | 'rail'   — rail = 0U side channel (PDU); does not consume U.
+ *                                Each face has a left and a right channel (bay 'left',
+ *                                else right); rail items collide only with rail items
+ *                                in the same channel whose U ranges overlap.
  */
 import type { Device, DeviceType, Rack } from '@/model/types';
 import { panelKindFor } from './panelKind';
@@ -47,6 +49,12 @@ export interface Slot {
    * front and a rear unit can share one U. Derived from the device type — never persisted.
    */
   depth: Depth;
+  /**
+   * The chassis depth in mm, when the device records one. With it (and the rack's
+   * depth) back-to-back placement is judged by real millimetres instead of the
+   * full/shallow category: two short switches can share a U front and rear.
+   */
+  depthMm?: number;
 }
 
 /**
@@ -83,7 +91,20 @@ export function slotOf(d: Device): Slot {
     side: d.side ?? 'front',
     bay: d.bay ?? 'full',
     depth: isFullDepth(d.type) ? 'full' : 'shallow',
+    ...(d.depthMm && d.depthMm > 0 ? { depthMm: d.depthMm } : {}),
   };
+}
+
+/**
+ * Whether two units on opposite faces of overlapping U are too deep to share them:
+ * by millimetres when both units and the rack record a depth, else by category
+ * (only two full-depth chassis clash). Never stricter than the category rule for a
+ * full-depth pair, so recording depths can only free up space, never block more.
+ */
+export function backToBackClash(a: Slot, b: Slot, rackDepthMm?: number): boolean {
+  if (a.depth !== 'full' || b.depth !== 'full') return false;
+  if (a.depthMm && b.depthMm && rackDepthMm && rackDepthMm > 0) return a.depthMm + b.depthMm > rackDepthMm;
+  return true;
 }
 
 /** Top occupied unit of a slot (ru + span - 1). */
@@ -99,6 +120,11 @@ export function baysConflict(a: Bay, b: Bay): boolean {
   return a === b;
 }
 
+/** The rail channel a 0U item sits in: 'left' only when its bay says so; legacy 'full' is the right. */
+export function railChannel(slot: Pick<Slot, 'bay'>): 'left' | 'right' {
+  return slot.bay === 'left' ? 'left' : 'right';
+}
+
 /** Closed-interval overlap of two U ranges [ru, topU]. */
 export function uRangesOverlap(a: Slot, b: Slot): boolean {
   return a.ru <= topU(b) && b.ru <= topU(a);
@@ -107,20 +133,26 @@ export function uRangesOverlap(a: Slot, b: Slot): boolean {
 /**
  * Do two slots physically collide?
  *  - Different sides never collide (front vs rear are separate faces).
- *  - Rail-mounted items collide only with other rail items on the same side
- *    (they live in the side channel, not the U column).
+ *  - Rail-mounted items collide only with other rail items in the same channel of the
+ *    same side whose U ranges overlap (they live beside the U column, not in it).
  *  - Rack-mounted items collide when their U ranges overlap AND their bays conflict.
  */
-export function slotsCollide(a: Slot, b: Slot): boolean {
+export function slotsCollide(a: Slot, b: Slot, rackDepthMm?: number): boolean {
   if (a.mount === 'rail' || b.mount === 'rail') {
-    // Rail items live in the side channel: two on the same side share it; one rail + one
-    // rack don't, and opposite sides have separate channels.
-    return a.side === b.side && a.mount === 'rail' && b.mount === 'rail';
+    // Rail items live in a side channel: one rail + one rack never meet, and each face
+    // has its own left and right channel. Two items in one channel can stack by height.
+    return (
+      a.side === b.side &&
+      a.mount === 'rail' &&
+      b.mount === 'rail' &&
+      railChannel(a) === railChannel(b) &&
+      uRangesOverlap(a, b)
+    );
   }
   if (a.side !== b.side) {
-    // Opposite faces are independent UNLESS both are full-depth chassis — those fill the U
-    // front-to-rear, so two of them can't occupy overlapping U on opposite sides.
-    return a.depth === 'full' && b.depth === 'full' && uRangesOverlap(a, b);
+    // Opposite faces are independent UNLESS both are full-depth chassis that together
+    // are deeper than the rack (see backToBackClash).
+    return uRangesOverlap(a, b) && backToBackClash(a, b, rackDepthMm);
   }
   return uRangesOverlap(a, b) && baysConflict(a.bay, b.bay);
 }
@@ -154,7 +186,7 @@ export function canFit(
     if (occ.id === ignoreId) continue;
     if (occ.rackId !== rack.id) continue;
     const s = slotOf(occ);
-    if (!slotsCollide(s, candidate)) continue;
+    if (!slotsCollide(s, candidate, rack.depthMm)) continue;
     // Same U range but a half-bay is free vs a full clash → distinguish the message.
     return {
       ok: false,
@@ -217,4 +249,60 @@ export function nearestFreeU(
     if (d > 0 && fits(start + d)) return start + d;
   }
   return null;
+}
+
+/**
+ * Nearest free spot for a 0U rail item on `side`: a 'left' or 'right' bay pins the
+ * channel; 'full' (no preference) tries the right channel, then the left, and takes
+ * whichever lands closer to `target` (the right on a tie). Null when neither has room.
+ */
+export function nearestFreeRail(
+  rack: Rack,
+  occupants: Device[],
+  span: number,
+  target: number,
+  side: Side = 'front',
+  bay: Bay = 'full',
+  ignoreId?: string,
+): { ru: number; bay: 'left' | 'right' } | null {
+  const channels: ('left' | 'right')[] = bay === 'full' ? ['right', 'left'] : [bay];
+  let best: { ru: number; bay: 'left' | 'right' } | null = null;
+  for (const ch of channels) {
+    const ru = nearestFreeU(rack, occupants, span, target, side, ch, 'shallow', ignoreId, 'rail');
+    if (ru != null && (!best || Math.abs(ru - target) < Math.abs(best.ru - target))) best = { ru, bay: ch };
+  }
+  return best;
+}
+
+export interface DepthProblems {
+  /** Rack-mounted units deeper than the rack's usable depth. */
+  tooDeep: Device[];
+  /** Front + rear units sharing a U whose depths add up past the rack (and don't collide). */
+  clashes: [Device, Device][];
+}
+
+/**
+ * Depth-fit for one rack: what doesn't fit front-to-rear. Needs the rack's depth and
+ * the units' depths; anything unrecorded isn't judged. Warn-only by design — the
+ * designer never refuses a placement for depth (back-to-back pairs that truly can't
+ * share a U are already an occupancy collision via slotsCollide). Pure.
+ */
+export function depthProblems(rack: Rack, devices: readonly Device[]): DepthProblems {
+  const out: DepthProblems = { tooDeep: [], clashes: [] };
+  const limit = rack.depthMm;
+  if (!limit || limit <= 0) return out;
+  const racked = devices.filter((d) => d.rackId === rack.id && d.ru != null && (d.mount ?? 'rack') === 'rack');
+  for (const d of racked) if (d.depthMm && d.depthMm > limit) out.tooDeep.push(d);
+  for (let i = 0; i < racked.length; i++) {
+    for (let j = i + 1; j < racked.length; j++) {
+      const a = racked[i]!;
+      const b = racked[j]!;
+      const sa = slotOf(a);
+      const sb = slotOf(b);
+      if (sa.side === sb.side || !uRangesOverlap(sa, sb) || !a.depthMm || !b.depthMm) continue;
+      if (a.depthMm + b.depthMm <= limit || slotsCollide(sa, sb, limit)) continue;
+      out.clashes.push([a, b]);
+    }
+  }
+  return out;
 }

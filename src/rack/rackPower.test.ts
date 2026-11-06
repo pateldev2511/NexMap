@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { powerFeedAnalysis, proposePowerBalance } from './rackPower';
+import { cordsIntoPdu, isPdu, nextPduFeed, pduFeedCoverage, powerFeedAnalysis, proposePowerBalance } from './rackPower';
 import type { Device } from '@/model/types';
 
 const dev = (over: Partial<Device>): Device => ({
@@ -103,5 +103,39 @@ describe('proposePowerBalance', () => {
       dev({ id: 'c', watts: 80, powerFeed: 'A' }),
     ];
     expect(proposePowerBalance(fleet)).toEqual(proposePowerBalance(fleet));
+  });
+});
+
+describe('PDUs and their feeds', () => {
+  const pdu = (over: Partial<Device> = {}) =>
+    dev({ type: 'ups', mount: 'rail', side: 'rear', ru: 1, ruSpan: 6, interfaces: Array.from({ length: 8 }, (_, i) => ({ id: `o${i}`, name: `C13-${i + 1}` })), ...over });
+
+  it('a PDU is a rail-mounted ups; a rack UPS is not', () => {
+    expect(isPdu(pdu())).toBe(true);
+    expect(isPdu(dev({ type: 'ups', mount: 'rack' }))).toBe(false);
+    expect(cordsIntoPdu(dev({ type: 'ups', mount: 'rack', ru: 1 }))).toBe(false); // it feeds the PDUs
+  });
+
+  it('a new PDU takes the feed the rack lacks: A, then B, then the emptier one', () => {
+    expect(nextPduFeed('r1', [])).toBe('A');
+    expect(nextPduFeed('r1', [pdu({ powerFeed: 'A' })])).toBe('B');
+    expect(nextPduFeed('r1', [pdu()])).toBe('B'); // unset counts as A
+    expect(nextPduFeed('r1', [pdu({ powerFeed: 'B' })])).toBe('A');
+    expect(nextPduFeed('r1', [pdu({ powerFeed: 'A' }), pdu({ powerFeed: 'B' })])).toBe('A');
+    expect(nextPduFeed('r1', [pdu({ powerFeed: 'A', rackId: 'other' })])).toBe('A'); // another rack's
+  });
+
+  it('counts cords per feed: one per single-corded unit, one on each feed per dual-corded unit', () => {
+    const [a, b] = pduFeedCoverage({ id: 'r1' }, [
+      pdu({ id: 'pa', powerFeed: 'A' }),
+      dev({ id: 's1', ru: 10, powerFeed: 'AB' }),
+      dev({ id: 's2', ru: 12 }), // unset → A
+      dev({ id: 's3', ru: 14, powerFeed: 'B' }),
+      dev({ id: 'pp', type: 'patch-panel', ru: 20 }), // no cord
+      dev({ id: 'cm', type: 'generic', name: 'cm-01', ru: 21 }), // cable manager: no cord
+      dev({ id: 'off', ru: null as unknown as number }), // not mounted
+    ]);
+    expect(a).toMatchObject({ feed: 'A', pdus: 1, outlets: 8, cords: 2, deviceIds: ['s1', 's2'] });
+    expect(b).toMatchObject({ feed: 'B', pdus: 0, outlets: 0, cords: 2, deviceIds: ['s1', 's3'] });
   });
 });

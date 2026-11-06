@@ -13,6 +13,7 @@ export type NexIconName =
   | 'text'
   | 'shape'
   | 'iso'
+  | 'blueprint'
   | 'flow'
   | 'fabric'
   | 'hub'
@@ -212,6 +213,14 @@ const ICONS: Record<NexIconName, ReactNode> = {
       <path d="M12 3.5 20 8l-8 4.5L4 8z" />
       <path d="M4 8v8l8 4.5 8-4.5V8" />
       <path d="M12 12.5v8" />
+    </>
+  ),
+  // Blueprint view: a drafting sheet with a rolled edge and a ruled corner.
+  blueprint: (
+    <>
+      <path d="M5 4h11l3 3v13H5z" />
+      <path d="M16 4v3h3" />
+      <path d="M8 10h8M8 13h8M8 16h5" />
     </>
   ),
   // Stress-test / blast radius: an impact burst radiating from a node.

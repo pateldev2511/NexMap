@@ -839,6 +839,14 @@ export function App() {
                   run: () => st().setProjection(st().projection === 'iso' ? 'flat' : 'iso'),
                 },
                 {
+                  id: 'blueprint',
+                  label: st().projection === 'blueprint' ? 'Leave blueprint view' : 'Blueprint view',
+                  hint: 'the diagram as a drafting sheet',
+                  group: 'View',
+                  run: () =>
+                    st().setProjection(st().projection === 'blueprint' ? 'flat' : 'blueprint'),
+                },
+                {
                   id: 'reroute',
                   label: 'Route selected link(s) around obstacles',
                   group: 'View',

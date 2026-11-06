@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import { useProjectStore } from '@/store/projectStore';
-import { runExport, type ExportFormat, type ExportOptions } from '@/io/export';
+import { useProjectStore, type Projection } from '@/store/projectStore';
+import { localDate, runExport, type ExportFormat, type ExportOptions } from '@/io/export';
 import { buildSvg } from '@/io/export/buildSvg';
 import type { CanvasObject, Device, Link } from '@/model/types';
 import { NexIcon } from '@/ui/icons/NexIcon';
@@ -37,7 +37,8 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const [bgColor, setBgColor] = useState('#ffffff');
   const [includeLabels, setIncludeLabels] = useState(true);
   const [modern, setModern] = useState(false);
-  const [iso, setIso] = useState(() => store().projection === 'iso');
+  const [projection, setProjection] = useState<Projection>(() => store().projection);
+  const blueprint = projection === 'blueprint';
   const [highlightHealth, setHighlightHealth] = useState(true);
   const [quality, setQuality] = useState(0.92);
   const [fileName, setFileName] = useState('');
@@ -88,11 +89,13 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         background: supportsTransparent && transparent ? null : bgColor,
         includeLabels,
         objects: scene.objects as CanvasObject[],
-        projection: iso ? 'iso' : 'flat',
+        projection,
         health: highlightHealth ? store().health : null,
         modern,
+        title: projectName,
+        date: localDate(),
       }),
-    [scene, transparent, bgColor, includeLabels, supportsTransparent, iso, highlightHealth, modern, store],
+    [scene, transparent, bgColor, includeLabels, supportsTransparent, projection, highlightHealth, modern, projectName, store],
   );
   const previewUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(previewSvg);
 
@@ -109,7 +112,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         pageSize: 'a4',
         orientation: 'landscape',
         fileName,
-        projection: iso ? 'iso' : 'flat',
+        projection,
         health: highlightHealth ? store().health : null,
         modern,
       };
@@ -245,7 +248,9 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
               <>
                 <label>Background</label>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  {supportsTransparent && (
+                  {/* A blueprint is pale ink on its own paper — never transparent. */}
+                  {blueprint && <span>Blueprint paper</span>}
+                  {!blueprint && supportsTransparent && (
                     <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                       <input
                         type="checkbox"
@@ -255,7 +260,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                       Transparent
                     </label>
                   )}
-                  {(!supportsTransparent || !transparent) && (
+                  {!blueprint && (!supportsTransparent || !transparent) && (
                     <input
                       type="color"
                       value={bgColor}
@@ -289,20 +294,22 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                   />
                   Include device names
                 </label>
-                <label>Projection</label>
-                <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                  <input
-                    type="checkbox"
-                    checked={iso}
-                    onChange={(e) => setIso(e.target.checked)}
-                  />
-                  Isometric view
-                </label>
+                <label htmlFor="export-projection">Projection</label>
+                <select
+                  id="export-projection"
+                  value={projection}
+                  onChange={(e) => setProjection(e.target.value as Projection)}
+                >
+                  <option value="flat">Flat (2D)</option>
+                  <option value="iso">Isometric</option>
+                  <option value="blueprint">Blueprint sheet (title block, on blue paper)</option>
+                </select>
                 <label>Style</label>
                 <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                   <input
                     type="checkbox"
-                    checked={modern}
+                    checked={modern && !blueprint}
+                    disabled={blueprint}
                     onChange={(e) => setModern(e.target.checked)}
                   />
                   Modern (cards, shadows, dot grid)

@@ -13,6 +13,126 @@ the cables down to the hardware, with a user control to dial the motion.
 
 ### Added
 
+- **Power-cord plan.** NexMap now works out which PDU outlet each unit's power
+  cord plugs into: one cord for single-corded gear, one on each feed for
+  dual-corded gear. Each cord takes the free outlet on its feed nearest the unit's
+  height, filling from the top of the rack down. Select a unit and its Power tab
+  shows "Plugs into: Feed A pdu-a · C13-3"; select a PDU and it lists every outlet
+  and what plugs into it, with free ones marked. The export drawer's cable schedule
+  gains a **Power cords** CSV (rack, device, U, feed, PDU, outlet). A cord whose feed
+  has no free outlet is listed as "no free outlet", never doubled up. The plan is
+  worked out from the rack each time and isn't saved in the file.
+- **PDUs know which power feed they're on.** A new PDU takes the feed its rack
+  doesn't have yet, so the first is A and the second B. That holds whether you place
+  it, paste it from a parts list, or get it from a template. The strip shows its feed
+  letter, and the Power tab offers a PDU only Feed A or B (a strip can't be
+  dual-corded). In racks that have at least one PDU, the panel now warns
+  about two things. "No PDU on feed B" fires when gear needs a cord on a feed that
+  no PDU in the rack is on. "Feed A is short of outlets" fires when a feed has more
+  cords than outlets on its PDUs. Each warning has an **Add PDU** button that puts a
+  PDU on that feed in a free rail channel. A dual-corded unit counts one cord on each
+  feed; patch panels, blanking panels, cable managers and rack UPSes count none. A
+  new **full-height PDU** (24 outlets) is in the library, and a parts-list line like
+  "full height PDU" or "vertical PDU" mounts it. The two redundant enterprise
+  templates now cord every unit into both feeds from full-height A and B PDUs, so
+  they open with no power warnings. The 24U server-room template uses a full-height
+  PDU too.
+- **Two rail channels per rack face.** Each face of a rack now has a left and a
+  right 0U channel, and two rail items only collide when they share a channel and
+  their U ranges overlap. Two PDUs fit on the rear as an A feed and a B feed, and
+  short strips can stack in one channel. When you place a rail item, the toolbar
+  offers Auto (right channel, then left), L or R. A pasted parts list fills the rear
+  right and left channels first, then the front ones, and only stacks once every
+  channel is in use. The rack inspector shows a rail item's position as
+  "U15–20 · rear rail · right channel". Rail items in older files keep their place
+  in the right channel.
+- **Vertical cable managers.** A new "Vertical cable manager (0U)" in the rack
+  library runs the full height of the rail it's placed on. It also mounts from a
+  pasted parts list ("vertical cable manager"), ahead of any PDUs. Cable routes now
+  include the vertical run, e.g. "cm-01 (U22) → Vertical manager 1 (U1–42) →
+  cm-02 (U35)". A cord that stays inside one horizontal manager doesn't use the
+  vertical run, and a cross-rack cord goes up each rack's vertical manager. Gear
+  beside a vertical manager counts as dressed, so it no longer gets "Dense gear
+  without a cable manager". The schedule shows how many cords each vertical manager
+  carries. It never warns that one is over capacity: that depends on the
+  manager's width and depth, and vendors publish it only through sizing
+  calculators. The rack inspector's Hardware tab gains an **Accessory** field, so
+  any generic unit can be marked as a cable manager, or unmarked even when its name
+  reads like one ("cm-01").
+- **Real datasheet depths for the hardware catalog.** Every rack-mount model now
+  carries the installed depth from its vendor's datasheet, with sources listed in
+  `docs/CATALOG-DEPTHS.md`. Applying a model in the inspector, pasting a parts list
+  or placing a rack template brings that depth along. Depth-fit can now catch a
+  758 mm PowerEdge R750 pasted into a 400 mm wall cabinet the moment it lands,
+  instead of only after someone types the depth in. The model picker shows each
+  depth ("2U · 4p · 1100W · 28kg · 758mm deep"). A rack with a depth now says when
+  some of its full-depth gear records none ("Depth not checked for 3 units"), so
+  silence can't pass for "fits". When those units name a catalog model, **Fill
+  depths** stamps their datasheet figures in one ⌘Z, and never overwrites a depth
+  someone entered. Four short-depth models were added for shallow cabinets:
+  - Synology RS422+
+  - Supermicro SYS-5019D-FN8TP
+  - Cisco Catalyst 9800-L
+  - CyberPower OR600ERM1U
+- **Blueprint view.** A third view style beside 2D and ISO: the sheet icon in the
+  canvas toolbar, or "Blueprint view" in ⌘K. The diagram becomes a drafting sheet,
+  with pale ink on blue paper, a fine drafting grid, line-drawn devices with corner
+  registration ticks, and names lettered in mono caps. Zones become dashed
+  outlines. Risky links keep their amber and red, because a drawing that hides a
+  SPOF is worse than a plain one. Saved views remember it. In Export, "Blueprint
+  sheet" adds a ruled border and a title block (project, date, scale NTS, node and
+  link counts) in its own strip below the drawing.
+- **An icon-system spec every skin is held to.** One 24-unit grid with a 2–22 live
+  area, one pen per skin, three corner radii, one port size, and one silhouette per
+  device type (`docs/ICON-SYSTEM.md`). A test measures the line, flat and
+  blueprint art against it, so an icon that drifts fails CI. Writing it turned up a
+  dozen line icons that disagreed with their flat versions; the UPS, for one, was a
+  wide box in line art and a tower in flat. Those were redrawn to match.
+- **Patch schedule from your topology.** Once gear is mounted, "Patch N from
+  topology" in the cable schedule turns every link you drew between racked devices
+  into a patch cable. It uses the ports a link names, or the first free ones.
+  Labels run P-001, P-002 … and carry on after any you already have. Lengths are
+  estimated from where the gear sits. It's one ⌘Z, and the banner says what it
+  left alone: "Patched 16 links as P-001–P-016 — 1 link has an end outside a
+  rack." A device with no free port is named, never double-patched, and links
+  that already have a cable aren't patched twice.
+- **Cable-management lanes.** Each cord is now routed through the horizontal cable
+  manager nearest each end (same face, within 3U). The schedule shows the route
+  ("via cm-02 (U35) → cm-01 (U40)"), and so do the CSV's new Route column and the
+  exported cable table. Chips under the schedule show how full each manager is
+  ("cm-01 U40 · 28/24"), at about 24 cords per U. Smart suggestions warn when a
+  manager is over capacity, and when dense gear (12+ cords) has no manager near it.
+  These are warnings, never blocks. Cable managers also draw as finger-duct bars
+  now, not blanking panels. Managers in older designs are recognised by their stock
+  names ("Cable manager 2", a template's "cm-01").
+- **Paste a parts list into a rack.** "Parts list" in the rack designer's toolbar
+  takes a quote, BOM or email, one item per line, and mounts it. Quantities like
+  "2x", "× 2", "(2)", "qty 2" or a spreadsheet's Qty column work. A number that
+  describes the item ("24 port switch", "MX204") is not read as a quantity. Named
+  models (Cisco, Dell, HPE, APC …) get their real height, power, weight and ports
+  from the catalog. Anything else is matched by what it is ("metered PDU",
+  "1U cable manager", "core switch 10G"), and a "3U" on the line sets the height.
+  Before anything changes, a preview shows where each unit lands, heaviest at the
+  bottom: UPS, then compute, network, switches and patching, with rail PDUs on the
+  rear channel. It fills around gear already in the rack and lists what won't fit
+  and what it couldn't read; it never guesses. Mounting is one ⌘Z, and names
+  follow a declared naming rule.
+- **Rack depth-fit.** Racks and devices can record a depth in mm: "Depth (mm)" in a
+  device's Power tab in the rack designer, and a Depth column in the Racks table.
+  Cabinet presets come with a typical usable depth (42U enclosed ~900 mm, 24U
+  ~550 mm, wall 12U ~400 mm, wall 6U ~300 mm); an open two-post rack has no depth
+  limit. NexMap then **warns, never blocks**:
+  - "Server-1 is 1000 mm deep; 42U fits 900 mm."
+  - "PP-1 (500 mm) and PP-2 (450 mm) sit front and rear of the same U but need
+    950 mm of 42U's 900 mm."
+
+  These show in Validation, the rack's health score and Smart suggestions. Recorded
+  depths also free up space: two short switches (say 450 + 400 mm in a 900 mm
+  cabinet) can now share a U front and rear, which the designer used to refuse for
+  any two full-depth units. Without depths recorded, nothing changes.
+- **Edit a rack's power and weight caps.** The Racks table now has Power cap (W) and
+  Weight cap (kg) columns, so the power and weight budget can actually be set up.
+  Before, the caps existed but nothing in the app edited them. Blank clears a limit.
 - **Carry your rules to the next design.** The Rules tab (and ⌘K) can save a
   design's rules as a small `.nexrules` file and load rules into another design,
   from a rules file or straight from any `.nexmap` design. Loading merges as one
@@ -547,6 +667,32 @@ the cables down to the hardware, with a user control to dial the motion.
 - Refreshed brand assets: new app icon, Open Graph image, and theme color.
 
 ### Fixed
+
+- A 0U PDU in the rack library's gear thumbnail no longer draws negative-height
+  outlets, which filled the console with SVG errors. A strip too short for all its
+  outlets now draws as many as fit.
+- A horizontal cable manager's finger ducts no longer cut through its name on the
+  rack faceplate ("C ble mana er").
+- **Four starter rack templates no longer build racks that can't physically
+  exist.** Once the catalog knew real depths, depth-fit flagged its own templates:
+  - The 6U home lab put a 753 mm server and a 584 mm UPS in a 300 mm wall cabinet.
+  - The 12U home-media and office-IDF cabinets (400 mm) held 758 mm servers.
+  - The 24U "server room" used a 550 mm half-height network cabinet.
+
+  The wall cabinets now hold short-depth gear that fits them. The server room
+  stands in a new **24U server cabinet** preset (915 mm usable, from APC's
+  NetShelter SX 24U). Templates also mount each catalog model at its real height:
+  the RS3621xs+ is 2U, not the 4U generic NAS. A test now builds every template
+  and fails if any rack trips its own depth check.
+- **Validation no longer reports legitimate rack sharing as overlaps.** The rack
+  collision check ignored faces, half-bays and 0U rails, so a front and rear patch
+  panel in one U, two half-width units side by side, or a PDU on the rail beside a
+  switch read as "overlap in the rack" errors. It now uses the rack designer's own
+  placement rule.
+
+- **A PDU dropped into a rack is named "PDU", not "UPS 2".** The same went for the
+  PSU shelf and console server, and a cable manager, blanking panel or shelf came
+  out as "Node". These now get a name for what they are.
 
 - **Declaring a rule is autosaved right away.** Autosave only watched for diagram
   edits, and declaring, retracting, adding or removing a rule doesn't edit the diagram.

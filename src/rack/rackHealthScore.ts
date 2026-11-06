@@ -62,6 +62,13 @@ export function rackHealthScore(
   if (budget.overWatts || budget.overWeight) {
     capacity = 0;
     capacityRisk = budget.overWatts ? 'Over the power cap.' : 'Over the weight cap.';
+  } else if (budget.overDepth) {
+    // Doesn't fit front-to-rear: a real problem, but a warning — not a hard fail.
+    capacity = 0.4;
+    const n = budget.tooDeep + budget.depthClashes;
+    capacityRisk = budget.tooDeep > 0
+      ? `${budget.tooDeep} unit${budget.tooDeep === 1 ? ' is' : 's are'} deeper than the rack.`
+      : `${n} front/rear pair${n === 1 ? '' : 's'} too deep to share a U.`;
   } else if (budget.pct > 0.9) {
     capacity = clamp01(1 - (budget.pct - 0.9) / 0.1) * 0.5 + 0.3; // 0.3..0.8 band when 90-100%
     capacityRisk = `Only ${budget.freeU}U free (${Math.round(budget.pct * 100)}% full).`;

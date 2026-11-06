@@ -135,6 +135,15 @@ export interface Device {
   /** Power draw (watts) and weight (kg) for the rack power/weight budget. Optional. */
   watts?: number;
   weightKg?: number;
+  /** Chassis depth (mm) for rack depth-fit. Additive and optional: absent → not checked. */
+  depthMm?: number;
+  /**
+   * What a passive rack accessory is, when its device type can't say (a cable manager is
+   * type 'generic'). Lets cable runs be routed through managers; on the 0U rail it is a
+   * vertical manager. 'none' says a unit is NOT one even though its name reads like one
+   * ("cm-01"). Additive and optional.
+   */
+  rackAccessory?: 'cable-manager' | 'none';
   /** Unit list price (USD) for the bill-of-materials cost rollup (schema v3 additive). Optional. */
   priceUsd?: number;
   /** Airflow direction for hot-aisle hinting (schema v3 additive). Absent → front-to-rear. */
@@ -363,8 +372,12 @@ export interface View {
   /** Layer IDs hidden in this view. */
   hiddenLayers: string[];
   camera?: { tx: number; ty: number; scale: number };
-  /** Render projection for this view (Phase 9). Absent = flat (back-compat). */
-  projection?: 'flat' | 'iso';
+  /**
+   * Render projection for this view (Phase 9). `blueprint` is the drafting skin
+   * over flat geometry. Absent = flat (back-compat); an older build that doesn't
+   * know `blueprint` falls back to flat, since it only special-cases `iso`.
+   */
+  projection?: 'flat' | 'iso' | 'blueprint';
 }
 
 export interface Rack {
@@ -382,6 +395,11 @@ export interface Rack {
   /** Capacity caps for the power/weight budget (additive, optional). */
   maxWatts?: number;
   maxWeightKg?: number;
+  /**
+   * Usable mounting depth, front rail to rear (mm). Additive and optional: absent →
+   * depth isn't checked (an open two-post rack has no depth limit).
+   */
+  depthMm?: number;
   /** Left-to-right order in the multi-rack row view; absent → insertion order. */
   order?: number;
   /**

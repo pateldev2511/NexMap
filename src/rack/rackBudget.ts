@@ -5,6 +5,7 @@
  * caps simply never reports an overload.
  */
 import type { Device, Rack } from '@/model/types';
+import { depthProblems } from './rackModel';
 
 export interface RackBudget {
   /** Distinct physical U occupied by rack-mounted (non-rail) gear, capped at ruHeight. */
@@ -18,6 +19,12 @@ export interface RackBudget {
   maxWeightKg?: number;
   overWatts: boolean;
   overWeight: boolean;
+  /** Rack depth (mm), when set, and how many units don't fit it (see depthProblems). */
+  depthMm?: number;
+  tooDeep: number;
+  depthClashes: number;
+  /** Anything that doesn't fit the rack's depth — a warning, never a block. */
+  overDepth: boolean;
 }
 
 /**
@@ -52,6 +59,7 @@ export function rackBudget(rack: Rack, devices: Device[]): RackBudget {
   // Distinct U across both faces (front+rear share depth; half-bays share their U).
   const occupied = occupiedUnits(rack, devices);
 
+  const depth = depthProblems(rack, inRack);
   const usedU = occupied.size;
   const freeU = Math.max(0, rack.ruHeight - usedU);
   const pct = rack.ruHeight > 0 ? usedU / rack.ruHeight : 0;
@@ -65,6 +73,10 @@ export function rackBudget(rack: Rack, devices: Device[]): RackBudget {
     maxWeightKg: rack.maxWeightKg,
     overWatts: rack.maxWatts != null && watts > rack.maxWatts,
     overWeight: rack.maxWeightKg != null && weightKg > rack.maxWeightKg,
+    ...(rack.depthMm ? { depthMm: rack.depthMm } : {}),
+    tooDeep: depth.tooDeep.length,
+    depthClashes: depth.clashes.length,
+    overDepth: depth.tooDeep.length + depth.clashes.length > 0,
   };
 }
 

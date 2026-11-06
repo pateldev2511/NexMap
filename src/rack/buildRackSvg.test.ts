@@ -120,15 +120,15 @@ describe('cable schedule (E3)', () => {
   it('derives installer rows with device:port labels', () => {
     const rows = cableScheduleRows([sw, srv], [cable]);
     expect(rows).toEqual([
-      { color: '#22d3ee', label: 'uplink', from: 'core-sw:Gi1/0/1', to: 'esxi-01:vmnic0', lengthFt: '', vlan: '' },
+      { color: '#22d3ee', label: 'uplink', from: 'core-sw:Gi1/0/1', to: 'esxi-01:vmnic0', lengthFt: '', vlan: '', route: '' },
     ]);
   });
 
   it('falls back to ids when a name is missing, and CSV-quotes fields', () => {
     const csv = cableScheduleCsv([sw, srv], [cable]);
     const lines = csv.split('\n');
-    expect(lines[0]).toBe('Color,Label,From,To,VLAN,Length (ft)');
-    expect(lines[1]).toBe('"#22d3ee","uplink","core-sw:Gi1/0/1","esxi-01:vmnic0","",""');
+    expect(lines[0]).toBe('Color,Label,From,To,VLAN,Length (ft),Route');
+    expect(lines[1]).toBe('"#22d3ee","uplink","core-sw:Gi1/0/1","esxi-01:vmnic0","","",""');
   });
 
   it('shows the VLAN when both ends agree, and "a/b" when they differ', () => {
