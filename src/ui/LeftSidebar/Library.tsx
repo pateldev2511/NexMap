@@ -2,8 +2,9 @@ import { useMemo, useState } from 'react';
 import type { DeviceType } from '@/model/types';
 import { IsoIcon } from '@/canvas/IsoIcon';
 import { FlatIcon } from '@/canvas/FlatIcon';
+import { BlueprintIcon } from '@/canvas/BlueprintIcon';
 import { deviceVisual } from '@/canvas/deviceVisuals';
-import { useProjectStore } from '@/store/projectStore';
+import { useProjectStore, type Projection } from '@/store/projectStore';
 import { defaultDeviceName } from '@/model/schema';
 import { NexIcon } from '@/ui/icons/NexIcon';
 import styles from './Library.module.css';
@@ -55,7 +56,7 @@ const GROUPS: Group[] = [
   },
 ];
 
-function LibraryItem({ type, iso }: { type: DeviceType; iso: boolean }) {
+function LibraryItem({ type, projection }: { type: DeviceType; projection: Projection }) {
   const visual = deviceVisual(type);
   return (
     <div
@@ -68,10 +69,13 @@ function LibraryItem({ type, iso }: { type: DeviceType; iso: boolean }) {
       title={`Drag to add ${defaultDeviceName(type)}`}
     >
       <span className={styles.swatch}>
-        {/* Match the active canvas projection: flat tiles in 2D, 3D models in iso. */}
+        {/* Match the active canvas projection: flat tiles in 2D, 3D models in iso,
+            line drawings (in the sidebar's own ink) in blueprint. */}
         <svg width="34" height="26" viewBox="0 0 34 26" aria-hidden="true">
-          {iso ? (
+          {projection === 'iso' ? (
             <IsoIcon type={type} accent={visual.accent} cx={17} cy={11} size={19} />
+          ) : projection === 'blueprint' ? (
+            <BlueprintIcon type={type} cx={17} cy={13} size={20} ink="currentColor" />
           ) : (
             <FlatIcon type={type} accent={visual.accent} cx={17} cy={13} size={18} />
           )}
@@ -83,7 +87,7 @@ function LibraryItem({ type, iso }: { type: DeviceType; iso: boolean }) {
 }
 
 export function Library() {
-  const iso = useProjectStore((s) => s.projection) === 'iso';
+  const projection = useProjectStore((s) => s.projection);
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState<Set<string>>(
     () => new Set(GROUPS.filter((g) => g.defaultOpen).map((g) => g.name)),
@@ -132,7 +136,7 @@ export function Library() {
               {isOpen && (
                 <div className={styles.grid}>
                   {g.types.map((t) => (
-                    <LibraryItem key={t} type={t} iso={iso} />
+                    <LibraryItem key={t} type={t} projection={projection} />
                   ))}
                 </div>
               )}

@@ -15,6 +15,11 @@ export interface RackPreset {
   widthIn: NonNullable<Rack['widthIn']>;
   /** One-line description for the picker. */
   hint: string;
+  /**
+   * Typical usable mounting depth (mm) for this kind of rack — a starting point the
+   * user can change per rack. Absent for open two-post racks: no depth limit there.
+   */
+  depthMm?: number;
 }
 
 export const RACK_PRESETS: readonly RackPreset[] = [
@@ -24,7 +29,8 @@ export const RACK_PRESETS: readonly RackPreset[] = [
     ruHeight: 42,
     postType: 'four-post',
     widthIn: 19,
-    hint: 'Full-height data-center cabinet',
+    hint: 'Full-height data-center cabinet · ~900 mm usable',
+    depthMm: 900,
   },
   {
     id: 'std-24u',
@@ -32,7 +38,17 @@ export const RACK_PRESETS: readonly RackPreset[] = [
     ruHeight: 24,
     postType: 'four-post',
     widthIn: 19,
-    hint: 'Half-height IDF cabinet',
+    hint: 'Half-height IDF cabinet · ~550 mm usable',
+    depthMm: 550,
+  },
+  {
+    id: 'std-24u-deep',
+    label: '24U · 19" 4-post server',
+    ruHeight: 24,
+    postType: 'four-post',
+    widthIn: 19,
+    hint: 'Half-height server cabinet · ~915 mm usable',
+    depthMm: 915,
   },
   {
     id: 'open-42u',
@@ -48,7 +64,8 @@ export const RACK_PRESETS: readonly RackPreset[] = [
     ruHeight: 12,
     postType: 'wall',
     widthIn: 19,
-    hint: 'Small office / closet',
+    hint: 'Small office / closet · ~400 mm usable',
+    depthMm: 400,
   },
   {
     id: 'wall-6u',
@@ -56,7 +73,8 @@ export const RACK_PRESETS: readonly RackPreset[] = [
     ruHeight: 6,
     postType: 'wall',
     widthIn: 19,
-    hint: 'Home lab / branch',
+    hint: 'Home lab / branch · ~300 mm usable',
+    depthMm: 300,
   },
   {
     id: 'wide-42u',
@@ -64,7 +82,8 @@ export const RACK_PRESETS: readonly RackPreset[] = [
     ruHeight: 42,
     postType: 'four-post',
     widthIn: 23,
-    hint: 'Wide (carrier / 23") cabinet',
+    hint: 'Wide (carrier / 23") cabinet · ~900 mm usable',
+    depthMm: 900,
   },
 ] as const;
 
@@ -77,12 +96,14 @@ export function rackPresetById(id: string | undefined): RackPreset | undefined {
 /** Build the Rack-shaped fields (name aside) for a chosen preset. */
 export function rackFieldsFromPreset(preset: RackPreset): Pick<
   Rack,
-  'ruHeight' | 'postType' | 'widthIn' | 'presetId'
+  'ruHeight' | 'postType' | 'widthIn' | 'presetId' | 'depthMm'
 > {
   return {
     ruHeight: preset.ruHeight,
     postType: preset.postType,
     widthIn: preset.widthIn,
     presetId: preset.id,
+    // A preset's depth replaces the rack's (an open two-post clears it: no limit).
+    depthMm: preset.depthMm,
   };
 }

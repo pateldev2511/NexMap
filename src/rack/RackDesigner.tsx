@@ -26,13 +26,18 @@ import {
 } from './buildRackSvg';
 import { analyzeCabling } from './rackHealth';
 import { rackBudget, fleetBudget } from './rackBudget';
-import { powerFeedAnalysis } from './rackPower';
-import { slotOf, canFit, nearestFreeU, isFullDepth, orderRacks, type FitResult } from './rackModel';
-import { RACK_DEVICE_PRESETS, RACK_PRESET_GROUPS, type RackDevicePreset } from './rackDevicePresets';
+import { cordsIntoPdu, isPdu, nextPduFeed, powerFeedAnalysis } from './rackPower';
+import { planPowerCords, powerCordCsv } from './powerCords';
+import { slotOf, canFit, nearestFreeU, nearestFreeRail, railChannel, isFullDepth, isFullHeightRail, orderRacks, type FitResult } from './rackModel';
+import { RACK_DEVICE_PRESETS, RACK_PRESET_GROUPS, presetSpan, type RackDevicePreset } from './rackDevicePresets';
+import { cableLanes, managerSpanLabel, routeLabel } from './cableLanes';
+import { isCableManager } from './panelKind';
+import { planPatches } from './patchPlan';
 import { RACK_PRESETS, rackFieldsFromPreset, DEFAULT_RACK_PRESET } from './rackTypes';
 import { RackTemplatePicker } from './RackTemplatePicker';
-import { catalogById, catalogForType, catalogSpecLabel } from './rackCatalog';
+import { catalogById, catalogForType, catalogPatch, catalogSpecLabel } from './rackCatalog';
 import type { RackTemplate } from './rackTemplates';
+import { PartsListPanel } from './PartsListPanel';
 import { COLOR_BY_MODES, colorByLegend, type ColorByMode } from './rackColorBy';
 import { rackInsights, type RackInsight } from './rackInsights';
 import { rackHealthScore } from './rackHealthScore';
@@ -46,11 +51,11 @@ import type { Device, TextObject } from '@/model/types';
 import styles from './RackDesigner.module.css';
 
 /** Human-readable reason for a rejected drop. */
-function rejectReason(fit: FitResult): string {
+function rejectReason(fit: FitResult, mount: 'rack' | 'rail' = 'rack'): string {
   if (fit.ok) return '';
   switch (fit.reason) {
     case 'occupied':
-      return 'That U is occupied';
+      return mount === 'rail' ? 'That rail channel is taken here' : 'That U is occupied';
     case 'bay-conflict':
       return 'That half-bay is taken';
     case 'out-of-bounds':
@@ -98,6 +103,7 @@ function GearThumb({ preset, device }: { preset?: RackDevicePreset; device?: Dev
     width: 56,
     height: 40,
     layerId: 'thumb',
+    ...(preset?.accessory ? { rackAccessory: preset.accessory } : {}),
     interfaces: Array.from({ length: Math.min(preset?.ports ?? 0, 48) }, (_, i) => ({ id: `p${i}`, name: preset?.portName(i) ?? `p${i}` })),
   };
   const face = device ? slotOf(device).side : 'front';
@@ -163,9 +169,10 @@ export function RackDesigner() {
   const [newType, setNewType] = useState<string>(DEFAULT_RACK_PRESET.id);
   const [reject, setReject] = useState<RejectInfo | null>(null);
   const [side, setSideState] = useState<'front' | 'rear'>('front');
-  const [bay, setBay] = useState<'full' | 'left' | 'right'>('full');
+  const [bayPick, setBay] = useState<'full' | 'left' | 'right'>('full');
   const [selCable, setSelCable] = useState<string | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [showParts, setShowParts] = useState(false);
   const [colorBy, setColorBy] = useState<ColorByMode>('gear');
   const [search, setSearch] = useState('');
   const [deviceSearch, setDeviceSearch] = useState('');
@@ -208,6 +215,17 @@ export function RackDesigner() {
   }, [deviceSearch, devices]);
   // Physical-cabling health (warns, never blocks).
   const cabling = useMemo(() => analyzeCabling(devices, cables), [devices, cables]);
+  // Which cable manager dresses each cord, and how full each manager in this rack is.
+  const lanes = useMemo(() => cableLanes(devices, cables), [devices, cables]);
+  const rackFill = useMemo(() => lanes.fill.filter((f) => f.manager.rackId === rack?.id), [lanes, rack?.id]);
+  // Which PDU outlet each cord in this rack plugs into (derived, never stored).
+  const powerCords = useMemo(() => (rack ? planPowerCords(rack, devices) : []), [rack, devices]);
+  // Logical links between racked gear that don't have a patch cable yet.
+  const patchable = useMemo(
+    () => planPatches(devices, s().linksAll(), cables, racks).items.length,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [devices, cables, racks, rev],
+  );
   const insights = useMemo(
     () => rackInsights({ racks, devices, cables, issues: cabling.issues, activeRackId: rack?.id, selectedDeviceId: selectedId }),
     [racks, devices, cables, cabling.issues, rack?.id, selectedId],
@@ -238,10 +256,12 @@ export function RackDesigner() {
   }, [insights]);
   const bestArmedU = useMemo(() => {
     if (!rack || !armed) return null;
-    const useBay = (armed.mount ?? 'rack') === 'rail' ? 'full' : bay;
+    const span = presetSpan(armed, rack.ruHeight);
+    const target = Math.min(21, rack.ruHeight);
+    if ((armed.mount ?? 'rack') === 'rail') return nearestFreeRail(rack, inRack, span, target, side, bayPick)?.ru ?? null;
     const depth = isFullDepth(armed.type) ? 'full' : 'shallow';
-    return nearestFreeU(rack, inRack, armed.span, Math.min(21, rack.ruHeight), side, useBay, depth);
-  }, [armed, bay, inRack, rack, side]);
+    return nearestFreeU(rack, inRack, span, target, side, bayPick, depth);
+  }, [armed, bayPick, inRack, rack, side]);
 
   /** Switch faces and drop any selection that belongs to the face we're leaving. */
   function setSide(next: 'front' | 'rear') {
@@ -373,30 +393,33 @@ export function RackDesigner() {
   /** Shared by click-to-place AND drag-and-drop: validate, then create + mount, or reject. */
   function placePreset(preset: RackDevicePreset, u: number) {
     if (!rack) return;
-    const span = preset.span;
+    // The bay / channel picker shows only while a preset is armed, so it applies only to
+    // that preset; anything else (a library drag) fills the bay or picks a channel itself.
+    const bay = armed?.key === preset.key ? bayPick : 'full';
+    const span = presetSpan(preset, rack.ruHeight);
     const mount = preset.mount ?? 'rack';
-    const useBay = mount === 'rail' ? 'full' : bay; // rail items span the channel
     const depth = isFullDepth(preset.type) ? 'full' : 'shallow';
-    const slot = {
-      ru: Math.min(u, rack.ruHeight - span + 1),
-      ruSpan: span,
-      mount,
-      side,
-      bay: useBay,
-      depth,
-    } as const;
-    lastPresetRef.current = preset;
+    const ru = Math.min(u, rack.ruHeight - span + 1);
     const occ = devices.filter((d) => d.rackId === rack.id);
+    // A rail item goes in the channel the bay picks; with no pick, the right channel if
+    // it has room at this U, else the left (so a second PDU becomes the B feed).
+    const useBay = mount === 'rack' || bay !== 'full'
+      ? bay
+      : (['right', 'left'] as const).find((ch) => canFit(rack, occ, { ru, ruSpan: span, mount, side, bay: ch, depth }).ok) ?? 'right';
+    const slot = { ru, ruSpan: span, mount, side, bay: useBay, depth } as const;
+    lastPresetRef.current = preset;
     // Pre-check BEFORE creating anything — never leave an orphan device on rejection.
     const fit = canFit(rack, occ, slot);
     if (!fit.ok) {
       setReject({
         u: slot.ru,
         span,
-        reason: rejectReason(fit),
-        pulseU: nearestFreeU(rack, occ, span, slot.ru, side, useBay, depth),
+        reason: rejectReason(fit, mount),
+        pulseU: mount === 'rail'
+          ? nearestFreeRail(rack, occ, span, slot.ru, side, bay)?.ru ?? null
+          : nearestFreeU(rack, occ, span, slot.ru, side, useBay, depth),
       });
-      announce(`Placement rejected: ${rejectReason(fit)}`);
+      announce(`Placement rejected: ${rejectReason(fit, mount)}`);
       window.setTimeout(() => setReject(null), REJECT_FLASH_MS);
       return;
     }
@@ -404,7 +427,7 @@ export function RackDesigner() {
     // Create the device, give it a DISTINGUISHABLE auto-numbered name (so the cable
     // schedule reads "sw-01:Gi1/0/1", not five identical "Switch" rows), auto-populate
     // ports, all in one undoable edit, then place it.
-    const base = defaultDeviceName(preset.type);
+    const base = preset.name ?? defaultDeviceName(preset.type);
     const used = new Set(devices.map((d) => d.name));
     let n = devices.filter((d) => d.name === base || d.name.startsWith(`${base} `)).length + 1;
     while (used.has(`${base} ${n}`)) n++;
@@ -415,8 +438,16 @@ export function RackDesigner() {
       : [];
     s().updateDevice(
       id,
-      { name: base, interfaces: [], watts: undefined, weightKg: undefined },
-      { name, interfaces: ifaces, watts: preset.watts || undefined, weightKg: preset.weightKg || undefined },
+      { name: base, interfaces: [], watts: undefined, weightKg: undefined, rackAccessory: undefined, powerFeed: undefined },
+      {
+        name,
+        interfaces: ifaces,
+        watts: preset.watts || undefined,
+        weightKg: preset.weightKg || undefined,
+        rackAccessory: preset.accessory,
+        // A new PDU takes the feed the rack still lacks: the first is A, the second B.
+        powerFeed: isPdu({ type: preset.type, mount }) ? nextPduFeed(rack.id, devices) : undefined,
+      },
     );
     s().placeInRack(id, rack.id, slot);
     s().select([id]);
@@ -450,10 +481,10 @@ export function RackDesigner() {
       setReject({
         u: ru,
         span: slot.ruSpan,
-        reason: rejectReason(fit),
-        pulseU: nearestFreeU(rack, others, slot.ruSpan, ru, slot.side, slot.bay, slot.depth),
+        reason: rejectReason(fit, slot.mount),
+        pulseU: nearestFreeU(rack, others, slot.ruSpan, ru, slot.side, slot.bay, slot.depth, undefined, slot.mount, slot.depthMm),
       });
-      announce(`Move rejected: ${rejectReason(fit)}`);
+      announce(`Move rejected: ${rejectReason(fit, slot.mount)}`);
       window.setTimeout(() => setReject(null), REJECT_FLASH_MS);
     }
   }
@@ -492,11 +523,8 @@ export function RackDesigner() {
     if (!selected) return;
     const model = catalogById(modelId);
     if (!model) return;
-    s().updateDevice(
-      selected.id,
-      { vendor: selected.vendor, model: selected.model, watts: selected.watts, weightKg: selected.weightKg },
-      { vendor: model.vendor, model: model.model, watts: model.watts || undefined, weightKg: model.weightKg || undefined },
-    );
+    const { before, after } = catalogPatch(selected, model);
+    s().updateDevice(selected.id, before, after);
     s().endEdit();
   }
 
@@ -577,6 +605,10 @@ export function RackDesigner() {
       s().autoLengthRackCables();
       return;
     }
+    if (insight.action === 'fill-depths') {
+      s().fillDepthsFromCatalog();
+      return;
+    }
     if (insight.action === 'add-asset-tag') {
       if (insight.deviceId) focusDevice(insight.deviceId);
       setInspectorTab('asset');
@@ -590,6 +622,16 @@ export function RackDesigner() {
         if (moved === 0 && selectedId) setInspectorTab('power');
       } else {
         if (selectedId) setInspectorTab('power');
+      }
+      return;
+    }
+    if (insight.action === 'add-pdu' && insight.rackId) {
+      const feed = insight.id.endsWith('-B') ? 'B' : 'A';
+      const id = s().addPdu(insight.rackId, feed);
+      if (id) {
+        setRackId(insight.rackId);
+        const d = s().devicesAll().find((x) => x.id === id);
+        if (d) setSideState(slotOf(d).side);
       }
       return;
     }
@@ -637,12 +679,18 @@ export function RackDesigner() {
     const d = devices.find((x) => x.id === deviceId);
     const target = racks.find((r) => r.id === targetRackId);
     if (!d || !target || d.rackId === targetRackId) return false;
-    const sl = slotOf(d);
+    const from = racks.find((r) => r.id === d.rackId);
+    // A full-height rail item takes the target rack's height, not its old one.
+    const sl = { ...slotOf(d), ...(from && isFullHeightRail(d, from) ? { ruSpan: target.ruHeight } : {}) };
     const occ = devices.filter((x) => x.rackId === targetRackId);
     // A pointer drag (row view) says WHERE the user pointed; the panel's
     // "Move to rack" control has no cursor, so it keeps the device's old U.
     const wanted = Math.max(1, Math.min(preferredU ?? sl.ru, target.ruHeight - sl.ruSpan + 1));
-    const u = nearestFreeU(target, occ, sl.ruSpan, wanted, sl.side, sl.bay, sl.depth, undefined, sl.mount);
+    // A rail item takes whichever channel of the target rack has room nearest.
+    const railSpot = sl.mount === 'rail' ? nearestFreeRail(target, occ, sl.ruSpan, wanted, sl.side) : null;
+    const u = sl.mount === 'rail'
+      ? railSpot?.ru ?? null
+      : nearestFreeU(target, occ, sl.ruSpan, wanted, sl.side, sl.bay, sl.depth, undefined, 'rack', sl.depthMm);
     const showReject = (reason: string) => {
       announce(`Move rejected: ${reason}`);
       setReject({ u: wanted, span: sl.ruSpan, reason, pulseU: null });
@@ -651,8 +699,8 @@ export function RackDesigner() {
       window.setTimeout(() => setRowReject(null), REJECT_FLASH_MS);
     };
     if (u == null) { showReject(`No room in ${target.name}`); return false; }
-    const fit = s().placeInRack(deviceId, targetRackId, { ...sl, ru: u });
-    if (!fit.ok) { showReject(rejectReason(fit)); return false; }
+    const fit = s().placeInRack(deviceId, targetRackId, { ...sl, ru: u, ...(railSpot ? { bay: railSpot.bay } : {}) });
+    if (!fit.ok) { showReject(rejectReason(fit, sl.mount)); return false; }
     if (follow) setRackId(targetRackId);
     setSideState(sl.side);
     s().select([deviceId]);
@@ -697,6 +745,9 @@ export function RackDesigner() {
     if (!rack) return;
     const csv = cableScheduleCsv(devices, cables);
     downloadBlob(new Blob([csv], { type: 'text/csv' }), `${exportName()}-cables.csv`);
+  }
+  function exportPowerCords() {
+    downloadBlob(new Blob([powerCordCsv(racks, devices)], { type: 'text/csv' }), `${exportName()}-power-cords.csv`);
   }
   function exportLabels() {
     rasterize(buildLabelSheetSvg(racks, devices, { background: '#ffffff' }), { scale: 2, mimeType: 'image/png', background: null })
@@ -769,6 +820,7 @@ export function RackDesigner() {
           )}
           <button className={styles.btn} onClick={createRack}>+ Rack</button>
           <button className={`${styles.btn} ${showTemplates ? styles.primary : ''}`} title="Insert a pre-made rack template" onClick={() => setShowTemplates((v) => !v)}>Templates</button>
+          <button className={`${styles.btn} ${showParts ? styles.primary : ''}`} title="Paste a parts list and mount it into this rack" disabled={!rack} onClick={() => setShowParts((v) => !v)}>Parts list</button>
           <button className={styles.btn} title="Duplicate the focused rack with its gear + cabling" onClick={cloneCurrentRack}>Clone</button>
         </div>
         <div className={styles.commandGroup} aria-label="Plan and view controls">
@@ -835,9 +887,16 @@ export function RackDesigner() {
               </button>
               {armed && (armed.mount ?? 'rack') === 'rack' && (
                 <div className={styles.seg} title="Half-width bay: two devices share one U">
-                  <button className={bay === 'full' ? styles.on : ''} onClick={() => setBay('full')}>Full</button>
-                  <button className={bay === 'left' ? styles.on : ''} onClick={() => setBay('left')}>L</button>
-                  <button className={bay === 'right' ? styles.on : ''} onClick={() => setBay('right')}>R</button>
+                  <button className={bayPick === 'full' ? styles.on : ''} onClick={() => setBay('full')}>Full</button>
+                  <button className={bayPick === 'left' ? styles.on : ''} onClick={() => setBay('left')}>L</button>
+                  <button className={bayPick === 'right' ? styles.on : ''} onClick={() => setBay('right')}>R</button>
+                </div>
+              )}
+              {armed && armed.mount === 'rail' && (
+                <div className={styles.seg} title="Rail channel: each face has a left and a right 0U channel">
+                  <button className={bayPick === 'full' ? styles.on : ''} onClick={() => setBay('full')}>Auto</button>
+                  <button className={bayPick === 'left' ? styles.on : ''} onClick={() => setBay('left')}>L</button>
+                  <button className={bayPick === 'right' ? styles.on : ''} onClick={() => setBay('right')}>R</button>
                 </div>
               )}
             </>
@@ -845,7 +904,7 @@ export function RackDesigner() {
         </div>
         <span className={styles.commandMetric} title="Used / total U (and power/weight if capped)">
           <b>{usedU}</b>/{rack.ruHeight}U{budget && budget.maxWatts != null ? ` · ${budget.watts}/${budget.maxWatts}W` : ''}
-          {budget && (budget.overWatts || budget.overWeight) ? ' ⚠' : ''}
+          {budget && (budget.overWatts || budget.overWeight || budget.overDepth) ? ' ⚠' : ''}
         </span>
         <div className={styles.spacer} />
         <div className={styles.commandGroup} aria-label="Export controls">
@@ -897,7 +956,7 @@ export function RackDesigner() {
                 <span className={styles.chipText}>
                   <b>{p.label}</b>
                   <small>
-                    {p.span}U · {p.ports} port{p.ports === 1 ? '' : 's'}
+                    {p.fullHeight ? 'Full height' : `${p.span}U`} · {p.ports} port{p.ports === 1 ? '' : 's'}
                     {p.watts > 0 ? ` · ${p.watts}W` : ''}
                     {p.weightKg > 0 ? ` · ${p.weightKg}kg` : ''}
                   </small>
@@ -916,6 +975,13 @@ export function RackDesigner() {
 
       {/* canvas */}
       <div className={`${styles.stage} ${armed && view === 'focus' ? styles.placing : ''}`} style={view === 'row' ? { flexDirection: 'column', alignItems: 'stretch' } : undefined}>
+        {showParts && rack && (
+          <div className={styles.templateOverlay} onClick={() => setShowParts(false)}>
+            <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 640 }}>
+              <PartsListPanel rack={rack} onClose={() => setShowParts(false)} />
+            </div>
+          </div>
+        )}
         {showTemplates && (
           <div className={styles.templateOverlay} onClick={() => setShowTemplates(false)}>
             <div onClick={(e) => e.stopPropagation()}>
@@ -1257,7 +1323,9 @@ export function RackDesigner() {
               {inspectorTab === 'placement' && (
                 <div className={styles.inspectorPane}>
                   <div className={styles.kv}><span>Type</span><b>{selected.type}</b></div>
-                  <div className={styles.kv}><span>Position</span><b>U{selected.ru} · {slotOf(selected).side} · {slotOf(selected).bay}</b></div>
+                  <div className={styles.kv}><span>Position</span><b>{slotOf(selected).mount === 'rail'
+                    ? `U${selected.ru}–${selected.ru! + slotOf(selected).ruSpan - 1} · ${slotOf(selected).side} rail · ${railChannel(slotOf(selected))} channel`
+                    : `U${selected.ru} · ${slotOf(selected).side} · ${slotOf(selected).bay}`}</b></div>
                   <div className={styles.kv}><span>Ports</span><b>{selected.interfaces?.length ?? 0}</b></div>
                   <div className={styles.rowBtns}>
                     <button className={styles.btn} title="Move up 1U (↑)" onClick={() => nudge(1)}>↑ U</button>
@@ -1295,6 +1363,26 @@ export function RackDesigner() {
                   <div className={styles.field}><label>Vendor</label><input value={selected.vendor ?? ''} onChange={(e) => updateSelected('vendor', e.target.value)} onBlur={commitSelectedEdit} /></div>
                   <div className={styles.field}><label>Model</label><input value={selected.model ?? ''} onChange={(e) => updateSelected('model', e.target.value)} onBlur={commitSelectedEdit} /></div>
                   <div className={styles.field}><label>Role</label><input value={selected.role ?? ''} onChange={(e) => updateSelected('role', e.target.value)} onBlur={commitSelectedEdit} /></div>
+                  {selected.type === 'generic' && (
+                    <div className={styles.field}>
+                      <label>Accessory</label>
+                      <select
+                        value={isCableManager(selected) ? 'cable-manager' : 'none'}
+                        aria-label="Rack accessory"
+                        title="A cable manager routes patch cords; on the 0U rail it runs vertically"
+                        onChange={(e) => {
+                          const on = e.target.value === 'cable-manager';
+                          // Clearing a unit whose name reads like a manager ("cm-01") needs an explicit 'none'.
+                          const off = isCableManager({ ...selected, rackAccessory: undefined }) ? 'none' : undefined;
+                          updateSelected('rackAccessory', on ? 'cable-manager' : off);
+                          commitSelectedEdit();
+                        }}
+                      >
+                        <option value="none">None</option>
+                        <option value="cable-manager">Cable manager</option>
+                      </select>
+                    </div>
+                  )}
                   <div className={styles.field}>
                     <label>Airflow</label>
                     <select
@@ -1345,17 +1433,45 @@ export function RackDesigner() {
                 <div className={styles.inspectorPane}>
                   <div className={styles.field}><label>Watts</label><input type="number" value={selected.watts ?? ''} onChange={(e) => updateSelected('watts', (e.target.value === '' ? undefined : Number(e.target.value)) as Device['watts'])} onBlur={commitSelectedEdit} /></div>
                   <div className={styles.field}><label>Weight (kg)</label><input type="number" value={selected.weightKg ?? ''} onChange={(e) => updateSelected('weightKg', (e.target.value === '' ? undefined : Number(e.target.value)) as Device['weightKg'])} onBlur={commitSelectedEdit} /></div>
+                  <div className={styles.field}><label>Depth (mm)</label><input type="number" min={0} value={selected.depthMm ?? ''} onChange={(e) => updateSelected('depthMm', (e.target.value === '' || Number(e.target.value) <= 0 ? undefined : Number(e.target.value)) as Device['depthMm'])} onBlur={commitSelectedEdit} aria-label="Depth (mm)" /></div>
                   <div className={styles.field}>
-                    <label>Power feed</label>
+                    <label>{isPdu(selected) ? 'On feed' : 'Power feed'}</label>
                     <select value={selected.powerFeed ?? 'A'} onChange={(e) => { updateSelected('powerFeed', e.target.value as Device['powerFeed']); commitSelectedEdit(); }}>
-                      <option value="A">Feed A (single)</option>
-                      <option value="B">Feed B (single)</option>
-                      <option value="AB">A + B (redundant)</option>
+                      <option value="A">{isPdu(selected) ? 'Feed A' : 'Feed A (single)'}</option>
+                      <option value="B">{isPdu(selected) ? 'Feed B' : 'Feed B (single)'}</option>
+                      {!isPdu(selected) && <option value="AB">A + B (redundant)</option>}
                     </select>
                   </div>
                   {(() => {
                     const pf = powerFeedAnalysis(devices);
                     return <div className={styles.powerBalance}>A {(pf.normalA / 1000).toFixed(2)} kW · B {(pf.normalB / 1000).toFixed(2)} kW · {pf.singleCorded} single-corded</div>;
+                  })()}
+                  {(() => {
+                    // Where this unit's cords plug in, or what plugs into this PDU.
+                    const nameOf = (id: string | null) => (id ? devices.find((d) => d.id === id)?.name ?? id : '');
+                    if (isPdu(selected)) {
+                      const used = new Map(powerCords.filter((c) => c.pduId === selected.id).map((c) => [c.outlet, c.deviceId]));
+                      const outlets = selected.interfaces ?? [];
+                      if (outlets.length === 0) return null;
+                      return (
+                        <div className={styles.cordList} aria-label="Power cords">
+                          <small>Outlets · {used.size} of {outlets.length} used</small>
+                          {outlets.map((o) => (
+                            <span key={o.id}><b>{o.name}</b> {used.has(o.name) ? nameOf(used.get(o.name)!) : <i>free</i>}</span>
+                          ))}
+                        </div>
+                      );
+                    }
+                    const mine = powerCords.filter((c) => c.deviceId === selected.id);
+                    if (!cordsIntoPdu(selected) || mine.length === 0 || !powerCords.some((c) => c.pduId)) return null;
+                    return (
+                      <div className={styles.cordList} aria-label="Power cords">
+                        <small>Plugs into</small>
+                        {mine.map((c) => (
+                          <span key={c.feed}><b>Feed {c.feed}</b> {c.pduId ? `${nameOf(c.pduId)} · ${c.outlet}` : <i>no free outlet</i>}</span>
+                        ))}
+                      </div>
+                    );
                   })()}
                 </div>
               )}
@@ -1454,7 +1570,39 @@ export function RackDesigner() {
                 Auto-length
               </button>
             )}
+            {patchable > 0 && (
+              <button
+                className={styles.btn}
+                style={{ float: 'right', fontSize: 11, marginRight: 4 }}
+                title="Cable every link between rack-mounted gear: free ports, P-### labels, estimated lengths. One undo."
+                onClick={() => s().patchFromTopology()}
+              >
+                Patch {patchable} from topology
+              </button>
+            )}
           </h3>
+          {rackFill.length > 0 && (
+            <div className={styles.laneFill} aria-label="Cable managers">
+              {rackFill.map((f) => (
+                f.capacity == null ? (
+                  <span
+                    key={f.manager.id}
+                    title={`${f.manager.name} carries ${f.cables} cords along ${managerSpanLabel(f.manager)}. Size it with the vendor's capacity calculator.`}
+                  >
+                    {f.manager.name} {managerSpanLabel(f.manager)} · {f.cables}
+                  </span>
+                ) : (
+                  <span
+                    key={f.manager.id}
+                    className={f.cables > f.capacity ? styles.laneOver : undefined}
+                    title={`${f.manager.name} at U${f.manager.ru} dresses ${f.cables} of about ${f.capacity} cords`}
+                  >
+                    {f.manager.name} U{f.manager.ru} · {f.cables}/{f.capacity}
+                  </span>
+                )
+              ))}
+            </div>
+          )}
           {cables.length === 0 && (
             <div className={styles.emptyMicro}>No cables yet.</div>
           )}
@@ -1480,6 +1628,9 @@ export function RackDesigner() {
                 >
                   ×
                 </button>
+                {!!lanes.routes.get(c.id)?.length && (
+                  <span className={styles.route}>via {routeLabel(lanes.routes.get(c.id)!)}</span>
+                )}
               </div>
             );
           })}
@@ -1516,9 +1667,10 @@ export function RackDesigner() {
               </div>
               <div className={styles.exportPreset}>
                 <b>Cable schedule</b>
-                <span>Endpoint list with color, label, and length.</span>
+                <span>Endpoint list with color, label, and length, plus each power cord's PDU outlet.</span>
                 <div className={styles.rowBtns}>
                   <button className={styles.btn} onClick={exportCsv}>CSV</button>
+                  <button className={styles.btn} title="Which PDU outlet each unit's power cords plug into" onClick={exportPowerCords}>Power cords</button>
                   <button className={styles.btn} onClick={() => s().autoLengthRackCables()}>Auto-length</button>
                 </div>
               </div>

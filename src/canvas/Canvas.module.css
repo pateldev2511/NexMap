@@ -1067,3 +1067,96 @@
 .holdsBadgeEnforced rect:not(.holdsRing) {
   stroke-width: 1.5;
 }
+
+/* ── Blueprint skin ──────────────────────────────────────────────────────
+   The drafting sheet: cyanotype paper, one pale ink, one fine pen. It's a skin,
+   not a theme — the sheet is the same blue in light and dark mode, the way a
+   printed blueprint is. Tokens are re-pointed on the SVG only, so floating
+   chrome (toolbar, zoom bar) keeps the app theme. Literal colours mirror
+   BLUEPRINT in blueprintArt.ts, which exports use. A drawing is still: no
+   travelling packets, no glow, no drop shadows. Health tints (amber/red links)
+   are kept on purpose — a sheet that hides a SPOF is worse than a plain one. */
+.blueprint {
+  background: #123e6b;
+}
+
+.blueprint .svg {
+  --canvas-bg: #123e6b;
+  --chrome-bg: #123e6b;
+  --chrome-border: #9fbbd8;
+  --chrome-fg: #e6f0fb;
+  --chrome-fg-muted: #b9cfe6;
+  --accent: #67e8f9;
+  --accent-ring: rgba(103, 232, 249, 0.45);
+}
+
+.deviceBlueprint {
+  pointer-events: none;
+}
+
+.blueprint .linkFlow {
+  display: none;
+}
+
+.blueprint .link {
+  stroke-width: 1.25;
+}
+
+.blueprint .link.selected,
+.blueprint .node.selected .deviceTileHalo {
+  filter: none;
+}
+
+/* Selection on paper is a dashed construction line, not a glowing chip. */
+.blueprint .node.selected .deviceTileHalo {
+  fill: none;
+  stroke-dasharray: 3 2;
+  stroke-width: 1.25;
+}
+
+.blueprint .node:hover .deviceTileHalo {
+  stroke-dasharray: 3 2;
+  stroke-width: 1;
+}
+
+/* Name cards become drafting labels: no card, caps, mono. The paper fill is
+   invisible on the sheet but stops a link from striking through the lettering. */
+.blueprint .infoCardInner {
+  background: #123e6b;
+  border-color: transparent;
+  box-shadow: none;
+  padding: 2px 6px;
+  font-family: var(--font-mono);
+}
+
+.blueprint .infoCardSelected {
+  border-color: var(--accent);
+  border-style: dashed;
+  box-shadow: none;
+}
+
+.blueprint .infoCardName {
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.blueprint .linkLabel,
+.blueprint .ifaceLabel {
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+}
+
+/* Zones are outlined areas on a drawing; user fills would paint over the sheet. */
+.blueprint .shapeBody {
+  fill: rgba(230, 240, 251, 0.04);
+  stroke: #b9cfe6;
+  stroke-width: 1.25;
+  stroke-dasharray: 6 3;
+}
+
+/* Callouts are lettered in the sheet's ink, whatever colour they carry on paper. */
+.blueprint .textObj {
+  fill: #e6f0fb;
+}

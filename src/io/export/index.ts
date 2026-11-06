@@ -45,12 +45,18 @@ export interface ExportOptions {
   pageSize: PageSize;
   orientation: 'portrait' | 'landscape';
   fileName: string;
-  /** Render the isometric projection in image/vector exports (Phase 9.6). */
-  projection?: 'flat' | 'iso';
+  /** Render the isometric projection, or the blueprint sheet, in image/vector exports. */
+  projection?: 'flat' | 'iso' | 'blueprint';
   /** Topology-health context to tint risky links in exports (null = no tint). */
   health?: import('@/canvas/connector').StrokeHealth | null;
   /** Modern styling (dot-grid, rounded zone cards, node chips, callout cards). */
   modern?: boolean;
+}
+
+/** Today as YYYY-MM-DD in the user's own time zone — the blueprint title block's date. */
+export function localDate(now: Date = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`;
 }
 
 function safeName(name: string, ext: string): string {
@@ -122,6 +128,8 @@ export async function runExport(
     projection: opts.projection,
     health: opts.health,
     modern: opts.modern,
+    title: scene.projectName,
+    date: localDate(),
   });
 
   if (opts.format === 'svg') {

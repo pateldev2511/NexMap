@@ -34,7 +34,8 @@ test('double-click empty canvas → picker → device created and selected (M4c)
   const before = await deviceCount(page);
   const svg = (await page.locator('svg:has(g[data-id])').first().boundingBox())!;
 
-  await page.mouse.dblclick(svg.x + 40, svg.y + 40); // empty corner
+  // Empty canvas below the floating toolbar (it spans most of the top band).
+  await page.mouse.dblclick(svg.x + 40, svg.y + 110);
   const menu = page.getByRole('menu', { name: 'Add device' });
   await expect(menu).toBeVisible();
   await menu.getByRole('menuitem', { name: 'Switch' }).click();
@@ -47,7 +48,7 @@ test('Escape closes the picker without creating anything', async ({ page }) => {
   await openBranchOffice(page);
   const before = await deviceCount(page);
   const svg = (await page.locator('svg:has(g[data-id])').first().boundingBox())!;
-  await page.mouse.dblclick(svg.x + 40, svg.y + 40);
+  await page.mouse.dblclick(svg.x + 40, svg.y + 110); // empty, below the toolbar
   await expect(page.getByRole('menu', { name: 'Add device' })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('menu', { name: 'Add device' })).toHaveCount(0);
@@ -119,7 +120,7 @@ test('keys do not leak past the open picker (Delete must not touch the canvas)',
   const count = await deviceCount(page);
 
   const svg = (await page.locator('svg:has(g[data-id])').first().boundingBox())!;
-  await page.mouse.dblclick(svg.x + 40, svg.y + 40);
+  await page.mouse.dblclick(svg.x + 40, svg.y + 110); // empty, below the toolbar
   await expect(page.getByRole('menu', { name: 'Add device' })).toBeVisible();
 
   await page.keyboard.press('Delete'); // router overlay swallows this

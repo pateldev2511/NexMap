@@ -16,6 +16,7 @@ import {
   stripPrefix,
 } from '@/lib/ipcidr';
 import type { Device, Link, Rack, Subnet, ValidationIssue, Vlan } from './types';
+import { depthProblems, slotOf, slotsCollide } from '@/rack/rackModel';
 
 let counter = 0;
 function issueId(): string {
@@ -281,18 +282,21 @@ function checkIpOutsideSubnet(devices: Device[], subnets: Subnet[]): ValidationI
   return issues;
 }
 
-/** Rule: rack RU placements must not collide or overflow. */
+/**
+ * Rule: rack placements must not collide or overflow, and must fit the rack's depth.
+ * Collisions follow the rack designer's own rule (rackModel.slotsCollide): opposite
+ * faces, half-bays and 0U rail items share a U legitimately. Depth only ever warns:
+ * a unit deeper than the rack, or a front + rear pair whose depths add up past it.
+ */
 function checkRacks(devices: Device[], racks: Rack[]): ValidationIssue[] {
   if (racks.length === 0) return [];
-  const byRack = new Map<string, number>();
-  for (const r of racks) byRack.set(r.id, r.ruHeight);
+  const rackById = new Map(racks.map((r) => [r.id, r]));
   const issues: ValidationIssue[] = [];
-  const placed = devices.filter((d) => d.rackId && d.ru != null);
+  const placed = devices.filter((d) => d.rackId && d.ru != null && rackById.has(d.rackId));
   // Overflow / invalid range.
   for (const d of placed) {
-    const height = byRack.get(d.rackId!);
+    const height = rackById.get(d.rackId!)!.ruHeight;
     const span = d.ruSpan ?? 1;
-    if (height == null) continue;
     if (d.ru! < 1 || d.ru! + span - 1 > height) {
       issues.push({
         id: issueId(),
@@ -303,21 +307,22 @@ function checkRacks(devices: Device[], racks: Rack[]): ValidationIssue[] {
       });
     }
   }
-  // Collisions within the same rack.
+  // Collisions within the same rack (the designer's own face/bay/rail/depth rule).
   const byRackId = new Map<string, Device[]>();
   for (const d of placed) {
     const list = byRackId.get(d.rackId!) ?? [];
     list.push(d);
     byRackId.set(d.rackId!, list);
   }
-  for (const [, list] of byRackId) {
+  for (const [rackId, list] of byRackId) {
+    const rack = rackById.get(rackId)!;
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
         const a = list[i]!;
         const b = list[j]!;
-        const aTop = a.ru! + (a.ruSpan ?? 1) - 1;
-        const bTop = b.ru! + (b.ruSpan ?? 1) - 1;
-        if (a.ru! <= bTop && b.ru! <= aTop) {
+        const sa = slotOf(a);
+        const sb = slotOf(b);
+        if (slotsCollide(sa, sb, rack.depthMm)) {
           issues.push({
             id: issueId(),
             severity: 'error',
@@ -327,6 +332,30 @@ function checkRacks(devices: Device[], racks: Rack[]): ValidationIssue[] {
           });
         }
       }
+    }
+  }
+  // Depth: deeper than the rack, or front + rear too deep to share a U (warn only).
+  for (const rack of racks) {
+    const { tooDeep, clashes } = depthProblems(rack, placed);
+    for (const d of tooDeep) {
+      issues.push({
+        id: issueId(),
+        severity: 'warn',
+        code: 'rack-depth-overflow',
+        message: `${d.name} is ${d.depthMm} mm deep; ${rack.name} fits ${rack.depthMm} mm.`,
+        objectIds: [d.id],
+      });
+    }
+    for (const [a, b] of clashes) {
+      issues.push({
+        id: issueId(),
+        severity: 'warn',
+        code: 'rack-depth-clash',
+        message: `${a.name} (${a.depthMm} mm) and ${b.name} (${b.depthMm} mm) sit front and rear of the same U but need ${
+          a.depthMm! + b.depthMm!
+        } mm of ${rack.name}'s ${rack.depthMm} mm.`,
+        objectIds: [a.id, b.id],
+      });
     }
   }
   return issues;

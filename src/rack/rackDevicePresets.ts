@@ -25,6 +25,17 @@ export interface RackDevicePreset {
   /** Nominal weight in kilograms. */
   weightKg: number;
   group: 'Switches' | 'Network' | 'Compute' | 'Power & cable' | 'Other';
+  /** Base device name when the type's own label would mislead (a PDU is type 'ups'). */
+  name?: string;
+  /** Marks a passive accessory the type can't express (see Device.rackAccessory). */
+  accessory?: 'cable-manager';
+  /** Runs the rack's full height wherever it's placed (a vertical manager); `span` is nominal. */
+  fullHeight?: boolean;
+}
+
+/** How many U a preset takes in a rack of `rackHeight` U. */
+export function presetSpan(preset: Pick<RackDevicePreset, 'span' | 'fullHeight'>, rackHeight: number): number {
+  return preset.fullHeight ? rackHeight : preset.span;
 }
 
 const gi = (i: number) => `Gi1/0/${i + 1}`;
@@ -47,7 +58,7 @@ export const RACK_DEVICE_PRESETS: readonly RackDevicePreset[] = [
   { key: 'firewall', label: 'Firewall', type: 'firewall', span: 1, ports: 6, portName: eth, watts: 60, weightKg: 4, group: 'Network' },
   { key: 'lb', label: 'Load balancer', type: 'load-balancer', span: 1, ports: 4, portName: te, watts: 100, weightKg: 5, group: 'Network' },
   { key: 'wlc', label: 'WLAN controller', type: 'wireless-controller', span: 1, ports: 4, portName: gi, watts: 60, weightKg: 4, group: 'Network' },
-  { key: 'console', label: 'Console server', type: 'switch', span: 1, ports: 16, portName: (i) => `tty${i + 1}`, watts: 25, weightKg: 3, group: 'Network' },
+  { key: 'console', label: 'Console server', name: 'Console', type: 'switch', span: 1, ports: 16, portName: (i) => `tty${i + 1}`, watts: 25, weightKg: 3, group: 'Network' },
   // Compute
   { key: 'server-2u', label: 'Server (2U)', type: 'server', span: 2, ports: 2, portName: nic, watts: 400, weightKg: 18, group: 'Compute' },
   { key: 'server-1u', label: 'Server (1U)', type: 'server', span: 1, ports: 2, portName: nic, watts: 250, weightKg: 12, group: 'Compute' },
@@ -56,15 +67,17 @@ export const RACK_DEVICE_PRESETS: readonly RackDevicePreset[] = [
   { key: 'pc', label: 'PC / Host', type: 'end-user', span: 1, ports: 1, portName: eth, watts: 200, weightKg: 8, group: 'Compute' },
   // Power & cable (UPS/PSU/PDU are power SOURCES → 0 W draw)
   { key: 'ups', label: 'UPS (2U)', type: 'ups', span: 2, ports: 0, portName: eth, watts: 0, weightKg: 25, group: 'Power & cable' },
-  { key: 'psu', label: 'PSU shelf', type: 'ups', span: 2, ports: 0, portName: eth, watts: 0, weightKg: 15, group: 'Power & cable' },
-  { key: 'pdu', label: 'PDU (0U rail)', type: 'ups', span: 6, ports: 8, portName: (i) => `C13-${i + 1}`, mount: 'rail', watts: 0, weightKg: 3, group: 'Power & cable' },
-  { key: 'cable-mgr', label: 'Cable manager', type: 'generic', span: 1, ports: 0, portName: eth, watts: 0, weightKg: 1, group: 'Power & cable' },
+  { key: 'psu', label: 'PSU shelf', name: 'PSU shelf', type: 'ups', span: 2, ports: 0, portName: eth, watts: 0, weightKg: 15, group: 'Power & cable' },
+  { key: 'pdu', label: 'PDU (0U rail)', name: 'PDU', type: 'ups', span: 6, ports: 8, portName: (i) => `C13-${i + 1}`, mount: 'rail', watts: 0, weightKg: 3, group: 'Power & cable' },
+  { key: 'pdu-full', label: 'PDU, full height (0U)', name: 'PDU', type: 'ups', span: 42, fullHeight: true, ports: 24, portName: (i) => `C13-${i + 1}`, mount: 'rail', watts: 0, weightKg: 6, group: 'Power & cable' },
+  { key: 'cable-mgr', label: 'Cable manager', name: 'Cable manager', accessory: 'cable-manager', type: 'generic', span: 1, ports: 0, portName: eth, watts: 0, weightKg: 1, group: 'Power & cable' },
+  { key: 'vcm', label: 'Vertical cable manager (0U)', name: 'Vertical manager', accessory: 'cable-manager', type: 'generic', span: 42, fullHeight: true, ports: 0, portName: eth, mount: 'rail', watts: 0, weightKg: 0, group: 'Power & cable' },
   // Other
   { key: 'patch-24', label: 'Patch panel (24)', type: 'patch-panel', span: 1, ports: 24, portName: keystone, watts: 0, weightKg: 1.5, group: 'Other' },
   { key: 'patch-48', label: 'Patch panel (48)', type: 'patch-panel', span: 1, ports: 48, portName: keystone, watts: 0, weightKg: 2.5, group: 'Other' },
   { key: 'fiber', label: 'Fiber patch (24)', type: 'patch-panel', span: 1, ports: 24, portName: (i) => `LC${i + 1}`, watts: 0, weightKg: 1.5, group: 'Other' },
-  { key: 'blank', label: 'Blanking panel', type: 'generic', span: 1, ports: 0, portName: eth, watts: 0, weightKg: 0.3, group: 'Other' },
-  { key: 'shelf', label: 'Shelf (2U)', type: 'generic', span: 2, ports: 0, portName: eth, watts: 0, weightKg: 3, group: 'Other' },
+  { key: 'blank', label: 'Blanking panel', name: 'Blank', type: 'generic', span: 1, ports: 0, portName: eth, watts: 0, weightKg: 0.3, group: 'Other' },
+  { key: 'shelf', label: 'Shelf (2U)', name: 'Shelf', type: 'generic', span: 2, ports: 0, portName: eth, watts: 0, weightKg: 3, group: 'Other' },
 ] as const;
 
 export const RACK_PRESET_GROUPS = ['Switches', 'Network', 'Compute', 'Power & cable', 'Other'] as const;

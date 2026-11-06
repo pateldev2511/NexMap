@@ -16,7 +16,7 @@
 import type { Device } from '@/model/types';
 import { escapeXml } from '@/io/export/buildSvg';
 import { portLayout, PATCH_PORT_OPTS, type Rect, type PortRect } from './rackLayout';
-import { panelKindFor } from './panelKind';
+import { isCableManager, panelKindForDevice } from './panelKind';
 import { isFullDepth, slotOf } from './rackModel';
 import { rackPhotoSkinParts } from './rackPhotoSkins';
 
@@ -157,7 +157,7 @@ export function rackShellParts({
 /** Shared visible port layout so drawn ports and cable endpoints stay aligned. */
 export function devicePortLayout(device: Device, panel: Rect): PortRect[] {
   const ports = (device.interfaces ?? []).map((i) => ({ id: i.id, name: i.name }));
-  const kind = panelKindFor(device.type);
+  const kind = panelKindForDevice(device);
   if (ports.length === 0) return [];
   if (kind === 'server') {
     const reservedRight = Math.min(panel.w * 0.42, 260);
@@ -194,7 +194,7 @@ export function devicePortLayout(device: Device, panel: Rect): PortRect[] {
  * patch) keep near-full width and never shrink.
  */
 function labelZoneFor(device: Device, panel: Rect): number {
-  const kind = panelKindFor(device.type);
+  const kind = panelKindForDevice(device);
   if (kind === 'switch' || kind === 'firewall') return 98;
   return panel.w - 18;
 }
@@ -269,20 +269,45 @@ function pduStripParts(device: Device, p: Rect): string[] {
   // Breaker rocker + power LED at the top.
   out.push(`<rect x="${n(p.x + p.w / 2 - 3)}" y="${n(p.y + 4)}" width="6" height="8" rx="1.2" fill="${C.cage}" stroke="${C.jackBd}" stroke-width="0.6"/>`);
   out.push(`<circle cx="${n(p.x + p.w / 2)}" cy="${n(p.y + 16)}" r="1.6" fill="url(#rkLedG)"/>`);
+  // The feed it's on, as the strip's silkscreen letter (only when there's room for it).
+  const feed = device.powerFeed === 'A' || device.powerFeed === 'B' ? device.powerFeed : null;
+  const lettered = feed != null && p.h >= 60;
+  if (lettered) {
+    out.push(`<text data-feed="${feed}" x="${n(p.x + p.w / 2)}" y="${n(p.y + 29)}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="8" font-weight="800" fill="${C.text}">${feed}</text>`);
+  }
   // Outlet column: one C13 per interface, evenly spaced, sized to the strip width.
   const count = Math.max(1, (device.interfaces ?? []).length || 8);
-  const top = p.y + 22;
-  const colH = Math.max(6, p.h - 28);
+  const top = p.y + (lettered ? 33 : 22);
+  const colH = Math.max(6, p.h - (lettered ? 39 : 28));
   const ow = Math.min(p.w - 5, 11);
-  const oh = Math.min(9, colH / count - 1.5);
+  // As many outlets as the column holds at 2px each plus a gap; a short strip (a library
+  // thumbnail) shows a few, never a negative-height outlet.
+  const drawn = Math.min(count, Math.floor(colH / 3.5));
+  const pitch = colH / Math.max(1, drawn);
+  const oh = Math.min(9, pitch - 1.5);
   const ox = p.x + (p.w - ow) / 2;
-  const pitch = colH / count;
-  const drawn = Math.min(count, Math.floor(colH / (oh + 1.5)));
   for (let i = 0; i < drawn; i++) {
     const oy = top + i * pitch;
     out.push(`<rect x="${n(ox)}" y="${n(oy)}" width="${n(ow)}" height="${n(oh)}" rx="1.4" fill="${C.cage}" stroke="${C.jackBd}" stroke-width="0.7"/>`);
     // C13 ground-pin glyph.
     out.push(`<path d="M ${n(ox + ow / 2 - 2)} ${n(oy + oh / 2 - 1)} h 4 M ${n(ox + ow / 2)} ${n(oy + oh / 2 + 0.6)} v 2" stroke="${C.notch}" stroke-width="1" stroke-linecap="round"/>`);
+  }
+  return out;
+}
+
+/**
+ * A vertical 0U cable manager: a dark channel with a finger duct at every U, so cords
+ * read as dressed into it beside the gear they leave.
+ */
+function verticalManagerParts(device: Device, p: Rect): string[] {
+  const out: string[] = [
+    `<rect x="${n(p.x)}" y="${n(p.y)}" width="${n(p.w)}" height="${n(p.h)}" rx="2.5" fill="#20262e" stroke="${C.chassisBd}" stroke-width="0.9"/>`,
+  ];
+  const fingers = Math.max(1, device.ruSpan ?? 1);
+  const pitch = p.h / fingers;
+  for (let i = 0; i < fingers; i++) {
+    const fy = p.y + i * pitch + pitch / 2 - 2;
+    out.push(`<rect x="${n(p.x + 2)}" y="${n(fy)}" width="${n(p.w - 4)}" height="4" rx="2" fill="#161c24" stroke="${C.cageBd}" stroke-width="0.5"/>`);
   }
   return out;
 }
@@ -367,14 +392,15 @@ export function deviceFaceParts(
   // outlets down its length, not any horizontal faceplate. Keyed on MOUNT, not
   // type (a PDU is stored as type 'ups', same as a rack UPS). No name label.
   if (slotOf(device).mount === 'rail') {
-    return [...pduStripParts(device, panel), ...statusOverlay(device, panel)];
+    const strip = isCableManager(device) ? verticalManagerParts(device, panel) : pduStripParts(device, panel);
+    return [...strip, ...statusOverlay(device, panel)];
   }
 
   // The rear of a full-depth chassis is power + cooling, not a mirror of the front jacks.
   if (face === 'rear' && isFullDepth(device.type)) {
     return [...rearFaceParts(device, panel, hideLabel), ...statusOverlay(device, panel)];
   }
-  const kind = panelKindFor(device.type);
+  const kind = panelKindForDevice(device);
   // Faceplate drawer that folds in the hide-name flag + the shared label zone
   // (so the silkscreen is truncated to fit and never lands under the jacks).
   const labelMaxW = labelZoneFor(device, panel);
@@ -502,12 +528,13 @@ export function deviceFaceParts(
     }
     for (let i = 0; i < 6; i++) out.push(`<rect x="${n(panel.x + 70 + i * 5)}" y="${n(cy - 7)}" width="2" height="14" rx="1" fill="${C.vent}"/>`);
   } else if (kind === 'cable-mgr') {
-    out.push(plate({ faceplate: '#20262e', led: '#20262e' }));
-    // finger ducts
+    out.push(chassis(device, panel, { faceplate: '#20262e', led: '#20262e', hideLabel: true }));
+    // finger ducts, then the name on top so the fingers don't cut through it
     for (let i = 0; i < 10; i++) {
       const fx = panel.x + 14 + i * ((panel.w - 28) / 10);
       out.push(`<rect x="${n(fx)}" y="${n(panel.y + 4)}" width="6" height="${n(panel.h - 8)}" rx="3" fill="#161c24" stroke="${C.cageBd}" stroke-width="0.5"/>`);
     }
+    if (!hideLabel) out.push(...labelParts(device, panel, labelMaxW));
   } else {
     // blank / blade / unknown — flat faceplate + two cage screws
     out.push(plate({ led: '#3a4654' }));

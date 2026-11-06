@@ -1232,6 +1232,29 @@
   border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--chrome-border));
 }
 
+.cordList {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--chrome-fg);
+}
+
+.cordList small {
+  color: var(--chrome-fg-muted);
+}
+
+.cordList b {
+  display: inline-block;
+  min-width: 54px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.cordList i {
+  color: var(--chrome-fg-muted);
+}
+
 .fieldHint {
   display: flex;
   align-items: center;
@@ -1456,4 +1479,110 @@
   .workflowRail {
     grid-template-columns: repeat(2, minmax(150px, 1fr));
   }
+}
+
+/* Paste a parts list (PartsListPanel). */
+.partsHint {
+  margin: 6px 0 8px;
+  font-size: 12px;
+  color: var(--chrome-fg-muted);
+}
+.partsInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  font: 12px/1.5 var(--font-mono);
+  color: var(--chrome-fg);
+  background: var(--chrome-bg-2);
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  resize: vertical;
+}
+.partsInput:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.partsPreview {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  max-height: 220px;
+  overflow: auto;
+  border-top: 1px solid var(--chrome-border);
+}
+.partsPreview li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 2px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--chrome-border);
+}
+.partsQty {
+  flex: none;
+  min-width: 28px;
+  font-weight: 600;
+  color: var(--chrome-fg-muted);
+}
+.partsLabel {
+  flex: 1;
+  min-width: 0;
+}
+.partsLabel small {
+  color: var(--chrome-fg-muted);
+}
+.partsWhere {
+  flex: none;
+  font-family: var(--font-mono);
+  color: var(--chrome-fg-muted);
+}
+.partsUnknown .partsLabel,
+.partsUnknown .partsWhere {
+  color: var(--chrome-fg-muted);
+}
+.partsShort .partsWhere {
+  color: var(--sev-warn);
+  font-weight: 600;
+}
+.partsFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--chrome-fg-muted);
+}
+
+/* Cable-manager fill chips under the cable schedule header. */
+.laneFill {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 6px;
+  font-size: 11px;
+  color: var(--chrome-fg-muted);
+}
+.laneFill span {
+  padding: 1px 6px;
+  border: 1px solid var(--chrome-border, rgba(127, 127, 127, 0.3));
+  border-radius: 999px;
+}
+.laneFill .laneOver {
+  color: var(--sev-warn);
+  border-color: var(--sev-warn);
+}
+/* A cable's route through cable managers: its own line under the endpoints. */
+.cable:has(.route) {
+  flex-wrap: wrap;
+  row-gap: 1px;
+}
+.cable:has(.route) .ep {
+  flex: 1 1 0; /* shrink to an ellipsis rather than wrap the labels */
+}
+.cable .route {
+  flex-basis: 100%;
+  padding-left: 19px;
+  font: 10px var(--font-mono);
+  color: var(--chrome-fg-muted);
 }

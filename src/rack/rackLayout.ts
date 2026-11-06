@@ -7,7 +7,7 @@
  * jacks, and U position are computed in exactly ONE place. Pure + deterministic.
  */
 import type { Device, Rack } from '@/model/types';
-import { slotOf, topU } from './rackModel';
+import { railChannel, slotOf, topU } from './rackModel';
 
 /** Pixels per rack unit. Generous so a 1U panel + its jacks read clearly. */
 export const U_PX = 30;
@@ -89,8 +89,8 @@ export function deviceRect(rack: Rack, device: Device): Rect {
   const y = uToY(rack, s.ru, s.ruSpan);
   const h = s.ruSpan * U_PX;
   if (s.mount === 'rail') {
-    // Side rail: thin strip hugging the right rail (front view convention).
-    return { x: BAY_W - RAIL_PX - 16, y, w: 16, h };
+    // Side rail: thin strip hugging the left or right rail of the channel it's in.
+    return { x: railChannel(s) === 'left' ? RAIL_PX : BAY_W - RAIL_PX - 16, y, w: 16, h };
   }
   if (s.bay === 'left') return { x: RAIL_PX, y, w: innerW / 2 - 2, h };
   if (s.bay === 'right') return { x: RAIL_PX + innerW / 2 + 2, y, w: innerW / 2 - 2, h };

@@ -17,7 +17,7 @@ import {
 import { VENDORS, MODELS, ROLES } from '@/lib/deviceCatalog';
 import { MIN_LINK_WIDTH, MAX_LINK_WIDTH, DEFAULT_LINK_WIDTH } from '@/canvas/connector';
 import { parseVlanId, VLAN_MIN, VLAN_MAX } from '@/rack/vlan';
-import { catalogForType, catalogById, catalogSpecLabel } from '@/rack/rackCatalog';
+import { catalogForType, catalogById, catalogPatch, catalogSpecLabel } from '@/rack/rackCatalog';
 import {
   MIN_ICON_SCALE,
   MAX_ICON_SCALE,
@@ -91,16 +91,13 @@ function DeviceInspector({ device }: { device: Device }) {
     );
   }
 
-  /** Fill vendor/model/power/weight from a known catalog model in one undoable edit.
+  /** Fill vendor/model/power/weight/depth from a known catalog model in one undoable edit.
    *  Deliberately does NOT change a placed device's U-span or rewire ports (safe). */
   function applyModel(id: string) {
     const m = catalogById(id);
     if (!m) return;
-    updateDevice(
-      device.id,
-      { vendor: device.vendor, model: device.model, watts: device.watts, weightKg: device.weightKg },
-      { vendor: m.vendor, model: m.model, watts: m.watts || undefined, weightKg: m.weightKg || undefined },
-    );
+    const { before, after } = catalogPatch(device, m);
+    updateDevice(device.id, before, after);
     endEdit();
   }
 
@@ -157,7 +154,7 @@ function DeviceInspector({ device }: { device: Device }) {
             <select
               value=""
               aria-label="Apply a catalog model"
-              title="Fill vendor, power, and weight from a known model"
+              title="Fill vendor, power, weight and depth from a known model"
               onChange={(e) => { if (e.target.value) applyModel(e.target.value); }}
             >
               <option value="">Apply a known model…</option>

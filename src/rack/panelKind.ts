@@ -4,7 +4,7 @@
  * both. Parametric: the actual jack/bay counts come from the device's interfaces, not
  * from per-model artwork.
  */
-import type { DeviceType } from '@/model/types';
+import type { Device, DeviceType } from '@/model/types';
 
 export type PanelKind =
   | 'switch' // jack rows + SFP cages
@@ -41,4 +41,21 @@ export function panelKindFor(type: DeviceType): PanelKind {
     default:
       return 'blank';
   }
+}
+
+/**
+ * Is this device a horizontal cable manager? Its type is 'generic', so new ones are marked
+ * (`rackAccessory`). Unmarked ones are known only by a stock name — "Cable manager 2" or
+ * a template's "cm-01" — unless marked 'none'. Older designs named library-placed managers
+ * like any generic unit ("Node 3"), so those can't be told apart: mark them in the
+ * inspector's Accessory field.
+ */
+export function isCableManager(device: Pick<Device, 'type' | 'name' | 'rackAccessory'>): boolean {
+  if (device.rackAccessory) return device.rackAccessory === 'cable-manager';
+  return device.type === 'generic' && /^(cable manager( \d+)?|cm-?\d+)$/i.test(device.name.trim());
+}
+
+/** Panel style for a specific device: a cable manager draws as one, not a blank. */
+export function panelKindForDevice(device: Pick<Device, 'type' | 'name' | 'rackAccessory'>): PanelKind {
+  return isCableManager(device) ? 'cable-mgr' : panelKindFor(device.type);
 }

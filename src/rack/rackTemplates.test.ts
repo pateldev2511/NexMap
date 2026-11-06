@@ -1,13 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useProjectStore } from '@/store/projectStore';
 import { RACK_TEMPLATES, templatesByTier, RACK_TIERS } from './rackTemplates';
-import { presetByKey } from './rackDevicePresets';
-import { catalogById } from './rackCatalog';
+import { presetByKey, presetSpan } from './rackDevicePresets';
+import { RACK_CATALOG, catalogById } from './rackCatalog';
 import { rackPresetById } from './rackTypes';
-import { isFullDepth, slotsCollide, type Slot } from './rackModel';
+import { depthProblems, isFullDepth, slotsCollide, type Slot } from './rackModel';
 
 const s = () => useProjectStore.getState();
 const NOW = '2026-01-01T00:00:00.000Z';
+const RACK_CATALOG_DEPTH = (model: string) => RACK_CATALOG.find((m) => m.model === model)?.depthMm;
 
 describe('rack templates — data integrity', () => {
   it('covers every tier with at least one template', () => {
@@ -30,12 +31,13 @@ describe('rack templates — data integrity', () => {
             expect(catalog!.type, `${dv.name} catalog type`).toBe(p!.type);
           }
           const mount = p!.mount ?? 'rack';
+          const span = (dv.catalogId ? catalogById(dv.catalogId)?.span : undefined) ?? presetSpan(p!, H);
           if (mount !== 'rail') {
             expect(dv.ru, `${dv.name} ru in bounds`).toBeGreaterThanOrEqual(1);
-            expect(dv.ru + p!.span - 1, `${dv.name} top in bounds`).toBeLessThanOrEqual(H);
+            expect(dv.ru + span - 1, `${dv.name} top in bounds`).toBeLessThanOrEqual(H);
           }
           slots.push({
-            ru: dv.ru, ruSpan: p!.span, mount, side: dv.side ?? 'front', bay: 'full',
+            ru: dv.ru, ruSpan: span, mount, side: dv.side ?? 'front', bay: dv.bay ?? 'full',
             depth: isFullDepth(p!.type) ? 'full' : 'shallow',
           });
         }
@@ -50,6 +52,27 @@ describe('rack templates — data integrity', () => {
 
 describe('applyRackTemplate (store)', () => {
   beforeEach(() => s().newProject(NOW));
+
+  it('every template fits its own rack depth once catalog depths are stamped', () => {
+    for (const t of RACK_TEMPLATES) {
+      s().newProject(NOW);
+      const ids = s().applyRackTemplate(t);
+      for (const id of ids) {
+        const rack = s().racksAll().find((r) => r.id === id)!;
+        const p = depthProblems(rack, s().devicesAll());
+        const names = [...p.tooDeep.map((d) => d.name), ...p.clashes.map(([a, b]) => `${a.name}+${b.name}`)];
+        expect(names, `${t.id} / ${rack.name}`).toEqual([]);
+      }
+    }
+  });
+
+  it('stamps datasheet depths on catalog-backed devices', () => {
+    const t = RACK_TEMPLATES.find((x) => x.racks.some((r) => r.devices.some((d) => d.catalogId && catalogById(d.catalogId)?.depthMm)))!;
+    s().applyRackTemplate(t);
+    const withModel = s().devicesAll().filter((d) => d.model && RACK_CATALOG_DEPTH(d.model));
+    expect(withModel.length).toBeGreaterThan(0);
+    for (const d of withModel) expect(d.depthMm, d.name).toBe(RACK_CATALOG_DEPTH(d.model!));
+  });
 
   it('appends a template’s racks + placed, spec’d devices and is one undo', () => {
     const t = RACK_TEMPLATES.find((x) => x.id === 'home-lab-6u')!;

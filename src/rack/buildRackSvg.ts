@@ -24,6 +24,7 @@ import {
 import { isFullDepth, slotOf, orderRacks } from './rackModel';
 import { deviceFaceParts, deviceOppositeFaceParts, devicePortLayout, rackShellParts, RACK_ART_DEFS } from './rackDeviceArt';
 import { cablePath } from './cablePath';
+import { cableLanes, routeLabel } from './cableLanes';
 
 /** Literal-hex export palette for labels, tables, and U numbers. */
 const C = {
@@ -345,11 +346,14 @@ export interface CableScheduleRow {
   lengthFt: string;
   /** Port VLAN(s): a single id when both ends agree, "a/b" when they differ, "" when unset. */
   vlan: string;
+  /** Cable manager(s) the cord is dressed through, e.g. "cm-01 (U22)"; "" when none. */
+  route: string;
 }
 
 /** Derive the installer-facing patch list from drawn cables (E3). */
 export function cableScheduleRows(devices: Device[], cables: RackCable[]): CableScheduleRow[] {
   const byId = new Map(devices.map((d) => [d.id, d]));
+  const lanes = cableLanes(devices, cables);
   const ifaceOf = (deviceId: string, ifaceId: string) =>
     byId.get(deviceId)?.interfaces?.find((i) => i.id === ifaceId);
   const endLabel = (deviceId: string, ifaceId: string): string => {
@@ -371,15 +375,16 @@ export function cableScheduleRows(devices: Device[], cables: RackCable[]): Cable
     to: endLabel(c.bEnd.deviceId, c.bEnd.ifaceId),
     lengthFt: c.lengthFt != null ? String(c.lengthFt) : '',
     vlan: vlanCol(c),
+    route: routeLabel(lanes.routes.get(c.id) ?? []),
   }));
 }
 
 /** CSV patch list. Reuses the simple quoting convention of the existing CSV exports. */
 export function cableScheduleCsv(devices: Device[], cables: RackCable[]): string {
   const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
-  const header = ['Color', 'Label', 'From', 'To', 'VLAN', 'Length (ft)'].join(',');
+  const header = ['Color', 'Label', 'From', 'To', 'VLAN', 'Length (ft)', 'Route'].join(',');
   const rows = cableScheduleRows(devices, cables).map((r) =>
-    [q(r.color), q(r.label), q(r.from), q(r.to), q(r.vlan), q(r.lengthFt)].join(','),
+    [q(r.color), q(r.label), q(r.from), q(r.to), q(r.vlan), q(r.lengthFt), q(r.route)].join(','),
   );
   return [header, ...rows].join('\n');
 }
@@ -399,14 +404,15 @@ const TBL = {
   border: '#cdd6e0',
   text: '#15212e',
 } as const;
-// [swatch, From, To, Label, VLAN, Length] — fixed widths keep the literal-hex SVG simple.
-const TBL_COLS: { key: 'color' | 'from' | 'to' | 'label' | 'vlan' | 'lengthFt'; label: string; w: number }[] = [
+// [swatch, From, To, Label, VLAN, Length, Route] — fixed widths keep the literal-hex SVG simple.
+const TBL_COLS: { key: 'color' | 'from' | 'to' | 'label' | 'vlan' | 'lengthFt' | 'route'; label: string; w: number }[] = [
   { key: 'color', label: '', w: 30 },
   { key: 'from', label: 'From', w: 180 },
   { key: 'to', label: 'To', w: 180 },
   { key: 'label', label: 'Label', w: 130 },
   { key: 'vlan', label: 'VLAN', w: 60 },
   { key: 'lengthFt', label: 'Length (ft)', w: 90 },
+  { key: 'route', label: 'Route', w: 210 },
 ];
 
 /**

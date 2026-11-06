@@ -19,6 +19,7 @@ import {
 } from '@/canvas/connector';
 import { deviceIsoGroup } from '@/canvas/deviceIso';
 import { deviceIconFlatGroup } from '@/canvas/deviceVisuals';
+import { BLUEPRINT, deviceIconBlueprintGroup } from '@/canvas/blueprintArt';
 import { clampIconScale } from '@/canvas/nodeCard';
 import { isoProjectPx, DEFAULT_TILE } from '@/canvas/iso';
 import { calloutRowsOrPlaceholder, rowAnchor } from '@/model/callout';
@@ -37,8 +38,12 @@ export interface ExportSvgOptions {
   padding?: number;
   /** Text notes + shapes/zones to include (shapes render under devices). */
   objects?: CanvasObject[];
-  /** Render the isometric projection instead of the flat scene (Phase 9.6). */
-  projection?: 'flat' | 'iso';
+  /** Render the isometric projection, or the blueprint drafting sheet, instead of the flat scene. */
+  projection?: 'flat' | 'iso' | 'blueprint';
+  /** Blueprint only: the sheet's title block (project name). Absent = no title block. */
+  title?: string;
+  /** Blueprint only: the date lettered in the title block (YYYY-MM-DD). Passed in so the build stays pure. */
+  date?: string;
   /** Topology-health context to tint risky links (SPOF/conflict). Null = no tint. */
   health?: StrokeHealth | null;
   /**
@@ -164,10 +169,15 @@ function countPairs(links: Link[]): Map<string, number> {
   return m;
 }
 
-function linkStrokeAttrs(l: Link, health: StrokeHealth | null, sole: boolean): string {
+function linkStrokeAttrs(
+  l: Link,
+  health: StrokeHealth | null,
+  sole: boolean,
+  defaultStroke: string = EXPORT_DEFAULT_STROKE,
+): string {
   const s = deriveLinkStroke(l, health, sole);
   const dash = s.dashed ? ' stroke-dasharray="6 4"' : '';
-  return `stroke="${escapeXml(s.color ?? EXPORT_DEFAULT_STROKE)}" stroke-width="${s.width}"${dash}`;
+  return `stroke="${escapeXml(s.color ?? defaultStroke)}" stroke-width="${s.width}"${dash}`;
 }
 
 /**
@@ -191,6 +201,7 @@ function ifaceLabelsSvg(
   l: Link,
   pts: { x: number; y: number }[],
   project: (p: { x: number; y: number }) => { x: number; y: number } = (p) => p,
+  ink = { fill: '#64748b', halo: '#ffffff' },
 ): string {
   if (pts.length < 2) return '';
   const out: string[] = [];
@@ -198,8 +209,8 @@ function ifaceLabelsSvg(
     const p = project(at);
     out.push(
       `<text x="${p.x.toFixed(1)}" y="${p.y.toFixed(1)}" text-anchor="middle" ` +
-        `font-family="monospace" font-size="8" fill="#64748b" paint-order="stroke" ` +
-        `stroke="#ffffff" stroke-width="2.5">${escapeXml(text)}</text>`,
+        `font-family="monospace" font-size="8" fill="${ink.fill}" paint-order="stroke" ` +
+        `stroke="${ink.halo}" stroke-width="2.5">${escapeXml(text)}</text>`,
     );
   };
   if (l.sourceInterface) label(l.sourceInterface, alongFrom(pts[0]!, pts[1]!, 22));
@@ -221,16 +232,16 @@ function linkArrowAttrs(l: Link): string {
  * so flat/iso export match the live canvas exactly. `boxX`/`boxY` are the box's
  * top-left; per-row padding + alignment are applied here.
  */
-function textObjectSvg(o: TextObject, boxX: number, boxY: number): string {
+function textObjectSvg(o: TextObject, boxX: number, boxY: number, ink?: string): string {
   const fs = o.fontSize ?? 14;
-  const fill = escapeXml(o.color ?? '#1c2733');
+  const fill = escapeXml(ink ?? o.color ?? '#1c2733');
   const rows = calloutRowsOrPlaceholder(o.blocks, fs);
   let y = boxY;
   return rows
     .map((r) => {
       y += r.size * 1.25;
       const a = rowAnchor(r.align, boxX, o.width, 4);
-      const rowFill = r.muted ? '#64748b' : fill;
+      const rowFill = r.muted ? (ink ? BLUEPRINT.inkDim : '#64748b') : fill;
       const fam = r.mono ? ' font-family="monospace"' : '';
       const inner = r.runs
         .map((run) => {
@@ -256,27 +267,37 @@ export function buildSvg(
   const padding = opts.padding ?? 40;
   // Rack-scoped callouts render on the rack elevation, not the flat diagram export.
   const objects = (opts.objects ?? []).filter((o) => !(o.kind === 'text' && o.rackScope));
+  const bp = opts.projection === 'blueprint';
   const b = bounds([...devices, ...objects], padding) ?? {
     minX: 0,
     minY: 0,
     maxX: 400,
     maxY: 300,
   };
+  // A blueprint sheet reserves a strip along the bottom for its title block, so
+  // the block never sits on the drawing.
+  if (bp && opts.title !== undefined) {
+    b.maxY += TITLE_BLOCK.h + 16;
+    b.maxX = Math.max(b.maxX, b.minX + TITLE_BLOCK.w + 32);
+  }
   const w = Math.max(1, b.maxX - b.minX);
   const h = Math.max(1, b.maxY - b.minY);
   const byId = new Map(devices.map((d) => [d.id, d]));
   const health = opts.health ?? null;
   const pairCount = countPairs(links);
 
-  const modern = opts.modern ?? false;
+  const modern = !bp && (opts.modern ?? false);
   const parts: string[] = [];
   parts.push(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" ` +
-      `viewBox="${b.minX} ${b.minY} ${w} ${h}" font-family="${modern ? MODERN_FONT : 'sans-serif'}">`,
+      `viewBox="${b.minX} ${b.minY} ${w} ${h}" font-family="${modern ? MODERN_FONT : bp ? 'monospace' : 'sans-serif'}">`,
   );
-  parts.push(ARROW_MARKER_DEF);
+  parts.push(bp ? BLUEPRINT_DEFS : ARROW_MARKER_DEF);
   if (modern) parts.push(MODERN_DEFS);
-  if (opts.background) {
+  if (bp) {
+    // The paper is the drawing: ink is pale, so a blueprint is never transparent.
+    parts.push(blueprintSheet(b.minX, b.minY, w, h));
+  } else if (opts.background) {
     parts.push(
       `<rect x="${b.minX}" y="${b.minY}" width="${w}" height="${h}" fill="${escapeXml(modern ? '#f8fafc' : opts.background)}"/>`,
     );
@@ -301,20 +322,22 @@ export function buildSvg(
       parts.push(modernZoneParts(o));
       continue;
     }
-    const fill = escapeXml(o.fill ?? '#e8effb');
-    const stroke = escapeXml(o.stroke ?? '#2563eb');
+    // Blueprint zones are outlined areas — a user fill would paint over the sheet.
+    const fill = bp ? 'none' : escapeXml(o.fill ?? '#e8effb');
+    const stroke = bp ? BLUEPRINT.inkDim : escapeXml(o.stroke ?? '#2563eb');
+    const pen = bp ? ' stroke-width="1.25" stroke-dasharray="6 3"' : ' stroke-width="1.5"';
     if (o.shape === 'ellipse') {
       parts.push(
-        `<ellipse data-id="${escapeXml(o.id)}" cx="${o.x + o.width / 2}" cy="${o.y + o.height / 2}" rx="${o.width / 2}" ry="${o.height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`,
+        `<ellipse data-id="${escapeXml(o.id)}" cx="${o.x + o.width / 2}" cy="${o.y + o.height / 2}" rx="${o.width / 2}" ry="${o.height / 2}" fill="${fill}" stroke="${stroke}"${pen}/>`,
       );
     } else {
       parts.push(
-        `<rect data-id="${escapeXml(o.id)}" x="${o.x}" y="${o.y}" width="${o.width}" height="${o.height}" rx="6" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`,
+        `<rect data-id="${escapeXml(o.id)}" x="${o.x}" y="${o.y}" width="${o.width}" height="${o.height}" rx="6" fill="${fill}" stroke="${stroke}"${pen}/>`,
       );
     }
     if (o.label)
       parts.push(
-        `<text x="${o.x + 8}" y="${o.y + 16}" fill="#64748b" font-size="11">${escapeXml(o.label)}</text>`,
+        `<text x="${o.x + 8}" y="${o.y + 16}" fill="${bp ? BLUEPRINT.inkDim : '#64748b'}" font-size="11">${escapeXml(bp ? o.label.toUpperCase() : o.label)}</text>`,
       );
   }
 
@@ -329,9 +352,11 @@ export function buildSvg(
         ? orthogonalIconPoints(a, t)
         : connectorIconPoints(l, a, t);
     parts.push(
-      `<path data-id="${escapeXml(l.id)}" d="${pathD(pts)}" fill="none" ${linkStrokeAttrs(l, health, (pairCount.get(pairKey(l)) ?? 0) === 1)}${linkArrowAttrs(l)} stroke-linecap="round" stroke-linejoin="round"/>`,
+      `<path data-id="${escapeXml(l.id)}" d="${pathD(pts)}" fill="none" ${linkStrokeAttrs(l, health, (pairCount.get(pairKey(l)) ?? 0) === 1, bp ? BLUEPRINT_LINK : undefined)}${linkArrowAttrs(l)} stroke-linecap="round" stroke-linejoin="round"/>`,
     );
-    flatIfaceLabels.push(ifaceLabelsSvg(l, pts));
+    flatIfaceLabels.push(
+      ifaceLabelsSvg(l, pts, undefined, bp ? { fill: BLUEPRINT.inkDim, halo: BLUEPRINT.paper } : undefined),
+    );
   }
 
   // Devices.
@@ -346,16 +371,21 @@ export function buildSvg(
         `<rect x="${(d.width / 2 - iconSize / 2 - pad).toFixed(1)}" y="${(d.height / 2 - 1 - iconSize / 2 - pad).toFixed(1)}" width="${(iconSize + pad * 2).toFixed(1)}" height="${(iconSize + pad * 2).toFixed(1)}" rx="12" fill="#ffffff" stroke="#e2e8f0" stroke-width="1" filter="url(#nexmap-shadow)"/>`,
       );
     }
-    // Flat export uses the flat 2D tile icon, matching the flat canvas. (Iso
-    // export — buildSvgIso — keeps the 3D model.)
+    // Flat export uses the flat 2D tile icon, matching the flat canvas; the
+    // blueprint sheet traces the line set in ink. (Iso export — buildSvgIso —
+    // keeps the 3D model.)
     parts.push(
-      deviceIconFlatGroup(d.type, d.width / 2, d.height / 2 - 1, iconSize),
+      bp
+        ? deviceIconBlueprintGroup(d.type, d.width / 2, d.height / 2 - 1, iconSize)
+        : deviceIconFlatGroup(d.type, d.width / 2, d.height / 2 - 1, iconSize),
     );
     if (opts.includeLabels) {
       parts.push(
         modern
           ? modernDeviceLabel(d.name, d.width / 2, d.height + 14)
-          : `<text x="${d.width / 2}" y="${d.height + 12}" fill="#1c2733" font-size="11" text-anchor="middle">${escapeXml(d.name)}</text>`,
+          : bp
+            ? `<text x="${d.width / 2}" y="${d.height + 12}" fill="${BLUEPRINT.ink}" font-size="10" font-weight="600" letter-spacing="0.6" text-anchor="middle" paint-order="stroke" stroke="${BLUEPRINT.paper}" stroke-width="3">${escapeXml(d.name.toUpperCase())}</text>`
+            : `<text x="${d.width / 2}" y="${d.height + 12}" fill="#1c2733" font-size="11" text-anchor="middle">${escapeXml(d.name)}</text>`,
       );
     }
     parts.push(`</g>`);
@@ -383,7 +413,7 @@ export function buildSvg(
     const dash = leaderDashArray(style);
     parts.push(
       `<line data-leader-for="${escapeXml(o.id)}" x1="${g.x1}" y1="${g.y1}" x2="${g.x2}" y2="${g.y2}" ` +
-        `stroke="${escapeXml(style.color)}" stroke-width="${style.width}" fill="none" stroke-linecap="round"` +
+        `stroke="${bp ? BLUEPRINT.inkDim : escapeXml(style.color)}" stroke-width="${style.width}" fill="none" stroke-linecap="round"` +
         `${dash ? ` stroke-dasharray="${dash}"` : ''}/>`,
     );
   }
@@ -398,11 +428,79 @@ export function buildSvg(
         `<rect x="${(o.x - 12).toFixed(1)}" y="${(o.y - 6).toFixed(1)}" width="${(o.width + 20).toFixed(1)}" height="${(ch + 18).toFixed(1)}" rx="12" fill="#ffffff" stroke="#e2e8f0" stroke-width="1" filter="url(#nexmap-zone-shadow)"/>`,
       );
     }
-    parts.push(`<g data-id="${escapeXml(o.id)}">${textObjectSvg(o, o.x, o.y)}</g>`);
+    parts.push(
+      `<g data-id="${escapeXml(o.id)}">${textObjectSvg(o, o.x, o.y, bp ? BLUEPRINT.ink : undefined)}</g>`,
+    );
+  }
+
+  if (bp && opts.title !== undefined) {
+    parts.push(
+      titleBlock(b.maxX - TITLE_BLOCK.w - 16, b.maxY - TITLE_BLOCK.h - 16, opts.title, opts.date, {
+        devices: devices.length,
+        links: links.length,
+      }),
+    );
   }
 
   parts.push(`</svg>`);
   return parts.join('');
+}
+
+// ── Blueprint sheet ────────────────────────────────────────────────────────
+
+/** Unhealthy links keep their amber/red on the sheet; healthy ones are ink. */
+const BLUEPRINT_LINK = '#b9cfe6';
+
+const BLUEPRINT_DEFS =
+  `<defs><marker id="nexmap-arrow" viewBox="0 0 10 10" refX="9" refY="5" ` +
+  `markerWidth="7" markerHeight="7" orient="auto-start-reverse">` +
+  `<path d="M0 0 L10 5 L0 10 z" fill="${BLUEPRINT.ink}"/></marker>` +
+  `<pattern id="nexmap-bp-minor" width="16" height="16" patternUnits="userSpaceOnUse">` +
+  `<path d="M16 0H0V16" fill="none" stroke="${BLUEPRINT.gridMinor}" stroke-width="1"/></pattern>` +
+  `<pattern id="nexmap-bp-major" width="80" height="80" patternUnits="userSpaceOnUse">` +
+  `<path d="M80 0H0V80" fill="none" stroke="${BLUEPRINT.gridMajor}" stroke-width="1"/></pattern>` +
+  `</defs>`;
+
+/** Paper, drafting grid, and the ruled border a sheet is framed by. */
+function blueprintSheet(x: number, y: number, w: number, h: number): string {
+  const m = 8;
+  return (
+    `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${BLUEPRINT.paper}"/>` +
+    `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="url(#nexmap-bp-minor)"/>` +
+    `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="url(#nexmap-bp-major)"/>` +
+    `<rect x="${x + m}" y="${y + m}" width="${Math.max(0, w - m * 2)}" height="${Math.max(0, h - m * 2)}" fill="none" stroke="${BLUEPRINT.inkDim}" stroke-width="1"/>`
+  );
+}
+
+const TITLE_BLOCK = { w: 248, h: 64 };
+
+/** The drawing's title block: what it is, how big, when — lettered in ink. */
+function titleBlock(
+  x: number,
+  y: number,
+  title: string,
+  date: string | undefined,
+  count: { devices: number; links: number },
+): string {
+  const { w, h } = TITLE_BLOCK;
+  const row = h / 2;
+  const name = title.trim() || 'Untitled';
+  const clipped = name.length > 30 ? name.slice(0, 29) + '…' : name;
+  const cell = (cx: number, cy: number, label: string, value: string) =>
+    `<text x="${cx}" y="${cy + 10}" fill="${BLUEPRINT.inkDim}" font-size="7" letter-spacing="0.8">${label}</text>` +
+    `<text x="${cx}" y="${cy + 23}" fill="${BLUEPRINT.ink}" font-size="10" font-weight="600">${escapeXml(value)}</text>`;
+  return (
+    `<g data-title-block="1">` +
+    `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${BLUEPRINT.paper}" stroke="${BLUEPRINT.ink}" stroke-width="1"/>` +
+    `<path d="M${x} ${y + row}H${x + w}M${x + 120} ${y + row}V${y + h}M${x + 184} ${y + row}V${y + h}" stroke="${BLUEPRINT.inkDim}" stroke-width="0.75" fill="none"/>` +
+    cell(x + 8, y, 'NETWORK DIAGRAM', clipped.toUpperCase()) +
+    cell(x + 8, y + row, 'DATE', date ?? '—') +
+    cell(x + 128, y + row, 'SCALE', 'NTS') +
+    cell(x + 192, y + row, 'NODES', String(count.devices)) +
+    `<text x="${x + w - 8}" y="${y + 10}" fill="${BLUEPRINT.inkDim}" font-size="7" letter-spacing="0.8" text-anchor="end">NEXMAP</text>` +
+    `<text x="${x + w - 8}" y="${y + 23}" fill="${BLUEPRINT.inkDim}" font-size="8" text-anchor="end">${count.links} LINKS</text>` +
+    `</g>`
+  );
 }
 
 const ISO_GRID = 16;

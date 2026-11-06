@@ -12,6 +12,8 @@ interface Props {
   onHelp: () => void;
   projection: Projection;
   onToggleProjection: () => void;
+  /** Blueprint skin on/off (back to flat). */
+  onToggleBlueprint: () => void;
   onAutoLayout: () => void;
   /** Flow lens ("stress-test your design") — read-only blast-radius mode. */
   flowMode: boolean;
@@ -32,11 +34,13 @@ export function CanvasToolbar({
   onHelp,
   projection,
   onToggleProjection,
+  onToggleBlueprint,
   onAutoLayout,
   flowMode,
   onToggleFlow,
 }: Props) {
   const iso = projection === 'iso';
+  const blueprint = projection === 'blueprint';
   const tool = (m: CanvasMode, icon: NexIconName, key: string, title: string) => (
     <button
       className={`${styles.tool} ${mode === m ? styles.active : ''}`}
@@ -70,6 +74,18 @@ export function CanvasToolbar({
       >
         <NexIcon name="iso" className={styles.toolIcon} />
         <span className={styles.key}>{iso ? 'ISO' : '2D'}</span>
+      </button>
+      {/* Icon-only: the toolbar already spans most of a 1280px canvas with both
+          panels open, so the third view style mustn't widen it by a full tool. */}
+      <button
+        className={`${styles.tool} ${styles.compact} ${blueprint ? styles.active : ''}`}
+        data-demote={blueprint ? undefined : 'chrome-item'}
+        onClick={onToggleBlueprint}
+        title={blueprint ? 'Leave blueprint view' : 'Blueprint view — a drafting sheet in one ink'}
+        aria-pressed={blueprint}
+        aria-label="Toggle blueprint view"
+      >
+        <NexIcon name="blueprint" className={styles.toolIcon} />
       </button>
       <button
         className={styles.icon}

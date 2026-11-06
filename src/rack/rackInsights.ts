@@ -6,15 +6,19 @@
  */
 import type { Device, Rack, RackCable, ValidationIssue } from '@/model/types';
 import { fleetBudget, rackBudget } from './rackBudget';
-import { powerFeedAnalysis } from './rackPower';
+import { pduFeedCoverage, powerFeedAnalysis } from './rackPower';
 import { airflowViolations } from './rackAirflow';
-import { nearestFreeU, slotOf } from './rackModel';
+import { isFullDepth, nearestFreeU, slotOf } from './rackModel';
+import { planCatalogDepths } from './rackCatalog';
+import { cableLanes, MANAGER_REACH_U } from './cableLanes';
 
 export type RackInsightSeverity = 'ok' | 'info' | 'warn' | 'error';
 export type RackInsightAction =
   | 'add-asset-tag'
+  | 'add-pdu'
   | 'auto-length'
   | 'balance-power'
+  | 'fill-depths'
   | 'go-to-u'
   | 'review-health'
   | 'review-rack';
@@ -98,6 +102,55 @@ export function rackInsights({
     });
   }
 
+  // Depth: gear that doesn't fit front-to-rear (warn — the designer never blocks it).
+  const deep = racks.find((r) => rackBudget(r, devices).overDepth);
+  if (deep) {
+    const b = rackBudget(deep, devices);
+    insights.push({
+      id: `depth-${deep.id}`,
+      title: b.tooDeep > 0 ? 'Gear deeper than the rack' : 'Front and rear gear too deep together',
+      detail:
+        b.tooDeep > 0
+          ? `${deep.name}: ${b.tooDeep} unit${b.tooDeep === 1 ? ' is' : 's are'} deeper than its ${b.depthMm} mm.`
+          : `${deep.name}: a front and a rear unit share a U but don't fit its ${b.depthMm} mm together.`,
+      severity: 'warn',
+      action: 'review-rack',
+      actionLabel: 'Review rack',
+      rackId: deep.id,
+    });
+  }
+
+  // Depth the check can't see: a rack with a depth holding full-depth gear that records
+  // none. Silence there would read as "fits"; say so, and fill what the catalog knows.
+  const fillable = new Set(planCatalogDepths(devices).map((f) => f.deviceId));
+  for (const rack of racks) {
+    if (!rack.depthMm) continue;
+    const unknown = devices.filter(
+      (d) =>
+        d.rackId === rack.id &&
+        d.ru != null &&
+        (d.mount ?? 'rack') === 'rack' &&
+        isFullDepth(d.type) &&
+        !(d.depthMm && d.depthMm > 0),
+    );
+    if (!unknown.length) continue;
+    const known = unknown.filter((d) => fillable.has(d.id));
+    const n = unknown.length;
+    insights.push({
+      id: `depth-unchecked-${rack.id}`,
+      title: `Depth not checked for ${n} unit${n === 1 ? '' : 's'}`,
+      detail: known.length
+        ? `${rack.name}: ${known.length} of them ${known.length === 1 ? 'is a catalog model' : 'are catalog models'} with a datasheet depth.`
+        : `${rack.name}: add a depth or apply a known model to check them against its ${rack.depthMm} mm.`,
+      severity: 'info',
+      action: known.length ? 'fill-depths' : 'review-rack',
+      actionLabel: known.length ? 'Fill depths' : 'Review rack',
+      rackId: rack.id,
+      objectIds: unknown.map((d) => d.id),
+    });
+    break;
+  }
+
   const power = powerFeedAnalysis(devices);
   const totalFeed = power.normalA + power.normalB;
   if (totalFeed > 0) {
@@ -124,6 +177,70 @@ export function rackInsights({
         actionLabel: 'Review power',
       });
     }
+  }
+
+  // PDUs: gear that needs a feed no PDU in its rack is on, or more cords than outlets.
+  // Racks without any PDU drawn are left alone (their power isn't modelled).
+  for (const rack of racks) {
+    const coverage = pduFeedCoverage(rack, devices);
+    if (!coverage.some((f) => f.pdus > 0)) continue;
+    for (const f of coverage) {
+      if (f.cords === 0) continue;
+      const units = `${f.cords} unit${f.cords === 1 ? '' : 's'}`;
+      if (f.pdus === 0) {
+        insights.push({
+          id: `pdu-missing-${rack.id}-${f.feed}`,
+          title: `No PDU on feed ${f.feed}`,
+          detail: `${rack.name}: ${units} need${f.cords === 1 ? 's' : ''} a cord on feed ${f.feed}, but none of its PDUs is on it.`,
+          severity: 'warn',
+          action: 'add-pdu',
+          actionLabel: `Add PDU ${f.feed}`,
+          rackId: rack.id,
+          objectIds: f.deviceIds,
+        });
+      } else if (f.cords > f.outlets) {
+        insights.push({
+          id: `pdu-outlets-${rack.id}-${f.feed}`,
+          title: `Feed ${f.feed} is short of outlets`,
+          detail: `${rack.name}: ${f.cords} cords on feed ${f.feed}, ${f.outlets} outlets across its ${f.pdus === 1 ? 'PDU' : `${f.pdus} PDUs`}.`,
+          severity: 'warn',
+          action: 'add-pdu',
+          actionLabel: `Add PDU ${f.feed}`,
+          rackId: rack.id,
+          objectIds: f.deviceIds,
+        });
+      }
+    }
+  }
+
+  // Cable management: an overfull manager, or dense gear with nowhere to dress its cords.
+  const lanes = cableLanes(devices, cables);
+  const full = lanes.fill.find((f) => f.capacity != null && f.cables > f.capacity);
+  if (full) {
+    const m = full.manager;
+    insights.push({
+      id: `cable-mgr-full-${m.id}`,
+      title: 'Cable manager over capacity',
+      detail: `${m.name} at U${m.ru} dresses ${full.cables} cords; a ${m.ruSpan ?? 1}U manager holds about ${full.capacity}.`,
+      severity: 'warn',
+      action: 'review-rack',
+      actionLabel: 'Review',
+      rackId: m.rackId,
+      deviceId: m.id,
+    });
+  }
+  const loose = lanes.unmanaged[0];
+  if (loose) {
+    insights.push({
+      id: `unmanaged-${loose.device.id}`,
+      title: 'Dense gear without a cable manager',
+      detail: `${loose.device.name} has ${loose.cables} cords and no cable manager within ${MANAGER_REACH_U}U.`,
+      severity: 'info',
+      action: 'review-rack',
+      actionLabel: 'Review',
+      rackId: loose.device.rackId,
+      deviceId: loose.device.id,
+    });
   }
 
   const missingLength = cables.filter((c) => c.lengthFt == null);

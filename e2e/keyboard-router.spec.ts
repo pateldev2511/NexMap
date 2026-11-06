@@ -104,7 +104,7 @@ test('Cmd+Z mid-drag reverts the drag and leaves history for a second press', as
   const count = await page.locator('g[data-id][role="button"]').count();
   // Give the second Cmd+Z something observable to undo: add a device first.
   const svg = (await page.locator('svg:has(g[data-id])').first().boundingBox())!;
-  await page.mouse.dblclick(svg.x + 40, svg.y + 40);
+  await page.mouse.dblclick(svg.x + 40, svg.y + 110); // empty, below the toolbar
   await page.getByRole('menu', { name: 'Add device' }).getByRole('menuitem', { name: 'Switch' }).click();
   await expect(page.locator('g[data-id][role="button"]')).toHaveCount(count + 1);
 
