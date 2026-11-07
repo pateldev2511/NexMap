@@ -7,6 +7,8 @@
  *    would silently drop the newer fields and destroy the user's data.
  *  - Strip prototype-pollution keys (__proto__/constructor/prototype) from any
  *    parsed JSON before it touches the model (DA-S3).
+ *  - After migration, validate the structure the editor indexes (required lists,
+ *    entry shapes, unique ids) before the document is adopted (#26).
  */
 import { legacyToBlocks } from './callout';
 import { SCHEMA_VERSION } from './schema';
@@ -91,7 +93,13 @@ export const MIGRATIONS: Record<number, Migration> = {
 
 export type LoadResult =
   | { ok: true; doc: NexMapDocument; migratedFrom?: number }
-  | { ok: false; reason: 'corrupt' | 'too-new' | 'invalid'; message: string };
+  | {
+      ok: false;
+      reason: 'corrupt' | 'too-new' | 'invalid';
+      message: string;
+      /** For a structural refusal: the offending field, e.g. `devices[3].id`. */
+      path?: string;
+    };
 
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -126,7 +134,15 @@ export function loadDocument(raw: string): LoadResult {
   } catch {
     return { ok: false, reason: 'corrupt', message: 'File is not valid JSON.' };
   }
+  return migrateDocument(parsed);
+}
 
+/**
+ * Migrate and validate an already-parsed document (a file's JSON, or an autosave
+ * draft read back from IndexedDB — a draft written by an older build is at an
+ * older schema too). Pure and total, like loadDocument.
+ */
+export function migrateDocument(parsed: unknown): LoadResult {
   if (!isPlainObject(parsed)) {
     return { ok: false, reason: 'invalid', message: 'Document root is not an object.' };
   }
@@ -181,9 +197,117 @@ export function loadDocument(raw: string): LoadResult {
     };
   }
 
+  // Structure the editor relies on, checked BEFORE anything is adopted: a refusal
+  // here leaves the open project, its history and its file untouched.
+  const problem = structuralProblem(doc);
+  if (problem) {
+    return {
+      ok: false,
+      reason: 'invalid',
+      message: `This file can't be opened: ${problem.path} ${problem.issue}.`,
+      path: problem.path,
+    };
+  }
+
   return {
     ok: true,
     doc: doc as unknown as NexMapDocument,
     ...(startVersion < SCHEMA_VERSION ? { migratedFrom: startVersion } : {}),
   };
+}
+
+type FieldCheck = 'string' | 'number' | 'object';
+
+/**
+ * What each indexed collection's entries must carry: only the fields the editor
+ * dereferences without a guard. Everything else (optional props, unknown future
+ * fields) passes through untouched, so forward-compatible files still open.
+ */
+const ENTRY_SHAPES: Record<string, Record<string, FieldCheck>> = {
+  layers: { id: 'string' },
+  devices: {
+    id: 'string',
+    type: 'string',
+    name: 'string',
+    x: 'number',
+    y: 'number',
+    width: 'number',
+    height: 'number',
+  },
+  links: { id: 'string', sourceId: 'string', targetId: 'string' },
+  objects: { id: 'string', x: 'number', y: 'number', width: 'number', height: 'number' },
+  vlans: { id: 'string', vlanId: 'number' },
+  subnets: { id: 'string', cidr: 'string' },
+  racks: { id: 'string', ruHeight: 'number' },
+  rackCables: { id: 'string', aEnd: 'object', bEnd: 'object' },
+  views: { id: 'string' },
+};
+
+/** Collections that must be present. The rest may be absent (read as empty). */
+const REQUIRED = new Set(['layers', 'devices', 'links']);
+
+const EXPECTED: Record<FieldCheck, string> = {
+  string: 'a string',
+  number: 'a finite number',
+  object: 'an object',
+};
+
+function fieldOk(v: unknown, check: FieldCheck): boolean {
+  if (check === 'string') return typeof v === 'string';
+  if (check === 'number') return typeof v === 'number' && Number.isFinite(v);
+  return isPlainObject(v);
+}
+
+/** The first structural problem in a migrated doc, as a field path + what's wrong. */
+export function structuralProblem(
+  doc: Record<string, unknown>,
+): { path: string; issue: string } | null {
+  const project = doc.project as Record<string, unknown>;
+  if (typeof project.id !== 'string' || project.id === '') {
+    return { path: 'project.id', issue: 'must be a non-empty string' };
+  }
+  if (typeof project.name !== 'string') {
+    return { path: 'project.name', issue: 'must be a string' };
+  }
+
+  for (const [collection, shape] of Object.entries(ENTRY_SHAPES)) {
+    const list = doc[collection];
+    if (list === undefined && !REQUIRED.has(collection)) continue;
+    if (!Array.isArray(list)) {
+      return {
+        path: collection,
+        issue: list === undefined ? 'is missing (expected a list)' : 'must be a list',
+      };
+    }
+    // Ids are the editor's keys: a repeat would silently keep only the last entry,
+    // and the next save would drop the others.
+    const seen = new Map<string, number>();
+    for (let i = 0; i < list.length; i++) {
+      const entry: unknown = list[i];
+      const at = `${collection}[${i}]`;
+      if (!isPlainObject(entry)) return { path: at, issue: 'must be an object' };
+      for (const [field, check] of Object.entries(shape)) {
+        if (!fieldOk(entry[field], check)) {
+          return { path: `${at}.${field}`, issue: `must be ${EXPECTED[check]}` };
+        }
+      }
+      const id = entry.id as string;
+      if (id === '') return { path: `${at}.id`, issue: 'must not be empty' };
+      if (collection === 'objects' && entry.kind === 'text' && !Array.isArray(entry.blocks)) {
+        return { path: `${at}.blocks`, issue: 'must be a list (the callout text)' };
+      }
+      if (collection === 'racks' && (entry.ruHeight as number) < 1) {
+        return { path: `${at}.ruHeight`, issue: 'must be at least 1' };
+      }
+      const first = seen.get(id);
+      if (first !== undefined) {
+        return {
+          path: `${at}.id`,
+          issue: `repeats the id "${id}" already used by ${collection}[${first}]`,
+        };
+      }
+      seen.set(id, i);
+    }
+  }
+  return null;
 }

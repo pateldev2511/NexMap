@@ -41,7 +41,7 @@ describe('loadDocument', () => {
     const doc = createEmptyDocument(NOW) as unknown as Record<string, unknown>;
     const hostile = JSON.stringify(doc).replace(
       '"devices":[]',
-      '"devices":[{"id":"x","__proto__":{"polluted":true}}]',
+      '"devices":[{"id":"x","type":"router","name":"R","x":0,"y":0,"width":56,"height":40,"__proto__":{"polluted":true}}]',
     );
     const result = loadDocument(hostile);
     // It loads (sanitized), and Object prototype is NOT polluted.
