@@ -743,6 +743,15 @@ the cables down to the hardware, with a user control to dial the motion.
 
 ### Fixed
 
+- **Every deploy reaches returning visitors on their next load.** The offline
+  service worker served the page from its cache first, so a returning visitor ran
+  the previous release (or older) until a later visit. Worse, when that stale page
+  asked for a bundle a newer deploy had removed, the host answered with the app's
+  HTML page, and the worker cached it as the script or stylesheet: the app then
+  loaded broken. The page now comes from the network first (the cached copy is the
+  offline fallback), hashed bundles are cached once and served from the cache, HTML
+  is never cached for anything but the page, and the cache is renamed so every
+  visitor's bad entries are dropped. NexMap still runs fully offline.
 - **Vendor-skinned switches lined up with their cable hit points.** A Cisco, Arista
   or Juniper faceplate drew its ports in a different layout from the one cables
   attach to, so a jack you clicked wasn't always the jack you saw. Skins are now
