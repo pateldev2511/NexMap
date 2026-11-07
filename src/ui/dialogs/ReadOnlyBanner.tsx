@@ -1,3 +1,4 @@
+import { useEffect, useRef, type ReactNode } from 'react';
 import { NexIcon } from '@/ui/icons/NexIcon';
 import styles from './ReadOnlyBanner.module.css';
 
@@ -7,9 +8,26 @@ export function ReadOnlyBanner() {
     <div className={styles.banner} role="status">
       <NexIcon name="warning" />
       <span>
-        This project is open in another tab. You're in read-only mode here - edits won't
-        be autosaved. Close the other tab to take over.
+        This project is open in another tab, so this tab is view-only. Close the other
+        tab to edit here.
       </span>
+    </div>
+  );
+}
+
+/**
+ * Makes an editing surface view-only while another tab is the writer (#24): the
+ * subtree goes `inert` (no clicks, focus or typing reach it). Layout-neutral —
+ * `display: contents` adds no box.
+ */
+export function ReadOnlyGate({ on, children }: { on: boolean; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    ref.current?.toggleAttribute('inert', on);
+  }, [on]);
+  return (
+    <div ref={ref} style={{ display: 'contents' }} data-readonly-gate={on ? '' : undefined}>
+      {children}
     </div>
   );
 }

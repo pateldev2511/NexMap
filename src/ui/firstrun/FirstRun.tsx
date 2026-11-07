@@ -22,7 +22,8 @@ export function FirstRun({
   onOpenText,
 }: {
   onDone: () => void;
-  onOpenText?: (text: string) => void;
+  /** Opens the text as the project; resolves false if it was refused or cancelled. */
+  onOpenText?: (text: string) => Promise<boolean>;
 }) {
   const loadDoc = useProjectStore((s) => s.loadDoc);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -37,8 +38,8 @@ export function FirstRun({
     setError(null);
     const text = await file.text();
     if (onOpenText) {
-      onOpenText(text);
-      onDone();
+      // A refused file keeps the start screen up (the reason shows as a toast).
+      if (await onOpenText(text)) onDone();
       return;
     }
     const result = loadDocument(text);

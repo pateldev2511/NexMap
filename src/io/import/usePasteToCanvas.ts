@@ -23,8 +23,12 @@ export function registerPasteCanvas(target: { readOnly: boolean }): () => void {
 }
 
 const activeCanvas = () => canvases[canvases.length - 1] ?? null;
-/** A read-only canvas (presentation) takes no paste of any kind (#35). */
-const pasteLocked = () => activeCanvas()?.readOnly ?? false;
+/**
+ * No paste of any kind on a read-only canvas (presentation, #35) or in a view-only
+ * tab, where another tab is the writer (#24).
+ */
+const pasteLocked = () =>
+  (activeCanvas()?.readOnly ?? false) || useProjectStore.getState().readOnly;
 
 /**
  * Paste-to-canvas (Stage 2). The ONE place keyboard paste is decided (#52) — the
@@ -51,7 +55,7 @@ export function usePasteToCanvas(): void {
 
     function onPaste(e: ClipboardEvent) {
       if (isTextTarget(e.target)) return; // let the field handle its own paste
-      if (pasteLocked()) return; // presenting: the diagram is read-only
+      if (pasteLocked()) return; // presenting, or a view-only tab
       const store = useProjectStore.getState();
       // The internal clipboard pastes onto a mounted network canvas only.
       const internal = !!activeCanvas() && store.hasClipboard();

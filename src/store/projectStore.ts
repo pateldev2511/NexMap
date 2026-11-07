@@ -432,7 +432,21 @@ export interface ProjectStore {
   ruleSupports: Map<string, RuleSupport[]>;
   canUndo: boolean;
   canRedo: boolean;
+  /** Unsaved to a file since the document was loaded or last saved. */
   dirty: boolean;
+  /**
+   * Which document is open: bumped by every loadDoc (open, new, template,
+   * recovery). Anything bound to one document — its file handle, a pending save
+   * — compares this before acting, so it can't land on a different project.
+   */
+  docIdentity: number;
+  /** Advances on every document change (see the wrapped `set`). */
+  docRevision: number;
+  /**
+   * Another tab holds the writer role (#24): the document is view-only here.
+   * Editing surfaces read this; persistence sets it from the Web Locks state.
+   */
+  readOnly: boolean;
   mode: CanvasMode;
   /** Active render projection (flat or isometric). View-level, not undoable. */
   projection: Projection;
@@ -724,8 +738,14 @@ export interface ProjectStore {
   /** Pick the device Flow measures reachability to (null = any exit). */
   setFlowTarget(id: string | null): void;
   endEdit(): void;
-  /** Mark the model as saved to a file (clears the unsaved-changes dot). */
-  markSaved(): void;
+  /**
+   * Mark the model as saved to a file (clears the unsaved-changes dot). Given the
+   * identity + revision a save serialized, it only clears when the document is
+   * still exactly that — a later edit or a different project stays unsaved.
+   * Returns whether it cleared.
+   */
+  markSaved(saved?: { identity: number; revision: number }): boolean;
+  setReadOnly(on: boolean): void;
   deleteSelection(): void;
   select(ids: string[], additive?: boolean): void;
   boxSelect(box: Box, additive?: boolean): void;
@@ -935,7 +955,31 @@ function snapValue(v: number, suspend: boolean): number {
   return suspend ? v : Math.round(v / GRID) * GRID;
 }
 
-export const useProjectStore = create<ProjectStore>((set, get) => {
+/**
+ * Callbacks run just before loadDoc swaps the model out, while getDocument() still
+ * returns the OUTGOING document — persistence flushes that document's pending
+ * autosave here, so a quick switch can't serialize the new project in its place.
+ */
+const beforeSwapListeners = new Set<() => void>();
+export function onBeforeDocumentSwap(listener: () => void): () => void {
+  beforeSwapListeners.add(listener);
+  return () => beforeSwapListeners.delete(listener);
+}
+
+export const useProjectStore = create<ProjectStore>((rawSet, get) => {
+  /**
+   * Every write that changes the model (`rev`) or marks the document edited
+   * (`dirty: true`) advances `docRevision`. A file save records the revision it
+   * serialized and only that exact revision can be marked saved (#18), so an
+   * edit made while the write was pending stays visibly unsaved.
+   */
+  const set = (patch: Partial<ProjectStore>): void => {
+    if (patch.docRevision === undefined && ('rev' in patch || patch.dirty === true)) {
+      rawSet({ ...patch, docRevision: (get()?.docRevision ?? 0) + 1 });
+    } else {
+      rawSet(patch);
+    }
+  };
   // New objects/devices/links attach to the active layer (falling back to the first).
   function firstLayerId(): string {
     const active = get()?.activeLayerId; // get() is undefined during store init
@@ -1532,6 +1576,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     canUndo: false,
     canRedo: false,
     dirty: false,
+    docIdentity: 0,
+    docRevision: 0,
+    readOnly: false,
     mode: 'select',
     projection: 'flat',
     flowMode: false,
@@ -3430,8 +3477,19 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       if (ruleGuard && ruleGuard.seq !== history.seq) get().runValidation();
     },
 
-    markSaved() {
+    markSaved(saved) {
+      if (
+        saved &&
+        (saved.identity !== get().docIdentity || saved.revision !== get().docRevision)
+      ) {
+        return false;
+      }
       set({ dirty: false });
+      return true;
+    },
+
+    setReadOnly(on) {
+      if (get().readOnly !== on) set({ readOnly: on });
     },
 
     deleteSelection() {
@@ -3936,6 +3994,14 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         .map(sanitizeStoredRule)
         .filter((r): r is CustomRuleSpec => r !== null);
       const loadedEnforced = strings(doc.enforcedRules);
+      // Last moment the outgoing document is still readable (pending autosave).
+      for (const fn of [...beforeSwapListeners]) {
+        try {
+          fn();
+        } catch {
+          /* a listener's failure must not block the load */
+        }
+      }
       model = fromDocument(doc);
       baseDoc = doc;
       history.clear();
@@ -3970,6 +4036,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         canUndo: false,
         canRedo: false,
         dirty: false,
+        // A different document: new identity, fresh revision (nothing edited yet).
+        docIdentity: get().docIdentity + 1,
+        docRevision: 0,
         projectName: doc.project.name,
         activeLayerId: model.layers.keys().next().value ?? 'default',
         activeViewId: null,
@@ -3990,9 +4059,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     },
 
     newProject(now) {
-      const doc = createEmptyDocument(now);
-      get().loadDoc(doc);
-      set({ dirty: false });
+      // loadDoc already leaves it clean, with a new identity (no file, no draft binding).
+      get().loadDoc(createEmptyDocument(now));
     },
 
     visibleDevices(viewport) {
