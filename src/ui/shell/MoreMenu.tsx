@@ -4,6 +4,20 @@ import { keyboardRouter } from '@/input/router';
 import { NexIcon } from '@/ui/icons/NexIcon';
 import styles from './AppShell.module.css';
 
+/** Is `el` still on screen and not clipped away by any scrolling ancestor? */
+function anchorVisible(el: HTMLElement): boolean {
+  const r = el.getBoundingClientRect();
+  const outside = (c: { left: number; right: number; top: number; bottom: number }) =>
+    r.right <= c.left || r.left >= c.right || r.bottom <= c.top || r.top >= c.bottom;
+  if (outside({ left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight })) return false;
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const { overflowX, overflowY } = getComputedStyle(p);
+    if (overflowX === 'visible' && overflowY === 'visible') continue;
+    if (outside(p.getBoundingClientRect())) return false;
+  }
+  return true;
+}
+
 /**
  * Top-bar "More" dropdown. The panel is PORTALED to <body> and positioned
  * `fixed` from the trigger's viewport rect — never `position:absolute` inside
@@ -14,8 +28,9 @@ import styles from './AppShell.module.css';
  *
  * Closes on: item click (children call onClose), outside pointerdown
  * (capture-phase, so it beats canvas gesture handlers), Escape (router overlay,
- * so it stacks correctly with other overlays), and viewport resize/scroll
- * (the anchor rect would otherwise go stale).
+ * so it stacks correctly with other overlays), viewport resize, and a scroll that
+ * takes the trigger out of sight. While the trigger stays visible a scroll just
+ * moves the panel with it.
  */
 export function MoreMenu({ children }: { children: (close: () => void) => ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -47,8 +62,18 @@ export function MoreMenu({ children }: { children: (close: () => void) => ReactN
     };
     document.addEventListener('pointerdown', onDown, true);
     window.addEventListener('resize', close);
-    // Any scroll (topbar, page) staleness-closes rather than chase the anchor.
-    window.addEventListener('scroll', close, true);
+    // A scroll moves the anchor. While the trigger is still on screen the panel
+    // follows it; that includes the action strip scrolling More into view as it
+    // is clicked, which used to close the menu the moment it opened when the
+    // strip overflows (wider Linux font metrics, CI). Once the trigger is
+    // scrolled out of sight the menu would point at nothing, so it closes.
+    const onScroll = (e: Event) => {
+      if (panelRef.current?.contains(e.target as Node)) return; // the menu's own scroll
+      const trigger = triggerRef.current;
+      if (trigger && anchorVisible(trigger)) place();
+      else close();
+    };
+    window.addEventListener('scroll', onScroll, true);
     const offEsc = keyboardRouter.registerOverlay((e) => {
       if (e.key === 'Escape') {
         close();
@@ -59,7 +84,7 @@ export function MoreMenu({ children }: { children: (close: () => void) => ReactN
     return () => {
       document.removeEventListener('pointerdown', onDown, true);
       window.removeEventListener('resize', close);
-      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('scroll', onScroll, true);
       offEsc();
     };
   }, [open]);
