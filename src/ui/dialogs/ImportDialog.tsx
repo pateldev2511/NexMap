@@ -250,6 +250,21 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
     setMapping(autoMap(p.headers, k === 'devices' ? DEVICE_FIELDS : LINK_FIELDS));
   }
 
+  // Parsers report bad rows as warnings; anything that still throws is a file we
+  // can't read. Reject it visibly instead of leaving a blank dialog — nothing has
+  // touched the project yet, and "Choose another file" retries in place.
+  async function pickFile(file: File) {
+    try {
+      await onFile(file);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      emptyImport(
+        file.name,
+        `Could not read this file (${reason}). Nothing was imported.`,
+      );
+    }
+  }
+
   function reMap(k: ImportKind) {
     setKind(k);
     if (parsed)
@@ -304,6 +319,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
     if (result) commitResult(result);
   }
 
+  const pending = !!(text || graphResult || semanticResult || mediaResult);
   const canCommit = graphResult
     ? graphResult.result.devices.length + graphResult.result.links.length > 0
     : semanticResult
@@ -323,7 +339,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className={styles.body}>
-          {!text && !graphResult && !semanticResult && !mediaResult && !done && (
+          {!pending && !done && (
             <div className={styles.dropzone} onClick={() => inputRef.current?.click()}>
               Choose a file: CSV (devices/links/IP/VLANs), GraphML, draw.io XML, Nmap XML,
               topology/NetBox JSON, or an image/SVG background underlay.
@@ -527,7 +543,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
             style={{ display: 'none' }}
             onChange={async (e) => {
               const file = e.target.files?.[0];
-              if (file) await onFile(file);
+              if (file) await pickFile(file);
               e.target.value = '';
             }}
           />
@@ -537,6 +553,11 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
             </button>
           ) : (
             <>
+              {pending && (
+                <button className={styles.btn} onClick={() => inputRef.current?.click()}>
+                  Choose another file
+                </button>
+              )}
               <button className={styles.btn} onClick={onClose}>
                 Cancel
               </button>
