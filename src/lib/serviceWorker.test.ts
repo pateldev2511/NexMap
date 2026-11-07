@@ -16,7 +16,12 @@ const js = (body: string) =>
   new Response(body, { headers: { 'content-type': 'text/javascript' } });
 const offline: Net = () => Promise.reject(new TypeError('Failed to fetch'));
 
-function worker(net: Net) {
+// The build replaces this line with the emitted file list (swPrecachePlugin in
+// vite.config.ts), and fails if it is missing.
+const PRECACHE_MARKER = 'const PRECACHE = [];';
+
+/** Loads the worker. `precache` stands in for the list the build writes into it. */
+function worker(net: Net, precache: string[] = []) {
   const listeners: Partial<Record<string, (e: unknown) => void>> = {};
   const store = new Map<string, Map<string, Response>>();
   const keyOf = (r: string | { url: string }) =>
@@ -28,23 +33,31 @@ function worker(net: Net) {
       return {
         match: async (r: string | { url: string }) => entries.get(keyOf(r))?.clone(),
         put: async (r: string | { url: string }, res: Response) => void entries.set(keyOf(r), res),
+        keys: async () => [...entries.keys()].map((url) => ({ url })),
+        delete: async (r: string | { url: string }) => entries.delete(keyOf(r)),
       };
     },
     keys: async () => [...store.keys()],
     delete: async (name: string) => store.delete(name),
   };
+  const messages: unknown[] = [];
   const self = {
     addEventListener: (type: string, fn: (e: unknown) => void) => (listeners[type] = fn),
-    skipWaiting: () => undefined,
-    clients: { claim: async () => undefined },
+    skipWaiting: async () => undefined,
+    clients: {
+      claim: async () => undefined,
+      matchAll: async () => [{ postMessage: (m: unknown) => messages.push(m) }],
+    },
     location: { origin: ORIGIN },
   };
   const calls: string[] = [];
-  const fetch = async (req: { url: string }) => {
-    calls.push(new URL(req.url).pathname);
-    return net(req.url);
+  const fetch = async (req: string | { url: string }) => {
+    const url = keyOf(req);
+    calls.push(new URL(url).pathname);
+    return net(url);
   };
-  new Function('self', 'caches', 'fetch', SOURCE)(self, caches, fetch);
+  const source = SOURCE.replace(PRECACHE_MARKER, `const PRECACHE = ${JSON.stringify(precache)};`);
+  new Function('self', 'caches', 'fetch', source)(self, caches, fetch);
 
   /** Dispatches a fetch event; resolves to the response, or null if not intercepted. */
   async function request(
@@ -70,14 +83,88 @@ function worker(net: Net) {
     listeners.activate!({ waitUntil: (p: Promise<unknown>) => (done = p) });
     await done;
   }
+  /** Runs the install step; resolves true if it succeeded. */
+  async function install() {
+    let done: Promise<unknown> = Promise.resolve();
+    listeners.install!({ waitUntil: (p: Promise<unknown>) => (done = p) });
+    return done.then(
+      () => true,
+      () => false,
+    );
+  }
   const cached = (path: string) => {
     for (const entries of store.values()) {
       const hit = entries.get(new URL(path, ORIGIN).href);
       if (hit) return hit;
     }
   };
-  return { request, activate, calls, store, cached, setNet: (n: Net) => (net = n) };
+  return {
+    request,
+    install,
+    activate,
+    calls,
+    store,
+    cached,
+    messages,
+    setNet: (n: Net) => (net = n),
+  };
 }
+
+/** A host serving one build: the page plus its files, and the SPA fallback for the rest. */
+const host =
+  (files: Record<string, string>): Net =>
+  (url) => {
+    const body = files[new URL(url).pathname];
+    return body !== undefined ? js(body) : html('<!doctype html><title>NexMap</title>');
+  };
+
+describe('service worker — install makes the first visit work offline', () => {
+  const BUILD = ['/assets/index-a1.js', '/assets/jspdf-b2.js', '/icon.svg'];
+
+  it('precaches the page and every build file, lazy chunks included', async () => {
+    const sw = worker(host({ '/assets/index-a1.js': 'app', '/assets/jspdf-b2.js': 'pdf', '/icon.svg': 'i' }), BUILD);
+    expect(await sw.install()).toBe(true);
+    for (const path of ['/', ...BUILD]) expect(sw.cached(path)).toBeDefined();
+
+    // A cold offline launch: the page and a never-loaded lazy chunk both answer.
+    sw.setNet(offline);
+    expect(await (await sw.request('/', 'navigate'))!.text()).toContain('NexMap');
+    expect(await (await sw.request('/assets/jspdf-b2.js'))!.text()).toBe('pdf');
+  });
+
+  it('fails install, rather than claim offline readiness, when a file is missing', async () => {
+    // jspdf-b2.js is absent, so the host answers with its SPA fallback page.
+    const sw = worker(host({ '/assets/index-a1.js': 'app', '/icon.svg': 'i' }), BUILD);
+    expect(await sw.install()).toBe(false);
+  });
+
+  it('fails install when the network drops mid-fill', async () => {
+    let served = 0;
+    const sw = worker((url) => (++served > 2 ? offline(url) : host({})(url)), BUILD);
+    expect(await sw.install()).toBe(false);
+  });
+
+  it('drops build files the new build no longer ships, keeping the page', async () => {
+    const sw = worker(host({ '/assets/index-a1.js': 'old' }), ['/assets/index-a1.js']);
+    await sw.install();
+    await sw.activate();
+    // The next deploy renamed the bundle.
+    const next = worker(host({ '/assets/index-c3.js': 'new' }), ['/assets/index-c3.js']);
+    for (const [name, entries] of sw.store) next.store.set(name, new Map(entries));
+    await next.install();
+    await next.activate();
+    expect(next.cached('/assets/index-a1.js')).toBeUndefined();
+    expect(next.cached('/assets/index-c3.js')).toBeDefined();
+    expect(next.cached('/')).toBeDefined();
+  });
+
+  it('tells open pages that offline use is ready once it activates', async () => {
+    const sw = worker(host({}), []);
+    await sw.install();
+    await sw.activate();
+    expect(sw.messages).toEqual([{ type: 'nexmap:offline-ready' }]);
+  });
+});
 
 describe('service worker — page navigations are network-first', () => {
   it('serves a new deploy on the next load even when an older page is cached', async () => {

@@ -17,7 +17,6 @@ import { DesignerChooser, type DesignerMode } from './ui/DesignerChooser';
 import { SettingsDialog } from './ui/dialogs/SettingsDialog';
 import { AboutDialog } from './ui/dialogs/AboutDialog';
 import { OutlineDialog } from './ui/dialogs/OutlineDialog';
-import { UpdateToast } from './ui/UpdateToast';
 import { CommandPalette, type PaletteCommand } from './ui/CommandPalette';
 import {
   countedDevices,
@@ -521,7 +520,6 @@ export function App() {
               onClose={() => setShowSettings(false)}
             />
           )}
-          <UpdateToast />
           <ValidationAnnouncer />
           {showPalette &&
             (() => {

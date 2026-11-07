@@ -1,0 +1,20 @@
+# Dependency update PRs. Security advisories for the lockfile also need
+# "Dependabot alerts" switched on in Settings → Code security. Every update PR runs
+# the full CI, including the sanitizer, PDF and .nexmap round-trip checks listed in
+# SECURITY.md → "Dependency advisories".
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Runtime libraries ship to users; keep them in their own, reviewable PRs.
+      dev-tooling:
+        dependency-type: development
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

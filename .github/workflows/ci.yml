@@ -33,6 +33,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Advisories against what ships to users (the sanitizer, PDF writer, ...).
+      # Dev tooling is excluded: it never reaches the browser. See SECURITY.md.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Test
         run: npm test
 
@@ -63,9 +68,18 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Run E2E
         run: npm run e2e
+      # Production build: offline service worker (the dev server never registers it).
+      - name: Run E2E (production build)
+        if: ${{ !cancelled() }}
+        run: npm run e2e:preview
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
           name: playwright-report
-          path: playwright-report/
+          path: |
+            playwright-report/
+            playwright-report-preview/
+            test-results/
+            test-results-preview/
+          if-no-files-found: warn
           retention-days: 7
