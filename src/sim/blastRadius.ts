@@ -9,20 +9,41 @@
  * reach the network's egress/core before the failure but cannot reach ANY surviving
  * egress after it. Measuring against the *set* of egress nodes (not a single anchor)
  * is what makes redundant uplinks read as resilient instead of a false total outage.
+ * That set answers "can it still get out?"; a user-picked target (one ISP, gateway
+ * or service) answers the narrower "can it still reach THIS?".
  *
  * Pure, canvas-free, O(V+E) — safe to run on every hover. Mirrors the undirected
  * adjacency build in lib/health.ts (the existing SPOF/bridge engine).
  */
 import type { Device, DeviceType, Link } from '@/model/types';
 
+export interface BlastOptions {
+  /**
+   * Measure reachability to these devices only — a chosen ISP, gateway or service —
+   * instead of the whole egress set. Ids not in `devices` are ignored; if none
+   * remain, the egress set is used as if no target were given.
+   */
+  targets?: readonly string[];
+}
+
 export interface BlastResult {
   /** The devices the user pulled (failed). */
   failed: Set<string>;
-  /** Devices that lost all reachability to a surviving egress because of the failure. */
+  /** Devices that lost all reachability to a surviving destination because of the failure. */
   isolated: Set<string>;
-  /** Devices still reachable from a surviving egress (the survivors). */
+  /** Devices still reachable from a surviving destination (the survivors). */
   survived: Set<string>;
-  /** A representative egress node for display, or null when the graph has no edges. */
+  /**
+   * The destinations reachability is measured against: the chosen targets, else the
+   * egress set (`egressNodes`). Empty when the graph has no edges and no target.
+   */
+  destinations: string[];
+  /**
+   * Devices that could not reach any destination even before the failure — already
+   * disconnected, so never counted as lost to it. Excludes failed devices.
+   */
+  alreadyCut: Set<string>;
+  /** A representative destination for display, or null when there is none. */
   anchor: string | null;
   /** Link ids with at least one failed-or-isolated endpoint (the "dead" wave). */
   deadLinks: Set<string>;
@@ -158,14 +179,20 @@ export function networkAnchor(devices: Device[], links: Link[]): string | null {
 /**
  * Compute what the failure of `failed` does to the rest of the network.
  * `failed` may be one device (a single click) or several (cascading what-ifs).
+ * By default "reachable" means reaching ANY egress node, so failing an ISP while a
+ * router survives reads as holding; pass `targets` to ask about one destination
+ * ("can the client still reach this ISP?").
  */
 export function blastRadius(
   devices: Device[],
   links: Link[],
   failed: Iterable<string>,
+  opts: BlastOptions = {},
 ): BlastResult {
   const failedSet = new Set(failed);
-  const egress = egressNodes(devices, links);
+  const known = new Set(devices.map((d) => d.id));
+  const chosen = (opts.targets ?? []).filter((id) => known.has(id));
+  const egress = chosen.length ? [...new Set(chosen)] : egressNodes(devices, links);
   const anchor = egress[0] ?? null;
 
   const distBefore = bfsLayers(buildAdjacency(devices, links, new Set()), egress);
@@ -177,6 +204,10 @@ export function blastRadius(
     if (!failedSet.has(id) && !distAfter.has(id)) isolated.add(id);
   }
   const survived = new Set(distAfter.keys());
+  const alreadyCut = new Set<string>();
+  for (const d of devices) {
+    if (!failedSet.has(d.id) && !distBefore.has(d.id)) alreadyCut.add(d.id);
+  }
 
   const deadLinks = new Set<string>();
   for (const l of links) {
@@ -227,5 +258,88 @@ export function blastRadius(
     }
   }
 
-  return { failed: failedSet, isolated, survived, anchor, deadLinks, rerouted };
+  return {
+    failed: failedSet,
+    isolated,
+    survived,
+    destinations: egress,
+    alreadyCut,
+    anchor,
+    deadLinks,
+    rerouted,
+  };
+}
+
+export interface BlastVerdict {
+  tone: 'idle' | 'safe' | 'danger';
+  /** The one-line verdict, naming the destination it's about. */
+  verdict: string;
+  /** Failed, newly unreachable and already-disconnected counts ("" when there's nothing to count). */
+  counts: string;
+  /** What reachability is measured against: the chosen device, or "any exit: …". */
+  destination: string;
+}
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * The Flow HUD's text verdict for a blast result, in words a screen reader can
+ * announce as-is. `chosen` says whether the destination was picked by the user
+ * (named outright) or is the default egress set ("the network").
+ */
+export function blastVerdict(
+  r: BlastResult,
+  nameOf: (id: string) => string,
+  chosen: boolean,
+): BlastVerdict {
+  const names = r.destinations.map(nameOf);
+  const destination = chosen
+    ? (names[0] ?? '')
+    : names.length === 0
+      ? 'nothing yet — draw a link'
+      : `any exit: ${names.slice(0, 3).join(', ')}${names.length > 3 ? ` +${names.length - 3}` : ''}`;
+  const dest = chosen ? (names[0] ?? 'the destination') : 'the network';
+  const lost = r.isolated.size;
+  const rr = r.rerouted.size;
+  const already = r.alreadyCut.size;
+
+  if (r.failed.size === 0) {
+    return {
+      tone: 'idle',
+      verdict: 'Click any device to pull it — watch what loses its connection.',
+      counts: already > 0 ? `${plural(already, 'device')} already disconnected from ${dest}` : '',
+      destination,
+    };
+  }
+  const counts = [
+    `${r.failed.size} failed`,
+    `${lost} newly unreachable`,
+    ...(already > 0 ? [`${already} already disconnected`] : []),
+  ].join(' · ');
+  if (r.destinations.length > 0 && r.destinations.every((id) => r.failed.has(id))) {
+    return {
+      tone: 'danger',
+      verdict: `${chosen ? dest : 'Every exit'} is down — ${plural(lost, 'device')} lost ${
+        chosen ? 'their path to it' : 'their way out'
+      }.`,
+      counts,
+      destination,
+    };
+  }
+  if (lost === 0) {
+    return {
+      tone: 'safe',
+      verdict:
+        `Holding — nothing lost its path to ${dest}` +
+        (rr > 0 ? `; traffic rerouted over ${plural(rr, 'backup link')}.` : '.'),
+      counts,
+      destination,
+    };
+  }
+  return {
+    tone: 'danger',
+    verdict: `${plural(lost, 'device')} isolated — no path to ${dest}` + (rr > 0 ? `; ${rr} rerouted.` : '.'),
+    counts,
+    destination,
+  };
 }

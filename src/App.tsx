@@ -1,23 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { AppShell } from './ui/shell/AppShell';
 import { MoreMenu } from './ui/shell/MoreMenu';
-import { LeftPanel } from './ui/LeftSidebar/LeftPanel';
-import { Inspector } from './ui/Inspector/Inspector';
-import { BottomPanel } from './ui/BottomPanel/BottomPanel';
 import { FirstRun } from './ui/firstrun/FirstRun';
 import { RecoveryDialog } from './ui/dialogs/RecoveryDialog';
-import { ImportDialog } from './ui/dialogs/ImportDialog';
-import { NexTextDialog } from './ui/dialogs/NexTextDialog';
 import { usePasteToCanvas } from './io/import/usePasteToCanvas';
-import { ExportDialog } from './ui/dialogs/ExportDialog';
-import { ShortcutsDialog } from './ui/dialogs/ShortcutsDialog';
 import { ViewSwitcher } from './ui/ViewSwitcher';
-import { RackDesigner } from './rack/RackDesigner';
 import { DesignerChooser, type DesignerMode } from './ui/DesignerChooser';
-import { SettingsDialog } from './ui/dialogs/SettingsDialog';
-import { AboutDialog } from './ui/dialogs/AboutDialog';
-import { OutlineDialog } from './ui/dialogs/OutlineDialog';
-import { UpdateToast } from './ui/UpdateToast';
+import { designerFor } from './persistence/draft';
+import { UnsavedChangesDialog, type UnsavedChoice } from './ui/dialogs/UnsavedChangesDialog';
 import { CommandPalette, type PaletteCommand } from './ui/CommandPalette';
 import {
   countedDevices,
@@ -37,14 +27,28 @@ import type { CustomRuleSpec } from '@/model/types';
 import { keyboardRouter } from './input/router';
 import { useQuietChrome } from './ui/useQuietChrome';
 import { ValidationAnnouncer } from './ui/ValidationAnnouncer';
-import { applyReduceMotion, getReduceMotion, applyMotionLevel, getMotionLevel } from './lib/prefs';
+import {
+  applyReduceMotion,
+  getReduceMotion,
+  applyMotionLevel,
+  getMotionLevel,
+  readPref,
+  writePref,
+} from './lib/prefs';
 import { installTooltips } from './ui/tooltip';
-import { ReadOnlyBanner, ErrorToast, NoticeToast } from './ui/dialogs/ReadOnlyBanner';
+import {
+  ReadOnlyBanner,
+  ReadOnlyGate,
+  ErrorToast,
+  NoticeToast,
+} from './ui/dialogs/ReadOnlyBanner';
 import { NexIcon } from './ui/icons/NexIcon';
-import { Canvas } from './canvas/Canvas';
-import { PerfHarness } from './perf/PerfHarness';
 import { useProjectStore } from './store/projectStore';
-import { usePersistence } from './persistence/usePersistence';
+import {
+  usePersistence,
+  type ConfirmReplace,
+  type PickedFile,
+} from './persistence/usePersistence';
 import { canOpenPicker } from './persistence/fsaccess';
 import { severityRank } from './model/validate';
 import { defaultDeviceName } from './model/schema';
@@ -52,15 +56,98 @@ import { QUICK_CREATE_TYPES } from './canvas/QuickCreateMenu';
 import { TEMPLATES } from './model/templates';
 import shell from './ui/shell/AppShell.module.css';
 
+// Code-split (#44). The launch screen needs none of these: each designer, the
+// network panels, the perf harness and every on-demand dialog load as their own
+// chunks. They are prefetched once the launch screen is idle (prefetchEditor), so
+// picking a designer doesn't wait on the network, and the service worker precaches
+// every chunk, so they open offline too.
+const loadCanvas = () => import('./canvas/Canvas');
+const loadRack = () => import('./rack/RackDesigner');
+const loadLeft = () => import('./ui/LeftSidebar/LeftPanel');
+const loadInspector = () => import('./ui/Inspector/Inspector');
+const loadBottom = () => import('./ui/BottomPanel/BottomPanel');
+const Canvas = lazy(() => loadCanvas().then((m) => ({ default: m.Canvas })));
+const RackDesigner = lazy(() => loadRack().then((m) => ({ default: m.RackDesigner })));
+const LeftPanel = lazy(() => loadLeft().then((m) => ({ default: m.LeftPanel })));
+const Inspector = lazy(() => loadInspector().then((m) => ({ default: m.Inspector })));
+const BottomPanel = lazy(() => loadBottom().then((m) => ({ default: m.BottomPanel })));
+const PerfHarness = lazy(() =>
+  import('./perf/PerfHarness').then((m) => ({ default: m.PerfHarness })),
+);
+const ImportDialog = lazy(() =>
+  import('./ui/dialogs/ImportDialog').then((m) => ({ default: m.ImportDialog })),
+);
+const ExportDialog = lazy(() =>
+  import('./ui/dialogs/ExportDialog').then((m) => ({ default: m.ExportDialog })),
+);
+const NexTextDialog = lazy(() =>
+  import('./ui/dialogs/NexTextDialog').then((m) => ({ default: m.NexTextDialog })),
+);
+const ShortcutsDialog = lazy(() =>
+  import('./ui/dialogs/ShortcutsDialog').then((m) => ({ default: m.ShortcutsDialog })),
+);
+const SettingsDialog = lazy(() =>
+  import('./ui/dialogs/SettingsDialog').then((m) => ({ default: m.SettingsDialog })),
+);
+const AboutDialog = lazy(() =>
+  import('./ui/dialogs/AboutDialog').then((m) => ({ default: m.AboutDialog })),
+);
+const OutlineDialog = lazy(() =>
+  import('./ui/dialogs/OutlineDialog').then((m) => ({ default: m.OutlineDialog })),
+);
+
+/** Warm both designers' chunks in idle time, once per page. */
+let prefetched = false;
+function prefetchEditor(): void {
+  if (prefetched) return;
+  prefetched = true;
+  const go = () => {
+    // Both designers' main chunks first, so either tile is ready soonest.
+    for (const load of [loadCanvas, loadRack, loadLeft, loadInspector, loadBottom])
+      void load().catch(() => {});
+  };
+  // Soon after the launch screen paints: on a slow link the chunks need that head
+  // start to be there by the time someone has picked a designer.
+  if ('requestIdleCallback' in window) window.requestIdleCallback(go, { timeout: 200 });
+  else setTimeout(go, 50);
+}
+
+// A returning visitor skips the launch screen into their last designer: start that
+// chunk now, in parallel with the first render, rather than after it.
+{
+  const remembered = readPref('nexmap.mode');
+  if (remembered === 'rack') void loadRack().catch(() => {});
+  else if (remembered === 'network')
+    for (const load of [loadCanvas, loadLeft, loadInspector, loadBottom]) void load().catch(() => {});
+}
+
+/** What the canvas area shows while a designer's chunk is still arriving. */
+function DesignerLoading() {
+  return (
+    <div
+      role="status"
+      style={{
+        display: 'grid',
+        placeItems: 'center',
+        height: '100%',
+        color: 'var(--chrome-fg-muted)',
+        fontSize: 13,
+      }}
+    >
+      Loading designer…
+    </div>
+  );
+}
+
 type Theme = 'light' | 'dark';
 
 function useTheme(): [Theme, () => void] {
   const [theme, setTheme] = useState<Theme>(() =>
-    localStorage.getItem('nexmap.theme') === 'dark' ? 'dark' : 'light',
+    readPref('nexmap.theme') === 'dark' ? 'dark' : 'light',
   );
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem('nexmap.theme', theme);
+    writePref('nexmap.theme', theme);
   }, [theme]);
   return [theme, () => setTheme((t) => (t === 'light' ? 'dark' : 'light'))];
 }
@@ -86,13 +173,17 @@ function EditableTitle() {
   const dirty = useProjectStore((s) => s.dirty);
   const rename = useProjectStore((s) => s.renameProject);
   const endEdit = useProjectStore((s) => s.endEdit);
+  const readOnly = useProjectStore((s) => s.readOnly);
   return (
     <div className={shell.titleEdit}>
       <input
         className={shell.titleInput}
         value={name}
         aria-label="Project name"
-        onChange={(e) => rename(name, e.target.value)}
+        readOnly={readOnly}
+        onChange={(e) => {
+          if (!readOnly) rename(name, e.target.value);
+        }}
         onBlur={endEdit}
       />
       {dirty && <span className={shell.dirtyDot} title="Unsaved changes" />}
@@ -111,9 +202,14 @@ export function App() {
   const [presentation, setPresentation] = useState(false);
   const [showPages, setShowPages] = useState(false);
   const [mode, setMode] = useState<DesignerMode | null>(() => {
-    const m = localStorage.getItem('nexmap.mode');
+    const m = readPref('nexmap.mode');
     return m === 'rack' || m === 'network' ? m : null;
   });
+  /** The open save/discard/cancel question, if any (#19). */
+  const [unsavedAsk, setUnsavedAsk] = useState<{
+    action: string;
+    resolve: (choice: UnsavedChoice) => void;
+  } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
@@ -124,7 +220,6 @@ export function App() {
   const redo = useProjectStore((s) => s.redo);
   const runValidation = useProjectStore((s) => s.runValidation);
   const newProject = useProjectStore((s) => s.newProject);
-  const dirty = useProjectStore((s) => s.dirty);
   const flash = useProjectStore((s) => s.flash);
 
   const persistence = usePersistence();
@@ -173,49 +268,140 @@ export function App() {
     runValidation();
   }
 
-  function handleNew() {
-    if (dirty && !confirm('Discard unsaved changes and start a new project?')) return;
+  /**
+   * Asked before a different document replaces the open one (#19): nothing to
+   * ask when it's saved; otherwise Save (and go ahead only if that worked),
+   * Discard (the pending autosave goes too), or Cancel (keep everything).
+   */
+  function confirmReplace(action: string): ConfirmReplace {
+    return async () => {
+      if (!useProjectStore.getState().dirty) return true;
+      const choice = await new Promise<UnsavedChoice>((resolve) =>
+        setUnsavedAsk({ action, resolve }),
+      );
+      if (choice === 'cancel') return false;
+      if (choice === 'discard') {
+        persistence.dropPendingAutosave();
+        return true;
+      }
+      return persistence.save();
+    };
+  }
+
+  async function handleNew() {
+    if (persistence.readOnly) return;
+    if (!(await confirmReplace('starting a new project')())) return;
     newProject(new Date().toISOString());
     setFirstRunDone(true);
   }
 
   function pickMode(m: DesignerMode) {
     setMode(m);
-    localStorage.setItem('nexmap.mode', m);
+    writePref('nexmap.mode', m);
     // Rack jumps straight into its own empty state; network shows the template start screen.
     setFirstRunDone(m === 'rack');
   }
 
+  /**
+   * Same project, other designer (#54): the document, undo history, file and
+   * draft all carry over — both designers edit one .nexmap. Starting a different
+   * project is New. The launch chooser still offers either designer standalone.
+   */
   function switchDesigner() {
-    if (dirty && !confirm('Discard unsaved changes and switch designer?')) return;
-    newProject(new Date().toISOString());
-    // Drop the stale draft too — the confirm already said "discard", and a
-    // lingering recoverable would otherwise pop a recovery prompt over the
-    // chooser after switching.
-    persistence.discardDraft();
-    localStorage.removeItem('nexmap.mode');
-    setMode(null);
-    setFirstRunDone(false);
+    const next: DesignerMode = mode === 'rack' ? 'network' : 'rack';
+    setMode(next);
+    writePref('nexmap.mode', next);
+    // Never cover the open project with the template gallery — but a pending
+    // recovery decision stays up.
+    if (!persistence.recoverable) setFirstRunDone(true);
   }
 
-  async function handleOpen() {
-    if (canOpenPicker) await persistence.open();
-    else fileInputRef.current?.click();
+  /** A document was just opened: show it, in a designer that suits it from the launch screen. */
+  function enterOpened() {
+    setFirstRunDone(true);
+    if (mode === null) {
+      const m = designerFor(useProjectStore.getState().getDocument());
+      setMode(m);
+      writePref('nexmap.mode', m);
+    }
   }
+
+  async function openPicked(file: PickedFile) {
+    if (await persistence.openFile(file, confirmReplace('opening another file'))) enterOpened();
+  }
+
+  /**
+   * Open (toolbar, ⌘O, palette, launch screen): the native picker where there is
+   * one, else the hidden file input — mounted on the launch screen too (#23).
+   * The file is chosen and validated first; only a sound file prompts or replaces.
+   */
+  async function handleOpen() {
+    if (persistence.readOnly) return;
+    if (canOpenPicker) {
+      const picked = await persistence.pickFile();
+      if (picked) await openPicked(picked);
+    } else fileInputRef.current?.click();
+  }
+
+  const fileInput = (
+    <input
+      ref={fileInputRef}
+      type="file"
+      accept=".nexmap,.json,application/json"
+      style={{ display: 'none' }}
+      data-testid="open-file-input"
+      onChange={async (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = '';
+        if (file) await openPicked({ text: await file.text(), handle: null, fileName: file.name });
+      }}
+    />
+  );
+
+  const unsavedDialog = unsavedAsk && (
+    <UnsavedChangesDialog
+      projectName={useProjectStore.getState().projectName}
+      action={unsavedAsk.action}
+      onChoose={(choice) => {
+        setUnsavedAsk(null);
+        unsavedAsk.resolve(choice);
+      }}
+    />
+  );
+
+  const readOnly = persistence.readOnly;
+
+  // View-only second tab (#24): editing shortcuts stop here, before the canvas
+  // or app stages see them. Save a copy (⌘S), export, the command menu, help and
+  // Esc still work; Tab and other plain keys keep their native behavior.
+  useEffect(() => {
+    if (!readOnly) return;
+    return keyboardRouter.registerOverlay((e) => {
+      if (e.key === 'Escape' || e.key === '?') return false;
+      if (e.metaKey || e.ctrlKey) {
+        const k = e.key.toLowerCase();
+        if (k === 's' || k === 'e' || k === 'k') return false;
+        e.preventDefault();
+      }
+      return true;
+    });
+  }, [readOnly]);
 
   const actions = (
     <>
       <button
         className={shell.topbarBtn}
-        onClick={handleNew}
-        title="New project (Ctrl+N)"
+        onClick={() => void handleNew()}
+        disabled={readOnly}
+        title="New project (Alt+N)"
       >
         <NexIcon name="new-file" />
         <span>New</span>
       </button>
       <button
         className={shell.topbarBtn}
-        onClick={handleOpen}
+        onClick={() => void handleOpen()}
+        disabled={readOnly}
         title="Open .nexmap (Ctrl+O)"
       >
         <NexIcon name="open-file" />
@@ -234,6 +420,7 @@ export function App() {
           <button
             className={shell.topbarBtn}
             onClick={() => setNexText(true)}
+            disabled={readOnly}
             title="NexText — text to diagram"
           >
             <NexIcon name="text" />
@@ -242,6 +429,7 @@ export function App() {
           <button
             className={shell.topbarBtn}
             onClick={() => setImporting(true)}
+            disabled={readOnly}
             title="Import CSV"
           >
             <NexIcon name="import" />
@@ -261,7 +449,7 @@ export function App() {
       <button
         className={shell.topbarBtn}
         onClick={doUndo}
-        disabled={!canUndo}
+        disabled={!canUndo || readOnly}
         title="Undo (Ctrl+Z)"
         aria-label="Undo"
       >
@@ -270,7 +458,7 @@ export function App() {
       <button
         className={shell.topbarBtn}
         onClick={doRedo}
-        disabled={!canRedo}
+        disabled={!canRedo || readOnly}
         title="Redo"
         aria-label="Redo"
       >
@@ -279,7 +467,7 @@ export function App() {
       <button
         className={shell.topbarBtn}
         onClick={switchDesigner}
-        title="Switch between the Network and Rack designers"
+        title={`Open this project in the ${mode === 'rack' ? 'Network' : 'Rack'} designer`}
         aria-label="Switch designer"
       >
         <NexIcon name={mode === 'rack' ? 'rack' : 'connect'} />
@@ -326,7 +514,7 @@ export function App() {
             )}
             <button className={shell.menuItem} onClick={() => { switchDesigner(); close(); }}>
               <NexIcon name="rack" />
-              <span>Switch designer…</span>
+              <span>{mode === 'rack' ? 'Open in Network designer' : 'Open in Rack designer'}</span>
             </button>
             <button className={shell.menuItem} onClick={() => { toggleTheme(); close(); }}>
               <NexIcon name="theme" />
@@ -355,9 +543,34 @@ export function App() {
   // text undo, not model undo — and Cmd+Z mid-drag is consumed by the
   // router's gesture-cancel stage before it can pop history.
   useQuietChrome(); // M3c: earned-quiet chrome demotion driver
+  const presentingRef = useRef(presentation);
+  presentingRef.current = presentation;
+  // The registered handler outlives renders; reach the current handleNew (it
+  // reads `dirty` for the unsaved-work confirm) rather than a stale capture.
+  const handleNewRef = useRef(handleNew);
+  handleNewRef.current = handleNew;
   useEffect(() => {
     keyboardRouter.install();
     const unregister = keyboardRouter.registerApp((e) => {
+      // Presenting is read-only (#35): no undo/redo or open, and no editor-only
+      // overlays (export, palette, help) opening unseen behind it. Swallowed so the
+      // browser's own ⌘O / ⌘K don't fire either. Save still works.
+      if (presentingRef.current) {
+        const k = e.key.toLowerCase();
+        if ((e.metaKey || e.ctrlKey) && ['z', 'o', 'e', 'k'].includes(k)) {
+          e.preventDefault();
+          return true;
+        }
+        if (e.key === '?' || (e.altKey && e.code === 'KeyN')) return true;
+      }
+      // New project: Alt/Option+N (#56). ⌘N/Ctrl+N is the browser's New Window and
+      // can't be intercepted, so it isn't offered. Matched by code: Option+N on
+      // macOS is a dead key (e.key is 'Dead'/'˜'), not 'n'.
+      if (e.altKey && !e.metaKey && !e.ctrlKey && e.code === 'KeyN') {
+        e.preventDefault();
+        void handleNewRef.current();
+        return true;
+      }
       if (e.metaKey || e.ctrlKey) {
         const k = e.key.toLowerCase();
         if (k === 'z') {
@@ -421,7 +634,11 @@ export function App() {
       <AppShell
         actions={actions}
         projectName="M0 SVG perf harness"
-        canvas={<PerfHarness />}
+        canvas={
+          <Suspense fallback={<DesignerLoading />}>
+            <PerfHarness />
+          </Suspense>
+        }
         status={<span>M0 benchmark — drives the M2 renderer decision</span>}
       />
     );
@@ -430,7 +647,9 @@ export function App() {
   if (presentation) {
     return (
       <div style={{ position: 'fixed', inset: 0, background: 'var(--canvas-bg)' }}>
-        <Canvas readOnly showPages={showPages} />
+        <Suspense fallback={<DesignerLoading />}>
+          <Canvas readOnly showPages={showPages} />
+        </Suspense>
         <button
           className={shell.topbarBtn}
           onClick={() => setPresentation(false)}
@@ -461,13 +680,24 @@ export function App() {
   // mode===null state; the recovery prompt appears inside whichever designer
   // is then chosen.
   if (mode === null) {
+    prefetchEditor();
     return (
-      <DesignerChooser
-        onPick={pickMode}
-        onOpen={() => void handleOpen()}
-        theme={theme}
-        onToggleTheme={toggleTheme}
-      />
+      <>
+        <DesignerChooser
+          onPick={pickMode}
+          onOpen={() => void handleOpen()}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+        />
+        {/* The fallback input and an Open failure live on the launch screen too (#23). */}
+        {fileInput}
+        {persistence.error && (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 100, pointerEvents: 'none' }}>
+            <ErrorToast message={persistence.error} />
+          </div>
+        )}
+        {unsavedDialog}
+      </>
     );
   }
   const isRack = mode === 'rack';
@@ -477,28 +707,56 @@ export function App() {
       actions={actions}
       titleNode={<EditableTitle />}
       fullBleed={isRack}
-      left={isRack ? undefined : <LeftPanel />}
-      right={isRack ? undefined : <Inspector />}
+      left={
+        isRack ? undefined : (
+          <ReadOnlyGate on={readOnly}>
+            <Suspense fallback={null}>
+              <LeftPanel />
+            </Suspense>
+          </ReadOnlyGate>
+        )
+      }
+      right={
+        isRack ? undefined : (
+          <ReadOnlyGate on={readOnly}>
+            <Suspense fallback={null}>
+              <Inspector />
+            </Suspense>
+          </ReadOnlyGate>
+        )
+      }
       canvas={
         <>
-          {persistence.readOnly && <ReadOnlyBanner />}
-          {isRack ? <RackDesigner /> : <Canvas showPages={showPages} />}
+          {readOnly && <ReadOnlyBanner />}
+          <Suspense fallback={<DesignerLoading />}>
+            {isRack ? (
+              <ReadOnlyGate on={readOnly}>
+                <RackDesigner />
+              </ReadOnlyGate>
+            ) : (
+              <Canvas showPages={showPages} readOnly={readOnly} />
+            )}
+          </Suspense>
           {showFirstRun && (
             <FirstRun
               onDone={() => setFirstRunDone(true)}
-              onOpenText={persistence.openText}
+              onOpenText={(text) =>
+                persistence.openText(text, confirmReplace('opening another file'))
+              }
             />
           )}
           {showRecovery && persistence.recoverable && (
             <RecoveryDialog
               draft={persistence.recoverable}
               onRecover={() => {
-                persistence.recover();
-                setFirstRunDone(true);
+                if (persistence.recover()) setFirstRunDone(true);
               }}
               onDiscard={() => {
                 persistence.discardDraft();
               }}
+              discardBlocked={
+                readOnly ? 'Open in another tab — close it to discard here.' : undefined
+              }
             />
           )}
           {persistence.error && <ErrorToast message={persistence.error} />}
@@ -508,32 +766,39 @@ export function App() {
           {flash && (
             <NoticeToast message={flash} onDismiss={() => useProjectStore.getState().setFlash(null)} />
           )}
-          {nexText && <NexTextDialog onClose={() => setNexText(false)} />}
-          {importing && <ImportDialog onClose={() => setImporting(false)} />}
-          {exporting && <ExportDialog onClose={() => setExporting(false)} />}
-          {showHelp && <ShortcutsDialog onClose={() => setShowHelp(false)} />}
-          {showAbout && <AboutDialog onClose={() => setShowAbout(false)} />}
-          {showOutline && <OutlineDialog onClose={() => setShowOutline(false)} />}
-          {showSettings && (
-            <SettingsDialog
-              theme={theme}
-              onToggleTheme={toggleTheme}
-              onClose={() => setShowSettings(false)}
-            />
-          )}
-          <UpdateToast />
+          <Suspense fallback={null}>
+            {nexText && <NexTextDialog onClose={() => setNexText(false)} />}
+            {importing && <ImportDialog onClose={() => setImporting(false)} />}
+            {exporting && <ExportDialog onClose={() => setExporting(false)} />}
+            {showHelp && <ShortcutsDialog onClose={() => setShowHelp(false)} />}
+            {showAbout && <AboutDialog onClose={() => setShowAbout(false)} />}
+            {showOutline && <OutlineDialog onClose={() => setShowOutline(false)} />}
+            {showSettings && (
+              <SettingsDialog
+                theme={theme}
+                onToggleTheme={toggleTheme}
+                onClose={() => setShowSettings(false)}
+              />
+            )}
+          </Suspense>
           <ValidationAnnouncer />
           {showPalette &&
             (() => {
               const st = useProjectStore.getState;
               // Commands relevant in both designers.
               const generic: PaletteCommand[] = [
-                { id: 'new', label: 'New project', hint: '⌘N', group: 'File', run: handleNew },
+                { id: 'new', label: 'New project', hint: '⌥N', group: 'File', run: () => void handleNew() },
                 { id: 'open', label: 'Open .nexmap…', hint: '⌘O', group: 'File', run: () => void handleOpen() },
                 { id: 'save', label: 'Save', hint: '⌘S', group: 'File', run: () => void persistence.save() },
                 { id: 'undo', label: 'Undo', hint: '⌘Z', group: 'Edit', run: doUndo },
                 { id: 'redo', label: 'Redo', hint: '⌘⇧Z', group: 'Edit', run: doRedo },
-                { id: 'switch', label: 'Switch designer…', group: 'View', run: switchDesigner },
+                {
+                  id: 'switch',
+                  label: mode === 'rack' ? 'Open in Network designer' : 'Open in Rack designer',
+                  hint: 'same project',
+                  group: 'View',
+                  run: switchDesigner,
+                },
                 { id: 'theme', label: 'Toggle theme', group: 'View', run: toggleTheme },
                 { id: 'shortcuts', label: 'Keyboard shortcuts', hint: '?', group: 'View', run: () => setShowHelp(true) },
                 { id: 'about', label: 'About & privacy', group: 'View', run: () => setShowAbout(true) },
@@ -857,8 +1122,13 @@ export function App() {
                 { id: 'present', label: 'Presentation mode', group: 'View', run: () => setPresentation(true) },
                 { id: 'outline', label: 'Topology outline (accessible list)', group: 'View', run: () => setShowOutline(true) },
               ];
-              const cmds: PaletteCommand[] =
-                mode === 'rack' ? generic : [...generic.slice(0, 5), ...networkOnly, ...generic.slice(5)];
+              // A view-only tab (#24) offers only what doesn't edit the project.
+              const VIEW_SAFE = new Set(['save', 'switch', 'theme', 'shortcuts', 'about']);
+              const cmds: PaletteCommand[] = readOnly
+                ? generic.filter((c) => VIEW_SAFE.has(c.id))
+                : mode === 'rack'
+                  ? generic
+                  : [...generic.slice(0, 5), ...networkOnly, ...generic.slice(5)];
               // Declare a rule by saying it: when the query reads as a custom rule
               // ("every camera lives in CCTV"), offer it first, with a live preview of
               // what it would flag. An identical rule already declared is shown, disabled.
@@ -923,23 +1193,26 @@ export function App() {
                 ];
               };
               return (
-                <CommandPalette commands={cmds} intent={ruleIntent} onClose={() => setShowPalette(false)} />
+                <CommandPalette
+                  commands={cmds}
+                  intent={readOnly ? () => [] : ruleIntent}
+                  onClose={() => setShowPalette(false)}
+                />
               );
             })()}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".nexmap,.json,application/json"
-            style={{ display: 'none' }}
-            onChange={async (e) => {
-              const file = e.target.files?.[0];
-              if (file) persistence.openText(await file.text());
-              e.target.value = '';
-            }}
-          />
+          {fileInput}
+          {unsavedDialog}
         </>
       }
-      bottom={isRack ? undefined : <BottomPanel />}
+      bottom={
+        isRack ? undefined : (
+          <ReadOnlyGate on={readOnly}>
+            <Suspense fallback={null}>
+              <BottomPanel />
+            </Suspense>
+          </ReadOnlyGate>
+        )
+      }
       status={<StatusBar persistence={persistence} mode={mode} />}
     />
   );

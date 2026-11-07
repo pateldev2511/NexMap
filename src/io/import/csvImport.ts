@@ -7,7 +7,14 @@
  * (importObjects); this module only produces candidate objects + warnings so the
  * import preview can show them before the user commits.
  */
-import { createDevice, createLink, createSubnet, createVlan } from '@/model/schema';
+import {
+  createDevice,
+  createLink,
+  createSubnet,
+  createVlan,
+  defaultDeviceName,
+  DEVICE_TYPES,
+} from '@/model/schema';
 import type { Device, DeviceType, Link, Subnet, Vlan } from '@/model/types';
 
 export type ImportKind = 'devices' | 'links';
@@ -55,6 +62,8 @@ export const LINK_FIELDS: FieldDef[] = [
   { key: 'bandwidth', aliases: ['bandwidth', 'speed', 'rate'] },
 ];
 
+// Shorthands and vendor-neutral synonyms. Every type's own id and export label
+// ("patch-panel", "Patch Panel", "VPC / VNet") resolve without being listed here.
 const TYPE_ALIASES: Record<string, DeviceType> = {
   router: 'router',
   rtr: 'router',
@@ -99,7 +108,28 @@ const TYPE_ALIASES: Record<string, DeviceType> = {
   rack: 'rack',
   ups: 'ups',
   camera: 'camera',
+  vnet: 'vpc',
+  igw: 'internet-gateway',
+  nat: 'nat-gateway',
+  vpn: 'vpn-gateway',
+  bucket: 'object-storage',
 };
+
+/** Type-cell lookup key: case, spaces, dashes, underscores and slashes don't matter. */
+function typeKey(v: string): string {
+  return v.toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+// Built from DEVICE_TYPES so the label the inventory export writes always reads back
+// as the same type; a new DeviceType can't silently round-trip to generic. Canonical
+// ids and labels go in last so an alias can never shadow one.
+const TYPE_LOOKUP = new Map<string, DeviceType>();
+for (const [alias, type] of Object.entries(TYPE_ALIASES))
+  TYPE_LOOKUP.set(typeKey(alias), type);
+for (const type of DEVICE_TYPES) {
+  TYPE_LOOKUP.set(typeKey(type), type);
+  TYPE_LOOKUP.set(typeKey(defaultDeviceName(type)), type);
+}
 
 function normalize(h: string): string {
   return h
@@ -199,7 +229,7 @@ export function parseDeviceType(value: string | undefined): {
   known: boolean;
 } {
   if (!value) return { type: 'generic', known: false };
-  const t = TYPE_ALIASES[normalize(value)];
+  const t = TYPE_LOOKUP.get(typeKey(value));
   return t ? { type: t, known: true } : { type: 'generic', known: false };
 }
 
@@ -262,11 +292,57 @@ export function buildDevices(
   return { devices, links: [], warnings, skipped };
 }
 
+/** Loose name key: case and runs of whitespace don't matter ("Core  SW" = "core sw"). */
+function nameKey(name: string): string {
+  return name.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+export type NameMatch =
+  | { kind: 'found'; device: Device }
+  | { kind: 'missing' }
+  | { kind: 'ambiguous'; matches: Device[] };
+
+/**
+ * Resolve link endpoints by device name, independent of device order. A unique exact
+ * (trimmed) name wins; otherwise the case/space-insensitive match must be unique. Two
+ * or more candidates are ambiguous and the caller skips the row rather than guess, so
+ * reordering devices can never re-point a link at a different physical box.
+ */
+export function deviceNameResolver(devices: Device[]): (name: string) => NameMatch {
+  const exact = new Map<string, Device[]>();
+  const loose = new Map<string, Device[]>();
+  const add = (m: Map<string, Device[]>, k: string, d: Device) => {
+    const list = m.get(k);
+    if (list) list.push(d);
+    else m.set(k, [d]);
+  };
+  for (const d of devices) {
+    add(exact, d.name.trim(), d);
+    add(loose, nameKey(d.name), d);
+  }
+  return (name) => {
+    const byExact = exact.get(name.trim()) ?? [];
+    const candidates = byExact.length > 0 ? byExact : (loose.get(nameKey(name)) ?? []);
+    if (candidates.length === 0) return { kind: 'missing' };
+    if (candidates.length === 1) return { kind: 'found', device: candidates[0]! };
+    return { kind: 'ambiguous', matches: candidates };
+  };
+}
+
+/** `"core" matches 2 devices: core (Router, HQ, 10.0.0.1); CORE (Switch)` */
+export function describeAmbiguous(name: string, matches: Device[]): string {
+  const each = matches.map((d) => {
+    const detail = [defaultDeviceName(d.type), d.location, d.managementIp];
+    return `${d.name} (${detail.filter(Boolean).join(', ')})`;
+  });
+  return `"${name}" matches ${matches.length} devices: ${each.join('; ')}`;
+}
+
 /**
  * Build links from rows, resolving source/target by device NAME against the
- * existing project (case-insensitive). Unresolved endpoints are warned and the
- * link skipped — never creates a dangling link (handles the links-before-devices
- * and unknown-endpoint edge cases).
+ * existing project (see deviceNameResolver). Unresolved or ambiguous endpoints are
+ * warned and the link skipped — never creates a dangling or guessed link (handles
+ * the links-before-devices, unknown-endpoint and duplicate-name edge cases).
  */
 export function buildLinks(
   rows: Record<string, string>[],
@@ -274,8 +350,7 @@ export function buildLinks(
   existingDevices: Device[],
   layerId: string,
 ): ImportResult {
-  const byName = new Map<string, string>();
-  for (const d of existingDevices) byName.set(d.name.trim().toLowerCase(), d.id);
+  const resolve = deviceNameResolver(existingDevices);
 
   const links: Link[] = [];
   const warnings: string[] = [];
@@ -288,21 +363,26 @@ export function buildLinks(
   rows.forEach((row, i) => {
     const srcName = get(row, 'source');
     const tgtName = get(row, 'target');
-    const srcId = srcName ? byName.get(srcName.toLowerCase()) : undefined;
-    const tgtId = tgtName ? byName.get(tgtName.toLowerCase()) : undefined;
-    if (!srcId || !tgtId) {
+    const src: NameMatch = srcName ? resolve(srcName) : { kind: 'missing' };
+    const tgt: NameMatch = tgtName ? resolve(tgtName) : { kind: 'missing' };
+    if (src.kind !== 'found' || tgt.kind !== 'found') {
       skipped++;
       const missing = [
-        !srcId ? srcName || '(blank source)' : null,
-        !tgtId ? tgtName || '(blank target)' : null,
-      ]
-        .filter(Boolean)
-        .join(', ');
-      warnings.push(`Row ${i + 1}: device not found: ${missing} — link skipped.`);
+        src.kind === 'missing' ? srcName || '(blank source)' : null,
+        tgt.kind === 'missing' ? tgtName || '(blank target)' : null,
+      ].filter(Boolean);
+      const problems = [
+        missing.length > 0 ? `device not found: ${missing.join(', ')}` : null,
+        src.kind === 'ambiguous' ? describeAmbiguous(srcName!, src.matches) : null,
+        tgt.kind === 'ambiguous' ? describeAmbiguous(tgtName!, tgt.matches) : null,
+      ].filter(Boolean);
+      const ambiguous = src.kind === 'ambiguous' || tgt.kind === 'ambiguous';
+      const hint = ambiguous ? ' Rename devices so names are unique.' : '';
+      warnings.push(`Row ${i + 1}: ${problems.join('; ')} — link skipped.${hint}`);
       return;
     }
     links.push(
-      createLink(srcId, tgtId, layerId, {
+      createLink(src.device.id, tgt.device.id, layerId, {
         name: get(row, 'name'),
         sourceInterface: get(row, 'sourceInterface'),
         targetInterface: get(row, 'targetInterface'),

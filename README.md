@@ -94,11 +94,11 @@ NexMap already has the core of a usable local network designer:
 These are the main reasons the project should still be treated as WIP:
 
 - No stable release process or published package yet.
-- Contributor guide, issue templates, security policy, and project governance are
-  still missing.
-- File format/schema may still evolve before a stable `1.0`.
-- First-class interfaces/ports are not modeled yet; endpoint interface labels are
-  still free text.
+- Project governance is still informal. The [contributor guide](CONTRIBUTING.md),
+  [security policy](SECURITY.md), [code of conduct](CODE_OF_CONDUCT.md) and issue
+  templates are in place.
+- File format/schema may still evolve before a stable `1.0`; the current shape and
+  its compatibility rules are in [`docs/FORMAT.md`](docs/FORMAT.md).
 - Advanced routing is still basic; obstacle avoidance and cable tracing are
   future work.
 - Browser/E2E coverage is still lighter than the unit coverage.
@@ -199,8 +199,7 @@ file when the project matters.
 The detailed roadmap lives in [`TODOS.md`](TODOS.md). Near-term open-source work
 should focus on:
 
-- contributor docs, issue templates, and release notes;
-- first-class interfaces/ports;
+- release notes and a stable release process;
 - better connector routing and cable tracing;
 - word-level rich-text editing and swatch chips in callout legends;
 - guided discovery import;

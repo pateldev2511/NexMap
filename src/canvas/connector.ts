@@ -137,6 +137,9 @@ export function deriveLinkStroke(
   return { color, dashed, width };
 }
 
+/** Perpendicular gap between neighbouring parallel links at the run's midpoint. */
+export const PARALLEL_LINK_SPACING = 18;
+
 /**
  * Points for a link that may be one of several parallel links between the same
  * pair. With no explicit waypoints and a group size > 1, insert a midpoint offset
@@ -148,7 +151,7 @@ export function parallelPoints(
   target: Device,
   indexInGroup: number,
   groupSize: number,
-  spacing = 18,
+  spacing = PARALLEL_LINK_SPACING,
 ): Pt[] {
   if ((link.waypoints?.length ?? 0) > 0 || groupSize <= 1) {
     return connectorPoints(link, source, target);
@@ -173,7 +176,7 @@ export function parallelIconPoints(
   target: Device,
   indexInGroup: number,
   groupSize: number,
-  spacing = 18,
+  spacing = PARALLEL_LINK_SPACING,
 ): Pt[] {
   if ((link.waypoints?.length ?? 0) > 0 || groupSize <= 1) {
     return connectorIconPoints(link, source, target);
@@ -199,6 +202,18 @@ export function orthogonalPoints(a: Pt, b: Pt): Pt[] {
   if (a.x === b.x || a.y === b.y) return [a, b]; // already straight
   const midX = (a.x + b.x) / 2;
   return [a, { x: midX, y: a.y }, { x: midX, y: b.y }, b];
+}
+
+/**
+ * The center-to-center route a link is drawn along, before icon-edge trimming and
+ * parallel fanning: the orthogonal elbow when routed so with no waypoints, else
+ * source → waypoints → target. Culling tests this, so it must follow the renderer.
+ */
+export function routePoints(link: Link, source: Device, target: Device): Pt[] {
+  if (link.routing === 'orthogonal' && (link.waypoints?.length ?? 0) === 0) {
+    return orthogonalPoints(center(source), center(target));
+  }
+  return connectorPoints(link, source, target);
 }
 
 /** Orthogonal render points trimmed to icon boundaries. */

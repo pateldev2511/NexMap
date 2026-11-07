@@ -68,6 +68,9 @@ import {
 } from './viewport';
 import { isoProjectPx, isoUnprojectPx, type IsoTile } from './iso';
 import type { Box } from '@/lib/spatial-index';
+import { noteCanvasCopy } from '@/io/import/canvasClipboard';
+import { exportInventoryCsv } from '@/io/export/csvExport';
+import { registerPasteCanvas } from '@/io/import/usePasteToCanvas';
 import styles from './Canvas.module.css';
 
 /**
@@ -77,6 +80,16 @@ import styles from './Canvas.module.css';
  * marquee, resize, and link rubber-banding. Wrapped because setPointerCapture
  * throws on an already-released pointer.
  */
+/**
+ * After a canvas copy/cut: put the copied devices on the system clipboard as an
+ * inventory CSV (useful pasted into a spreadsheet; it also marks the clipboard as
+ * this canvas's own, see io/import/canvasClipboard). Shapes-only copies get the
+ * plain marker.
+ */
+function markCanvasCopy(devices: Device[]): void {
+  noteCanvasCopy(devices.length > 0 ? exportInventoryCsv(devices) : undefined);
+}
+
 function capturePointer(el: Element | null, pointerId: number): void {
   try {
     el?.setPointerCapture(pointerId);
@@ -355,8 +368,27 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   // cancel stage (cancelActiveGesture below) BEFORE this runs.
   const handleCanvasKey = useCallback(
     (e: KeyboardEvent): boolean => {
-      if (readOnly) return false; // no keyboard editing in presentation
       const mod = e.metaKey || e.ctrlKey;
+      // Presentation is read-only (#35): only viewing keys act — zoom, fit, zoom
+      // to selection, copy, Space-pan. The canvas's editing combos are swallowed rather than passed on
+      // (⌘D would otherwise bookmark the page); everything else does nothing here.
+      if (readOnly) {
+        const k = e.key.toLowerCase();
+        const viewing = mod
+          ? k === '0' || k === '=' || k === '+' || k === '-' || k === 'c'
+          : e.code === 'Space' || e.key === 'Alt' || e.key === '2';
+        if (!viewing) {
+          if (mod && ['a', 'd', 'x', 'g', ']', '['].includes(k)) {
+            e.preventDefault();
+            return true;
+          }
+          if (mod && e.shiftKey && k === 'l') {
+            e.preventDefault();
+            return true;
+          }
+          return false;
+        }
+      }
 
       // Viewport + selection shortcuts (viewport lives here in the canvas).
       if (mod && e.key === '0') {
@@ -388,21 +420,19 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         store().runValidation();
         return true;
       }
+      // Copy / cut fill the canvas clipboard and leave the default alone, so the
+      // native copy/cut event that follows can mark the system clipboard as ours
+      // (see io/import/canvasClipboard). ⌘V is NOT handled here at all: the paste
+      // event decides internal vs. external CSV/image (usePasteToCanvas, #52).
       if (mod && (e.key === 'c' || e.key === 'C')) {
-        e.preventDefault();
         store().copySelection();
+        if (store().hasClipboard()) markCanvasCopy(store().clipboardDevices());
         return true;
       }
       if (mod && (e.key === 'x' || e.key === 'X')) {
-        e.preventDefault();
         store().cutSelection();
         store().runValidation();
-        return true;
-      }
-      if (mod && (e.key === 'v' || e.key === 'V')) {
-        e.preventDefault();
-        store().paste();
-        store().runValidation();
+        if (store().hasClipboard()) markCanvasCopy(store().clipboardDevices());
         return true;
       }
       if (mod && (e.key === 'g' || e.key === 'G')) {
@@ -523,6 +553,9 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   // across renders (and StrictMode-idempotent) while handlers stay fresh.
   const routerApiRef = useRef({ key: handleCanvasKey, cancel: cancelActiveGesture });
   routerApiRef.current = { key: handleCanvasKey, cancel: cancelActiveGesture };
+  // This canvas is where paste lands — or, read-only, where it's refused (#35).
+  useEffect(() => registerPasteCanvas({ readOnly }), [readOnly]);
+
   useEffect(
     () =>
       keyboardRouter.registerCanvas('flat', {
@@ -1399,13 +1432,21 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
 
       const items: MenuItem[] = onEntity
         ? [
-            { label: 'Copy', shortcut: '⌘C', onClick: () => s.copySelection() },
+            {
+              label: 'Copy',
+              shortcut: '⌘C',
+              onClick: () => {
+                s.copySelection();
+                if (s.hasClipboard()) markCanvasCopy(s.clipboardDevices());
+              },
+            },
             {
               label: 'Cut',
               shortcut: '⌘X',
               onClick: () => {
                 s.cutSelection();
                 s.runValidation();
+                if (s.hasClipboard()) markCanvasCopy(s.clipboardDevices());
               },
             },
             {
@@ -1515,6 +1556,10 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     const o = store().getObject(id);
     return o ? { x: o.x, y: o.y, width: o.width, height: o.height } : null;
   };
+  // Links cull by their drawn route against the same flat box (straight run,
+  // orthogonal elbow or waypoint legs), so a cable crossing the view with both
+  // ends off-screen still draws (#34). In iso the box is the flat bounds of the
+  // un-projected screen rect; iso is linear, so testing in flat space is safe.
   const links = (size.w > 0 ? store().visibleLinks(box) : []).filter((l) =>
     vis(l.layerId),
   );

@@ -24,6 +24,7 @@ import {
 } from '@/io/import/graphImport';
 import type { Subnet, Vlan } from '@/model/types';
 import { NexIcon } from '@/ui/icons/NexIcon';
+import { useModalDialog } from './useModalDialog';
 import styles from './ImportDialog.module.css';
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif']);
@@ -83,6 +84,7 @@ function svgSize(svg: string): { width: number; height: number } {
  * bad import never half-corrupts the project and Undo reverts it in one step.
  */
 export function ImportDialog({ onClose }: { onClose: () => void }) {
+  const { titleId, dialogProps } = useModalDialog(onClose);
   const store = useProjectStore.getState;
   const [kind, setKind] = useState<ImportKind>('devices');
   const [text, setText] = useState<string | null>(null);
@@ -250,6 +252,21 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
     setMapping(autoMap(p.headers, k === 'devices' ? DEVICE_FIELDS : LINK_FIELDS));
   }
 
+  // Parsers report bad rows as warnings; anything that still throws is a file we
+  // can't read. Reject it visibly instead of leaving a blank dialog — nothing has
+  // touched the project yet, and "Choose another file" retries in place.
+  async function pickFile(file: File) {
+    try {
+      await onFile(file);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      emptyImport(
+        file.name,
+        `Could not read this file (${reason}). Nothing was imported.`,
+      );
+    }
+  }
+
   function reMap(k: ImportKind) {
     setKind(k);
     if (parsed)
@@ -304,6 +321,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
     if (result) commitResult(result);
   }
 
+  const pending = !!(text || graphResult || semanticResult || mediaResult);
   const canCommit = graphResult
     ? graphResult.result.devices.length + graphResult.result.links.length > 0
     : semanticResult
@@ -314,16 +332,16 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.dialog} onClick={(e) => e.stopPropagation()}>
+      <div className={styles.dialog} {...dialogProps} onClick={(e) => e.stopPropagation()}>
         <div className={styles.head}>
-          <h2>Import</h2>
+          <h2 id={titleId}>Import</h2>
           <button className={styles.close} onClick={onClose} aria-label="Close">
             <NexIcon name="close" />
           </button>
         </div>
 
         <div className={styles.body}>
-          {!text && !graphResult && !semanticResult && !mediaResult && !done && (
+          {!pending && !done && (
             <div className={styles.dropzone} onClick={() => inputRef.current?.click()}>
               Choose a file: CSV (devices/links/IP/VLANs), GraphML, draw.io XML, Nmap XML,
               topology/NetBox JSON, or an image/SVG background underlay.
@@ -527,7 +545,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
             style={{ display: 'none' }}
             onChange={async (e) => {
               const file = e.target.files?.[0];
-              if (file) await onFile(file);
+              if (file) await pickFile(file);
               e.target.value = '';
             }}
           />
@@ -537,6 +555,11 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
             </button>
           ) : (
             <>
+              {pending && (
+                <button className={styles.btn} onClick={() => inputRef.current?.click()}>
+                  Choose another file
+                </button>
+              )}
               <button className={styles.btn} onClick={onClose}>
                 Cancel
               </button>

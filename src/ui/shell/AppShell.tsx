@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { NexIcon } from '@/ui/icons/NexIcon';
 import { NexMapLogo } from '@/ui/deck/NexMapLogo';
 import { getPanelOpen, setPanelOpen } from '@/lib/prefs';
@@ -114,7 +114,7 @@ export function AppShell({
           </div>
         )}
         <div className={styles.topbarSpacer} />
-        <div className={styles.topbarActions}>{actions}</div>
+        <ActionStrip>{actions}</ActionStrip>
       </header>
 
       {!fullBleed && (
@@ -140,6 +140,60 @@ export function AppShell({
       {!fullBleed && bottom && <div className={styles.bottom}>{bottom}</div>}
 
       <footer className={styles.status}>{status}</footer>
+    </div>
+  );
+}
+
+/**
+ * The topbar's action buttons. Labels show while they fit; when they don't, the
+ * strip drops to icons (measured, not a fixed breakpoint, so it holds for any
+ * button count and font metrics). Only when even the icons don't fit does the
+ * strip scroll (touch, trackpad, a plain mouse wheel, or Tab moving focus), with
+ * the edge that has more buttons beyond it faded.
+ */
+function ActionStrip({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const edges = () => {
+      const max = el.scrollWidth - el.clientWidth;
+      el.dataset.moreStart = String(el.scrollLeft > 1);
+      el.dataset.moreEnd = String(el.scrollLeft < max - 1);
+    };
+    // Measure with labels, then keep them only if they fit. Both reads happen in one
+    // task, so the user never sees the labelled layout flash.
+    const fit = () => {
+      el.dataset.compact = 'false';
+      el.dataset.compact = String(el.scrollWidth > el.clientWidth + 1);
+      edges();
+    };
+    // A vertical wheel scrolls the strip sideways, but only when it can move.
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      e.preventDefault();
+      el.scrollLeft += e.deltaY;
+    };
+    const ro = new ResizeObserver(fit);
+    ro.observe(el.parentElement ?? el);
+    // Buttons come and go (designer, selection) and labels change (the views menu).
+    const mo = new MutationObserver(fit);
+    mo.observe(el, { childList: true, subtree: true, characterData: true });
+    el.addEventListener('scroll', edges, { passive: true });
+    el.addEventListener('wheel', onWheel, { passive: false });
+    fit();
+    return () => {
+      ro.disconnect();
+      mo.disconnect();
+      el.removeEventListener('scroll', edges);
+      el.removeEventListener('wheel', onWheel);
+    };
+  }, []);
+
+  return (
+    <div ref={ref} className={styles.topbarActions}>
+      {children}
     </div>
   );
 }

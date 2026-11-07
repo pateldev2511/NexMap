@@ -30,6 +30,25 @@ Include: affected version/commit, a description, reproduction steps, and (if
 possible) a minimal `.nexmap` or input that triggers it. We aim to acknowledge
 within a few days. Coordinated disclosure is appreciated.
 
+## Dependency advisories
+
+The maintainer triages advisories against the production dependencies (the code
+that ships to the browser). CI fails on any high or critical one
+(`npm audit --omit=dev --audit-level=high`), and Dependabot opens update PRs
+weekly. For each advisory, record in the update PR the locked version that was
+affected and the version that replaces it. Discuss whether a flaw is reachable in
+NexMap privately (see above), not in the public PR.
+
+After updating a dependency in the security path, run these besides the full
+suite:
+
+| Dependency | What it guards | Check |
+| --- | --- | --- |
+| `dompurify` | rich text and SVG underlays in `.nexmap` and imports | `npx vitest run src/lib/sanitizeHtml.test.ts src/model` |
+| `jspdf` | offline PDF handoffs | `npx playwright test e2e/pdf-export.spec.ts` |
+| `fflate` | ZIP handoff packages | `npx vitest run src/io/export` |
+| any | offline use of the shipped build | `npm run e2e:preview` |
+
 ## Supported versions
 
 NexMap is pre-1.0; only the latest `main` is supported. Fixes land on `main`.

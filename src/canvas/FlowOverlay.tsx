@@ -1,8 +1,18 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import type { Device, Link } from '@/model/types';
 import { center } from './connector';
-import { blastRadius } from '@/sim/blastRadius';
+import { blastRadius, blastVerdict, isEgressType } from '@/sim/blastRadius';
+import { useProjectStore } from '@/store/projectStore';
 import styles from './Canvas.module.css';
+
+/** The chosen Flow destination as blast options — ignored once it isn't in the diagram. */
+function useFlowTargets(devices: Device[]): string[] | undefined {
+  const target = useProjectStore((s) => s.flowTarget);
+  return useMemo(
+    () => (target && devices.some((d) => d.id === target) ? [target] : undefined),
+    [target, devices],
+  );
+}
 
 /** Hops from the failed set to every node, so the red wave can propagate outward. */
 function waveDistances(
@@ -53,19 +63,24 @@ interface SceneProps {
  */
 function FlowSceneOverlayImpl({ devices, links, failed, scale, onToggle }: SceneProps) {
   const [hover, setHover] = useState<string | null>(null);
-  const result = useMemo(() => blastRadius(devices, links, failed), [devices, links, failed]);
+  const targets = useFlowTargets(devices);
+  const result = useMemo(
+    () => blastRadius(devices, links, failed, { targets }),
+    [devices, links, failed, targets],
+  );
   const byId = useMemo(() => new Map(devices.map((d) => [d.id, d])), [devices]);
   const dist = useMemo(() => waveDistances(devices, links, failed), [devices, links, failed]);
   const failedSet = result.failed;
+  const destinations = useMemo(() => new Set(result.destinations), [result.destinations]);
 
   // Intent telegraph: the EXTRA devices that would drop if you also pulled `hover`.
   const preview = useMemo(() => {
     if (!hover || failedSet.has(hover)) return new Set<string>();
-    const next = blastRadius(devices, links, [...failed, hover]).isolated;
+    const next = blastRadius(devices, links, [...failed, hover], { targets }).isolated;
     const extra = new Set<string>([hover]);
     for (const id of next) if (!result.isolated.has(id) && !failedSet.has(id)) extra.add(id);
     return extra;
-  }, [hover, devices, links, failed, failedSet, result.isolated]);
+  }, [hover, devices, links, failed, failedSet, result.isolated, targets]);
 
   const sw = (n: number) => n / scale; // screen-constant stroke regardless of zoom
   const delay = (id: string) => `${(dist.get(id) ?? 0) * 70}ms`;
@@ -132,7 +147,9 @@ function FlowSceneOverlayImpl({ devices, links, failed, scale, onToggle }: Scene
             ? styles.flowIsolatedRing
             : isPreview
               ? styles.flowPreviewRing
-              : '';
+              : destinations.has(d.id)
+                ? styles.flowTargetRing
+                : '';
         return (
           <g key={`flow-${d.id}`}>
             {ringCls && (
@@ -154,6 +171,7 @@ function FlowSceneOverlayImpl({ devices, links, failed, scale, onToggle }: Scene
             )}
             <circle
               className={styles.flowHit}
+              data-flow-hit={d.id}
               cx={c.x}
               cy={c.y}
               r={r}
@@ -185,7 +203,12 @@ interface HudProps {
  * the viewport group so it stays put while the canvas pans. Esc exits the lens.
  */
 export function FlowHud({ devices, links, failed, onExit, onReset }: HudProps) {
-  const result = useMemo(() => blastRadius(devices, links, failed), [devices, links, failed]);
+  const targets = useFlowTargets(devices);
+  const setTarget = useProjectStore((s) => s.setFlowTarget);
+  const result = useMemo(
+    () => blastRadius(devices, links, failed, { targets }),
+    [devices, links, failed, targets],
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -195,33 +218,65 @@ export function FlowHud({ devices, links, failed, onExit, onReset }: HudProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onExit]);
 
-  const lost = result.isolated.size;
-  const rr = result.rerouted.size;
-  let verdict: string;
-  let tone: 'idle' | 'safe' | 'danger';
-  if (failed.length === 0) {
-    verdict = 'Click any device to pull it — watch what loses its connection.';
-    tone = 'idle';
-  } else if (lost === 0) {
-    verdict =
-      rr > 0
-        ? `Holding — traffic rerouted over ${rr} backup link${rr === 1 ? '' : 's'}, 0 lost.`
-        : `Holding — 0 devices lost${failed.length > 1 ? ` after ${failed.length} failures` : ''}.`;
-    tone = 'safe';
-  } else {
-    verdict =
-      `${lost} device${lost === 1 ? '' : 's'} isolated — no path to the network` +
-      (rr > 0 ? `; ${rr} rerouted.` : '.');
-    tone = 'danger';
-  }
+  const byId = new Map(devices.map((d) => [d.id, d]));
+  const { verdict, tone, counts, destination } = blastVerdict(
+    result,
+    (id) => byId.get(id)?.name || 'Unnamed',
+    !!targets,
+  );
+
+  // Destinations worth asking about: exits (ISP, gateways, routers…) first, then any
+  // other linked device — a server or service is a fair "can it still reach this?".
+  const linked = new Set(links.flatMap((l) => [l.sourceId, l.targetId]));
+  const byName = (a: Device, b: Device) => a.name.localeCompare(b.name);
+  const candidates = devices.filter((d) => linked.has(d.id));
+  const exits = candidates.filter((d) => isEgressType(d.type)).sort(byName);
+  const others = candidates.filter((d) => !isEgressType(d.type)).sort(byName);
 
   return (
     <div className={styles.flowHud} data-canvas-chrome>
       <div className={styles.flowHudRow}>
         <span className={styles.flowHudBadge}>STRESS-TEST</span>
-        <span className={`${styles.flowHudVerdict} ${styles[`flowTone_${tone}`]}`}>{verdict}</span>
+        <span
+          className={`${styles.flowHudVerdict} ${styles[`flowTone_${tone}`]}`}
+          role="status"
+          aria-live="polite"
+        >
+          {verdict}
+          {counts && <span className={styles.flowHudCounts}>{counts}</span>}
+        </span>
       </div>
       <div className={styles.flowHudHint}>
+        <label className={styles.flowHudTarget}>
+          reach to{' '}
+          <select
+            className={styles.flowHudSelect}
+            value={targets?.[0] ?? ''}
+            onChange={(e) => setTarget(e.target.value || null)}
+            aria-label="Destination to measure reachability to"
+          >
+            <option value="">{targets ? 'any exit' : destination}</option>
+            {exits.length > 0 && (
+              <optgroup label="Exits">
+                {exits.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name || 'Unnamed'}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {others.length > 0 && (
+              <optgroup label="Other devices">
+                {others.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name || 'Unnamed'}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+        </label>
+        {' · '}
         click to fail · again to restore
         {failed.length > 0 && (
           <>

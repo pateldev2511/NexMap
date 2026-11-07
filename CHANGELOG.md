@@ -13,6 +13,21 @@ the cables down to the hardware, with a user control to dial the motion.
 
 ### Added
 
+- **Findings open the field to fix.** Click a validation finding, or Tab to it and
+  press Enter. A bad subnet CIDR or gateway opens the IP Plan with that field
+  focused and marked until it's fixed. A duplicate IP lists every device and port
+  that holds it and takes you to the exact address field. (#45)
+- **Stress-test: pick what "reachable" means.** Flow shows which destination its
+  verdict is about ("any exit: ISP, R1") and lets you pick one ISP, gateway or
+  device. Its line splits failed, newly unreachable and already-disconnected
+  devices. (#46)
+- **NexMap tells you when it's ready offline.** The first visit caches the whole
+  app, both designers and every exporter included, and says "NexMap is ready to
+  work offline" once it has. (#21)
+- **Copied devices paste into a spreadsheet.** Copying devices on the canvas puts
+  them on the system clipboard as an inventory CSV; pasting back onto the canvas
+  still brings the full devices, links and all. (#52)
+
 - **Gear that looks like gear.** Every canvas node is redrawn as a product render
   of the real hardware: anodized and brushed metal, glass screens, RJ45 jacks with
   link lights, drive caddies, rubber antennas, lit from one direction. Cloud
@@ -733,6 +748,20 @@ the cables down to the hardware, with a user control to dial the motion.
 
 ### Changed
 
+- **Switch designer keeps your project.** Moving between the Network and Rack
+  designers opens the same project in the other view, with its unsaved changes,
+  undo history, file and autosave. New is how you start a different project; the
+  launch screen still offers either designer on its own. (#54)
+- **New project is Alt/Option+N.** The help, toolbar and command menu advertised
+  Ctrl/Cmd+N, which browsers reserve for a new window. The shortcut guide now also
+  lists copy, cut and paste. (#56)
+- **The launch screen loads faster.** It no longer downloads and runs both
+  designers up front: on a throttled phone profile it appears in about 1.3 s instead
+  of 2 s, and repeat visits open the remembered designer faster. Each designer
+  loads in the background while you choose. (#44)
+- **A package is the whole project, and says so.** The ZIP always bundles the
+  entire design (editable file, CSVs, reports and renders, from one copy of the
+  project), so "Selection only" no longer appears for it. (#22)
 - **A cohesive, dark-first design system.** A greatly expanded token set
   (layered surfaces, brand gradients, elevation, glow, radii, spacing, motion
   curves, z-index) restyles the whole app — topbar, panels, status bar, command
@@ -742,6 +771,100 @@ the cables down to the hardware, with a user control to dial the motion.
 - Refreshed brand assets: new app icon, Open Graph image, and theme color.
 
 ### Fixed
+
+**Files, drafts and tabs**
+
+- **Save never lands in the wrong file.** New, Open or a template now starts with no
+  file attached, so Save asks where to put it instead of overwriting the last
+  project's file. A save marks only the exact version it wrote as saved, so an edit
+  made while it was writing still shows as unsaved. (#17, #18)
+- **Unsaved work asks before it's replaced.** New and Open (toolbar, ⌘O, the
+  command menu, the start screen) offer Save, Discard or Cancel when there are
+  unsaved changes. The file is checked first, so a bad file changes nothing. (#19)
+- **Your last edit survives a reload.** An edit still waiting to autosave is saved
+  when the tab is hidden, reloaded or closed; if the browser can't keep it, NexMap
+  asks before you leave. (#53)
+- **Recovery finds all your work.** A project with only racks, notes, shapes,
+  images, an IP plan or rules is now offered after a reload, and the prompt says
+  what it holds. A newer blank project no longer hides an older real one. (#20)
+- **Open from the launch screen works**, with or without the browser's file picker,
+  and lands in the right designer. (#23)
+- **A second tab is really read-only.** While another tab is editing, this tab is
+  view-only; when the other tab closes, this one takes over with its latest
+  autosave. (#24)
+- **Broken files are refused, clearly**, with the field at fault (e.g.
+  `devices[1].id`), instead of crashing the editor or quietly dropping objects. (#26)
+- **Blocked browser storage no longer blanks the app.** With site storage denied,
+  NexMap still opens, edits and downloads files, and Settings says so. (#37)
+- **The first offline launch works.** After one online visit, NexMap opens offline
+  in both designers instead of answering "Offline". (#21)
+
+**Editing**
+
+- **Cut and paste moves, cables and all.** Cutting a cabled site and pasting it back
+  returns the same devices with their links, ports, addresses and callouts, as one
+  undo step. Copy and duplicate are unchanged. (#51)
+- **⌘V pastes what you just copied, wherever you copied it.** A CSV or image copied
+  in another app imports from the keyboard shortcut, even after copying devices on
+  the canvas. (#52)
+- **Presentation is read-only.** Pasting, undo and editing shortcuts no longer
+  change the diagram while you present. (#35)
+- **Long cables stay visible** when you zoom into the middle of a link whose two
+  ends are off-screen. (#34)
+- **Every toolbar action is reachable** at phone, tablet and desktop widths. Labels
+  give way to icons when they don't fit, and on phones the actions get their own
+  row. (#25)
+- **Dialogs behave like dialogs.** Export, Import, Settings, Shortcuts, About,
+  Outline, NexText and the recovery and unsaved-changes prompts take focus, keep
+  Tab inside, close on Escape (the topmost one only), hand focus back, and keep
+  editor shortcuts from changing the diagram behind them. (#36)
+
+**Validation and Flow**
+
+- **IPv6 addresses are checked for real**, and two spellings of the same address
+  count as duplicates. (#30)
+- **Gateways are checked, not just required**: malformed, off-subnet, network and
+  broadcast gateways each get a finding naming the usable range. (#31)
+- **Big IP plans check instantly.** A 1,000-subnet plan drops from about half a
+  second to under 2 ms, with every overlap still reported. (#43)
+- **Path redundancy no longer goes stale**, and a single path names the exact link
+  whose loss separates the pair. (#42)
+
+**Racks**
+
+- **Patch from topology cables the ports you named**, and reports a named port
+  that's already taken instead of quietly using another. (#29)
+- **The rack health chip sees cable problems**: speed, media and VLAN mismatches
+  lower the score of every rack the cable touches. (#38)
+- **Every rack handoff file holds what its name says.** A focused rack's exports
+  hold that rack and every cable touching it, with the far rack named; "All racks"
+  is its own export. A failed render says why and offers Retry. (#39)
+
+**Import and export**
+
+- **Multi-page draw.io files import page by page**, so each page's links connect
+  that page's devices. (#27)
+- **Link imports never guess between devices with the same name.** (#28)
+- **Inventory CSVs round-trip every device type**, and a management address keeps
+  its prefix. (#32)
+- **A broken row no longer sinks a JSON import**, and "Choose another file" retries
+  in place. (#40)
+- **What you preview is what's in the package**: the ZIP's SVG, PNG and PDF use
+  the preview's projection, style, labels and highlighting. (#33)
+- **Huge diagrams export instead of breaking**, staying inside the browser's canvas
+  limits and stepping the scale down when needed. (#41)
+
+**Project**
+
+- **Dependencies with known advisories are updated** (DOMPurify, jsPDF, nanoid), CI
+  now fails on high or critical advisories in what ships, and SECURITY.md says how
+  upgrades are checked. (#55)
+- **The file-format guide describes the current schema (v7)**, and new documents
+  record the real app version. (#48)
+- **CI keeps its browser reports**, and a production-build suite checks offline
+  use. (#49)
+
+**Earlier in this release**
 
 - **Every deploy reaches returning visitors on their next load.** The offline
   service worker served the page from its cache first, so a returning visitor ran

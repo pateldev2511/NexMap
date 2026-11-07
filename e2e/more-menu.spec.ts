@@ -50,6 +50,32 @@ test('More menu works at a narrow width (the width CI failed at)', async ({ page
   await expect(page.getByRole('heading', { name: /shortcuts/i })).toBeVisible();
 });
 
+test('More opens when the action strip has to scroll to reach it, and follows it', async ({
+  page,
+}) => {
+  // Narrow enough that the strip overflows on every platform: More starts out of
+  // view, so clicking it scrolls the strip. That scroll used to close the menu as
+  // it opened (CI's wider fonts hit it at 1100px; locally it was a race).
+  await page.setViewportSize({ width: 700, height: 800 });
+  const strip = page.locator('header [class*="topbarActions"]');
+  await strip.evaluate((el) => (el.scrollLeft = 0));
+  expect(await strip.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+  await expect(moreButton(page)).not.toBeInViewport({ ratio: 1 });
+
+  await moreButton(page).click();
+  const panel = menu(page);
+  await expect(panel).toBeVisible();
+  // Anchored under the trigger it scrolled to.
+  const trigger = (await moreButton(page).boundingBox())!;
+  const box = (await panel.boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(trigger.y + trigger.height);
+  expect(Math.abs(box.x + box.width - (trigger.x + trigger.width))).toBeLessThan(2);
+
+  // Scroll More back out of sight: the menu would point at nothing, so it closes.
+  await strip.evaluate((el) => (el.scrollLeft = 0));
+  await expect(panel).toHaveCount(0);
+});
+
 test('Escape and outside-click close the menu', async ({ page }) => {
   await moreButton(page).click();
   await expect(menu(page)).toBeVisible();

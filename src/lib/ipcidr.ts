@@ -2,9 +2,10 @@
  * IPv4/IPv6 + CIDR helpers backing NexMap's network validations.
  *
  * Kept dependency-free and pure so the validation engine, import mapping, and
- * tests all share one source of truth. IPv4 is fully supported; IPv6 parsing is
- * intentionally minimal (presence + basic shape) for MVP validations — the heavy
- * IPv6 subnet math lands when cloud/IPv6 validations do (Post-MVP).
+ * tests all share one source of truth. IPv4 is fully supported. IPv6 addresses are
+ * parsed properly (group count, "::" placement, an IPv4 tail) and canonicalized per
+ * RFC 5952, so equivalent spellings compare equal; an IPv6 address may carry a
+ * /0–128 prefix. IPv6 *subnet* math (the IP Plan) is still IPv4-only (Post-MVP).
  */
 
 export interface ParsedCidr {
@@ -38,20 +39,92 @@ export function isValidIpv4(ip: string): boolean {
   return parseIpv4(ip) !== null;
 }
 
-/** Minimal IPv6 validity check (shape only — full math is Post-MVP). */
-export function isValidIpv6(ip: string): boolean {
-  const s = ip.trim();
-  if (!s.includes(':')) return false;
-  // At most one "::" compression, hex groups of 1-4 digits.
-  const doubleColons = s.match(/::/g);
-  if (doubleColons && doubleColons.length > 1) return false;
-  const groups = s.split(':');
-  if (groups.length > 8) return false;
-  for (const g of groups) {
-    if (g === '') continue; // from "::" or leading/trailing
-    if (!/^[0-9a-fA-F]{1,4}$/.test(g)) return false;
+const IPV6_GROUP = /^[0-9a-fA-F]{1,4}$/;
+
+/** Parse one side of a "::" into 16-bit groups; only the last part may be a dotted quad. */
+function ipv6Groups(side: string, allowIpv4Tail: boolean): number[] | null {
+  if (side === '') return [];
+  const parts = side.split(':');
+  const out: number[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i]!;
+    if (allowIpv4Tail && i === parts.length - 1 && part.includes('.')) {
+      const v4 = parseIpv4(part);
+      if (v4 === null) return null;
+      out.push(v4 >>> 16, v4 & 0xffff);
+    } else if (IPV6_GROUP.test(part)) {
+      out.push(parseInt(part, 16));
+    } else {
+      return null; // an empty group from a stray ":" or ":::", or not hex
+    }
   }
-  return true;
+  return out;
+}
+
+/**
+ * Parse an IPv6 address into its eight 16-bit groups, or null if malformed. Accepts
+ * one "::" (standing for at least one zero group) and a trailing dotted quad
+ * ("::ffff:192.0.2.1"). Zone ids ("fe80::1%eth0") are not supported.
+ */
+export function parseIpv6(ip: string): number[] | null {
+  const s = ip.trim();
+  if (!s.includes(':')) return null;
+  const halves = s.split('::');
+  if (halves.length > 2) return null;
+  if (halves.length === 1) {
+    const groups = ipv6Groups(s, true);
+    return groups && groups.length === 8 ? groups : null;
+  }
+  const head = ipv6Groups(halves[0]!, false);
+  const tail = ipv6Groups(halves[1]!, true);
+  if (!head || !tail || head.length + tail.length > 7) return null;
+  return [...head, ...new Array<number>(8 - head.length - tail.length).fill(0), ...tail];
+}
+
+/** True for a syntactically valid IPv6 address. */
+export function isValidIpv6(ip: string): boolean {
+  return parseIpv6(ip) !== null;
+}
+
+/**
+ * RFC 5952 text for eight groups: lowercase, no leading zeros, the longest run of
+ * two or more zero groups (leftmost on a tie) as "::", and an IPv4-mapped tail
+ * written as a dotted quad.
+ */
+function formatIpv6(g: number[]): string {
+  if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) {
+    return `::ffff:${g[6]! >>> 8}.${g[6]! & 255}.${g[7]! >>> 8}.${g[7]! & 255}`;
+  }
+  let bestStart = -1;
+  let bestLen = 1;
+  for (let i = 0; i < 8; ) {
+    if (g[i] !== 0) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < 8 && g[j] === 0) j++;
+    if (j - i > bestLen) {
+      bestStart = i;
+      bestLen = j - i;
+    }
+    i = j;
+  }
+  const hex = g.map((x) => x.toString(16));
+  if (bestStart === -1) return hex.join(':');
+  return `${hex.slice(0, bestStart).join(':')}::${hex.slice(bestStart + bestLen).join(':')}`;
+}
+
+/**
+ * The one spelling of an address (any /prefix dropped), or null if it isn't one:
+ * IPv4 as a dotted quad, IPv6 per RFC 5952. "2001:0db8:0:0:0:0:0:1" and "2001:db8::1"
+ * both come back "2001:db8::1", so duplicate checks compare addresses, not text.
+ */
+export function canonicalIp(ipOrCidr: string): string | null {
+  const ip = stripPrefix(ipOrCidr);
+  if (parseIpv4(ip) !== null) return ip; // leading zeros are rejected, so already canonical
+  const v6 = parseIpv6(ip);
+  return v6 ? formatIpv6(v6) : null;
 }
 
 export function isValidIp(ip: string): boolean {
@@ -81,6 +154,21 @@ export function parseCidr(cidr: string): ParsedCidr | null {
 /** True for a syntactically valid IPv4 CIDR like "10.0.0.0/24". */
 export function isValidCidr(cidr: string): boolean {
   return parseCidr(cidr) !== null;
+}
+
+/**
+ * True for an interface address written with a prefix, in either family:
+ * "10.0.0.5/24" (/0–32) or "2001:db8::1/64" (/0–128). Subnet CIDRs stay IPv4-only
+ * (`parseCidr`); this is the check for a device's management or port address.
+ */
+export function isValidIpWithPrefix(s: string): boolean {
+  const slash = s.indexOf('/');
+  if (slash === -1) return false;
+  const addr = s.slice(0, slash);
+  if (!addr.includes(':')) return parseCidr(s) !== null;
+  const prefixStr = s.slice(slash + 1).trim();
+  if (!/^(0|[1-9]\d{0,2})$/.test(prefixStr) || Number(prefixStr) > 128) return false;
+  return parseIpv6(addr) !== null;
 }
 
 /** True if an IPv4 address falls within the given CIDR range. */

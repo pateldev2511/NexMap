@@ -2,7 +2,7 @@ import { memo } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import type { CanvasObject, Device, DeviceType, Link } from '@/model/types';
 import { NexIcon } from '@/ui/icons/NexIcon';
-import { isValidIp, isValidCidr, stripPrefix, ipInCidr } from '@/lib/ipcidr';
+import { isValidIp, isValidIpWithPrefix, stripPrefix, ipInCidr } from '@/lib/ipcidr';
 import { nextFreeHost } from '@/lib/ipam';
 import { usedAddresses } from '@/sim/autoAddress';
 import { defaultDeviceName } from '@/model/schema';
@@ -78,7 +78,7 @@ const DEVICE_TYPES: DeviceType[] = [
 function ipError(value: string | undefined): string | null {
   const v = value?.trim();
   if (!v) return null;
-  if (v.includes('/')) return isValidCidr(v) ? null : 'Not a valid CIDR.';
+  if (v.includes('/')) return isValidIpWithPrefix(v) ? null : 'Not a valid CIDR.';
   return isValidIp(v) ? null : 'Not a valid IP address.';
 }
 
@@ -253,6 +253,7 @@ function DeviceInspector({ device }: { device: Device }) {
           <div className={styles.ipRow}>
             <input
               className={mgmtErr ? styles.invalid : ''}
+              data-address-field={`${device.id}:mgmt`}
               value={device.managementIp ?? ''}
               placeholder="10.0.0.1 or 10.0.0.1/24"
               onChange={(e) => set('managementIp', e.target.value)}
@@ -522,6 +523,7 @@ function InterfacesSection({ device }: { device: Device }) {
           />
           <input
             className={`${styles.ifaceIp}${ipError(iface.ip) ? ` ${styles.invalid}` : ''}`}
+            data-address-field={`${device.id}:${iface.id}`}
             value={iface.ip ?? ''}
             placeholder="port IP"
             aria-label="Interface IP"

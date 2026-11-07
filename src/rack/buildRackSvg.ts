@@ -7,7 +7,7 @@
  * buildPdfBlob(). The live editor shares only the LAYOUT math (rackLayout.ts), never
  * this markup. Every user string is run through escapeXml.
  */
-import type { Device, Rack, RackCable, TextObject } from '@/model/types';
+import type { Device, Rack, RackCable, RackCableEnd, TextObject } from '@/model/types';
 import { escapeXml } from '@/io/export/buildSvg';
 import { calloutRowsOrPlaceholder, rowAnchor } from '@/model/callout';
 import { DEFAULT_LEADER, leaderDashArray, leaderGeometry, type LeaderRect } from '@/model/leader';
@@ -282,7 +282,7 @@ export function buildRackRowSvg(
 export function buildLabelSheetSvg(
   racks: Rack[],
   devices: Device[],
-  opts: { background?: string | null } = {},
+  opts: { background?: string | null; /** What the sheet covers, for its title ("MDF"). */ scope?: string } = {},
 ): string {
   const cols = 3;
   const cw = 230, ch = 48, padX = 16, padY = 16, gap = 10, headH = 26;
@@ -309,7 +309,7 @@ export function buildLabelSheetSvg(
   const height = padY * 2 + headH + rows * (ch + gap);
   const parts: string[] = [];
   if (opts.background) parts.push(`<rect x="0" y="0" width="${width}" height="${height}" fill="${escapeXml(opts.background)}"/>`);
-  parts.push(`<text x="${padX}" y="${padY + 14}" font-family="ui-sans-serif,system-ui,sans-serif" font-size="15" font-weight="700" fill="${C.title}">Rack labels · ${cells.length}</text>`);
+  parts.push(`<text x="${padX}" y="${padY + 14}" font-family="ui-sans-serif,system-ui,sans-serif" font-size="15" font-weight="700" fill="${C.title}">${escapeXml(['Rack labels', opts.scope, String(cells.length)].filter(Boolean).join(' · '))}</text>`);
   if (cells.length === 0) {
     parts.push(`<text x="${padX}" y="${padY + headH + 16}" font-family="ui-sans-serif,system-ui,sans-serif" font-size="12" fill="${C.uNum}">No mounted devices.</text>`);
   }
@@ -346,6 +346,11 @@ export interface CableScheduleRow {
   label: string;
   from: string;
   to: string;
+  /**
+   * A cross-rack run's racks: "to IDF-2" when listed for one home rack (whose end is then
+   * `from`), "MDF → IDF-2" otherwise; "" for a run within one rack.
+   */
+  crossRack: string;
   lengthFt: string;
   /** Port VLAN(s): a single id when both ends agree, "a/b" when they differ, "" when unset. */
   vlan: string;
@@ -353,9 +358,19 @@ export interface CableScheduleRow {
   route: string;
 }
 
+export interface CableScheduleOptions {
+  /** Every rack, so a cross-rack run can name the far end's rack. */
+  racks?: readonly Rack[];
+  /** List for this rack: its end of each run goes first, and the far rack is named. */
+  homeRackId?: string;
+}
+
 /** Derive the installer-facing patch list from drawn cables (E3). */
-export function cableScheduleRows(devices: Device[], cables: RackCable[]): CableScheduleRow[] {
+export function cableScheduleRows(devices: Device[], cables: RackCable[], opts: CableScheduleOptions = {}): CableScheduleRow[] {
   const byId = new Map(devices.map((d) => [d.id, d]));
+  const rackName = new Map((opts.racks ?? []).map((r) => [r.id, r.name]));
+  const rackOf = (deviceId: string) => byId.get(deviceId)?.rackId;
+  const nameOfRack = (id: string) => rackName.get(id) ?? id;
   const lanes = cableLanes(devices, cables);
   const ifaceOf = (deviceId: string, ifaceId: string) =>
     byId.get(deviceId)?.interfaces?.find((i) => i.id === ifaceId);
@@ -364,30 +379,40 @@ export function cableScheduleRows(devices: Device[], cables: RackCable[]): Cable
     const portName = ifaceOf(deviceId, ifaceId)?.name ?? ifaceId;
     return `${dev?.name ?? deviceId}:${portName}`;
   };
-  const vlanCol = (c: RackCable): string => {
-    const va = ifaceOf(c.aEnd.deviceId, c.aEnd.ifaceId)?.vlan;
-    const vb = ifaceOf(c.bEnd.deviceId, c.bEnd.ifaceId)?.vlan;
+  const vlanCol = (near: RackCableEnd, far: RackCableEnd): string => {
+    const va = ifaceOf(near.deviceId, near.ifaceId)?.vlan;
+    const vb = ifaceOf(far.deviceId, far.ifaceId)?.vlan;
     if (va == null && vb == null) return '';
     if (va != null && vb != null) return va === vb ? String(va) : `${va}/${vb}`;
     return String(va ?? vb);
   };
-  return cables.map((c) => ({
-    color: c.color,
-    label: c.label ?? '',
-    from: endLabel(c.aEnd.deviceId, c.aEnd.ifaceId),
-    to: endLabel(c.bEnd.deviceId, c.bEnd.ifaceId),
-    lengthFt: c.lengthFt != null ? String(c.lengthFt) : '',
-    vlan: vlanCol(c),
-    route: routeLabel(lanes.routes.get(c.id) ?? []),
-  }));
+  return cables.map((c) => {
+    // The home rack's end reads first, so a technician at that rack starts from their side.
+    const [near, far] = opts.homeRackId && rackOf(c.bEnd.deviceId) === opts.homeRackId && rackOf(c.aEnd.deviceId) !== opts.homeRackId
+      ? [c.bEnd, c.aEnd]
+      : [c.aEnd, c.bEnd];
+    const ra = rackOf(near.deviceId);
+    const rb = rackOf(far.deviceId);
+    const cross = ra != null && rb != null && ra !== rb;
+    return {
+      color: c.color,
+      label: c.label ?? '',
+      from: endLabel(near.deviceId, near.ifaceId),
+      to: endLabel(far.deviceId, far.ifaceId),
+      crossRack: !cross ? '' : ra === opts.homeRackId ? `to ${nameOfRack(rb)}` : `${nameOfRack(ra)} → ${nameOfRack(rb)}`,
+      lengthFt: c.lengthFt != null ? String(c.lengthFt) : '',
+      vlan: vlanCol(near, far),
+      route: routeLabel(lanes.routes.get(c.id) ?? []),
+    };
+  });
 }
 
 /** CSV patch list. Reuses the simple quoting convention of the existing CSV exports. */
-export function cableScheduleCsv(devices: Device[], cables: RackCable[]): string {
+export function cableScheduleCsv(devices: Device[], cables: RackCable[], opts: CableScheduleOptions = {}): string {
   const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
-  const header = ['Color', 'Label', 'From', 'To', 'VLAN', 'Length (ft)', 'Route'].join(',');
-  const rows = cableScheduleRows(devices, cables).map((r) =>
-    [q(r.color), q(r.label), q(r.from), q(r.to), q(r.vlan), q(r.lengthFt), q(r.route)].join(','),
+  const header = ['Color', 'Label', 'From', 'To', 'Cross-rack', 'VLAN', 'Length (ft)', 'Route'].join(',');
+  const rows = cableScheduleRows(devices, cables, opts).map((r) =>
+    [q(r.color), q(r.label), q(r.from), q(r.to), q(r.crossRack), q(r.vlan), q(r.lengthFt), q(r.route)].join(','),
   );
   return [header, ...rows].join('\n');
 }
@@ -414,11 +439,12 @@ interface TableCol<K extends string> {
   w: number;
 }
 
-// [swatch, From, To, Label, VLAN, Length, Route] — fixed widths keep the literal-hex SVG simple.
-const TBL_COLS: TableCol<'color' | 'from' | 'to' | 'label' | 'vlan' | 'lengthFt' | 'route'>[] = [
+// [swatch, From, To, Cross-rack, Label, VLAN, Length, Route] — fixed widths keep the literal-hex SVG simple.
+const TBL_COLS: TableCol<'color' | 'from' | 'to' | 'crossRack' | 'label' | 'vlan' | 'lengthFt' | 'route'>[] = [
   { key: 'color', label: '', w: 30 },
   { key: 'from', label: 'From', w: 180 },
   { key: 'to', label: 'To', w: 180 },
+  { key: 'crossRack', label: 'Cross-rack', w: 130 },
   { key: 'label', label: 'Label', w: 130 },
   { key: 'vlan', label: 'VLAN', w: 60 },
   { key: 'lengthFt', label: 'Length (ft)', w: 90 },

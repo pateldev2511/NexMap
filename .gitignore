@@ -12,6 +12,8 @@ coverage
 .dev.vars
 test-results/
 playwright-report/
+playwright-report-preview/
+test-results-preview/
 blob-report/
 .playwright/
 

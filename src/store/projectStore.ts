@@ -33,7 +33,7 @@ import { bayOrigin, BAY_W } from '@/rack/rackLayout';
 import { DEFAULT_LEADER } from '@/model/leader';
 import { calloutRowsOrPlaceholder } from '@/model/callout';
 import { titleBlockBlocks, legendBlocks, legendEntries } from '@/model/docBlocks';
-import { canFit, isFullDepth, isFullHeightRail, nearestFreeRail, type FitResult, type Slot } from '@/rack/rackModel';
+import { canFit, isFullDepth, isFullHeightRail, nearestFreeRail, slotOf, type FitResult, type Slot } from '@/rack/rackModel';
 import { checkConnect, pruneCablesForInterfaces } from '@/rack/rackCables';
 import { presetByKey, presetSpan } from '@/rack/rackDevicePresets';
 import { catalogById, planCatalogDepths } from '@/rack/rackCatalog';
@@ -65,7 +65,8 @@ import { SpatialIndex, type Box } from '@/lib/spatial-index';
 import { computeAlignSnap, computeSpacingSnap, type AlignGuide } from '@/canvas/align';
 import { autoLayoutPositions } from '@/lib/layout';
 import { avoidRoute } from '@/lib/routing';
-import { pointInPolygon, type Point } from '@/lib/geometry';
+import { pointInPolygon, polylineIntersectsBox, segmentHitsRect, type Point } from '@/lib/geometry';
+import { PARALLEL_LINK_SPACING, routePoints } from '@/canvas/connector';
 import { parseNexText, buildModel, type Diagnostic as NexDiagnostic } from '@/lib/nextext';
 import { analyzeHealth, edgeDisjointPaths, type HealthReport } from '@/lib/health';
 import { fabricEdges } from '@/sim/fabric';
@@ -185,6 +186,19 @@ let resizeOrig: { id: string; box: Box } | null = null;
 /** Clipboard of copied model snapshots. Module-scoped, session-only. */
 let clipboard: Array<Device | CanvasObject> = [];
 let pasteOffset = 0;
+/**
+ * A pending MOVE (#51): exactly what the last cut removed, so paste can put those
+ * very entities back — same ids, interfaces and the links' port references,
+ * addresses, callout anchors, groups — with every link and rack cable the cut took
+ * along. Cleared by a copy. Paste moves while the cut entities are absent from the
+ * project, and copies once they're back (see pasteCut).
+ */
+let cutPayload: {
+  projectId: string;
+  movables: Array<Device | CanvasObject>;
+  links: Link[];
+  cables: RackCable[];
+} | null = null;
 /** Latest canvas camera, reported by the renderer (module-scoped to avoid re-render loops). */
 let currentCamera = { tx: 0, ty: 0, scale: 1 };
 /** Camera the canvas should jump to (set by applyView, read on cameraTick). */
@@ -298,6 +312,65 @@ function remapCloneGroups<T extends Device | CanvasObject>(clones: T[]): T[] {
   });
 }
 
+/**
+ * Per-link route bounds for viewport culling (#34), rebuilt only when the model
+ * changes (keyed on `rev`). A pan or zoom frame — same model, new viewport — is
+ * then one numeric pass over the links, not two map lookups apiece.
+ *
+ * Bounds cover both endpoint device boxes plus every waypoint, so they contain the
+ * whole drawn route (the orthogonal elbow stays inside its endpoints' bounds).
+ * `pads[i]` ≥ 0 marks a straight run, grown by how far a parallel-group member can
+ * bow off its chord: up to half the group's fan, and the group can't outnumber
+ * either end's links — exact for a lone link, no grouping pass. -1 marks a route
+ * tested leg by leg (waypoints or orthogonal).
+ */
+let linkCull: {
+  model: ModelState;
+  rev: number;
+  links: Link[];
+  bounds: Float64Array;
+  pads: Float64Array;
+} | null = null;
+
+function linkCullBounds(rev: number): NonNullable<typeof linkCull> {
+  if (linkCull && linkCull.model === model && linkCull.rev === rev) return linkCull;
+  const links: Link[] = [];
+  const bounds = new Float64Array(model.links.size * 4);
+  const pads = new Float64Array(model.links.size);
+  for (const l of model.links.values()) {
+    const a = model.devices.get(l.sourceId);
+    const b = model.devices.get(l.targetId);
+    if (!a || !b) continue; // dangling: draws nothing, so never culls in
+    let minX = Math.min(a.x, b.x);
+    let minY = Math.min(a.y, b.y);
+    let maxX = Math.max(a.x + a.width, b.x + b.width);
+    let maxY = Math.max(a.y + a.height, b.y + b.height);
+    const wps = l.waypoints;
+    if (wps) {
+      for (const p of wps) {
+        minX = Math.min(minX, p.x);
+        minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
+      }
+    }
+    let pad = -1;
+    if ((wps?.length ?? 0) === 0 && l.routing !== 'orthogonal') {
+      const n = Math.min(model.adjacency.get(a.id)?.size ?? 1, model.adjacency.get(b.id)?.size ?? 1);
+      pad = ((n - 1) / 2) * PARALLEL_LINK_SPACING;
+    }
+    const grow = Math.max(pad, 0);
+    const i = links.push(l) - 1;
+    pads[i] = pad;
+    bounds[i * 4] = minX - grow;
+    bounds[i * 4 + 1] = minY - grow;
+    bounds[i * 4 + 2] = maxX + grow;
+    bounds[i * 4 + 3] = maxY + grow;
+  }
+  linkCull = { model, rev, links, bounds, pads };
+  return linkCull;
+}
+
 function rebuildIndex(): void {
   index.clear();
   for (const d of model.devices.values()) index.insert(d.id, deviceBox(d));
@@ -359,7 +432,21 @@ export interface ProjectStore {
   ruleSupports: Map<string, RuleSupport[]>;
   canUndo: boolean;
   canRedo: boolean;
+  /** Unsaved to a file since the document was loaded or last saved. */
   dirty: boolean;
+  /**
+   * Which document is open: bumped by every loadDoc (open, new, template,
+   * recovery). Anything bound to one document — its file handle, a pending save
+   * — compares this before acting, so it can't land on a different project.
+   */
+  docIdentity: number;
+  /** Advances on every document change (see the wrapped `set`). */
+  docRevision: number;
+  /**
+   * Another tab holds the writer role (#24): the document is view-only here.
+   * Editing surfaces read this; persistence sets it from the Web Locks state.
+   */
+  readOnly: boolean;
   mode: CanvasMode;
   /** Active render projection (flat or isometric). View-level, not undoable. */
   projection: Projection;
@@ -367,6 +454,8 @@ export interface ProjectStore {
   flowMode: boolean;
   /** Device ids currently "pulled" (failed) in Flow mode. Cleared on exit. */
   flowFailed: string[];
+  /** The destination Flow measures reachability to; null = any exit. Cleared on exit. */
+  flowTarget: string | null;
   projectName: string;
   activeLayerId: string;
   activeViewId: string | null;
@@ -646,9 +735,17 @@ export interface ProjectStore {
   toggleFlowFailed(id: string): void;
   /** Restore every pulled device (stay in Flow). */
   clearFlowFailed(): void;
+  /** Pick the device Flow measures reachability to (null = any exit). */
+  setFlowTarget(id: string | null): void;
   endEdit(): void;
-  /** Mark the model as saved to a file (clears the unsaved-changes dot). */
-  markSaved(): void;
+  /**
+   * Mark the model as saved to a file (clears the unsaved-changes dot). Given the
+   * identity + revision a save serialized, it only clears when the document is
+   * still exactly that — a later edit or a different project stays unsaved.
+   * Returns whether it cleared.
+   */
+  markSaved(saved?: { identity: number; revision: number }): boolean;
+  setReadOnly(on: boolean): void;
   deleteSelection(): void;
   select(ids: string[], additive?: boolean): void;
   boxSelect(box: Box, additive?: boolean): void;
@@ -662,6 +759,8 @@ export interface ProjectStore {
   cutSelection(): void;
   paste(): void;
   hasClipboard(): boolean;
+  /** Devices on the canvas clipboard (copy or cut), for the system-clipboard text. */
+  clipboardDevices(): Device[];
   /** Toggle locked on selected devices (one undoable entry). */
   toggleLockSelection(): void;
   /** Move unlocked selected devices by a delta as one undoable entry. */
@@ -856,7 +955,31 @@ function snapValue(v: number, suspend: boolean): number {
   return suspend ? v : Math.round(v / GRID) * GRID;
 }
 
-export const useProjectStore = create<ProjectStore>((set, get) => {
+/**
+ * Callbacks run just before loadDoc swaps the model out, while getDocument() still
+ * returns the OUTGOING document — persistence flushes that document's pending
+ * autosave here, so a quick switch can't serialize the new project in its place.
+ */
+const beforeSwapListeners = new Set<() => void>();
+export function onBeforeDocumentSwap(listener: () => void): () => void {
+  beforeSwapListeners.add(listener);
+  return () => beforeSwapListeners.delete(listener);
+}
+
+export const useProjectStore = create<ProjectStore>((rawSet, get) => {
+  /**
+   * Every write that changes the model (`rev`) or marks the document edited
+   * (`dirty: true`) advances `docRevision`. A file save records the revision it
+   * serialized and only that exact revision can be marked saved (#18), so an
+   * edit made while the write was pending stays visibly unsaved.
+   */
+  const set = (patch: Partial<ProjectStore>): void => {
+    if (patch.docRevision === undefined && ('rev' in patch || patch.dirty === true)) {
+      rawSet({ ...patch, docRevision: (get()?.docRevision ?? 0) + 1 });
+    } else {
+      rawSet(patch);
+    }
+  };
   // New objects/devices/links attach to the active layer (falling back to the first).
   function firstLayerId(): string {
     const active = get()?.activeLayerId; // get() is undefined during store init
@@ -1000,6 +1123,92 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       canRedo: history.canRedo,
       dirty: true,
     });
+  }
+
+  /**
+   * Paste a cut back as a move (#51). Returns false — leaving the paste to the copy
+   * path — once any cut entity is back in the project (the move already landed, or
+   * the cut was undone): re-adding those ids would clash, and a second set of the
+   * same addresses is a copy's job, which drops them.
+   *
+   * The entities land as they were cut, where they were cut from. Links and cables
+   * come back when both their ends exist; into ANOTHER project only those inside
+   * the cut do, since an outside id there names a different device. A crossing
+   * link whose outside port was removed meanwhile keeps the link, not the stale
+   * port ref; a cable needs both ports. A layer or rack that's gone falls back to
+   * the first layer / the unplaced tray, as does a rack slot taken meanwhile.
+   */
+  function pasteCut(cut: NonNullable<typeof cutPayload>): boolean {
+    const back = (id: string) => model.devices.has(id) || model.objects.has(id) || model.links.has(id);
+    if (cut.movables.some((m) => back(m.id)) || cut.links.some((l) => back(l.id))) return false;
+    if (cut.movables.length === 0 && cut.links.length === 0) return false;
+    const sameProject = cut.projectId === model.project.id;
+    const layerOf = (id: string) => (model.layers.has(id) ? id : firstLayerId());
+    const cutIds = new Set(cut.movables.map((m) => m.id));
+
+    const devices: Device[] = [];
+    const objects: CanvasObject[] = [];
+    for (const m of cut.movables) {
+      if (m.kind !== 'device') {
+        objects.push({ ...m, layerId: layerOf(m.layerId) });
+        continue;
+      }
+      let d: Device = { ...m, layerId: layerOf(m.layerId) };
+      const rack = d.rackId != null ? model.racks.get(d.rackId) : undefined;
+      if (
+        d.rackId != null &&
+        (!rack || !canFit(rack, [...model.devices.values(), ...devices], slotOf(d), d.id).ok)
+      ) {
+        d = { ...d, rackId: undefined, ru: undefined, mount: undefined, side: undefined, bay: undefined };
+      }
+      devices.push(d);
+    }
+
+    const pasted = new Map(devices.map((d) => [d.id, d]));
+    const deviceOf = (id: string) => pasted.get(id) ?? model.devices.get(id);
+    const hasPort = (deviceId: string, ifaceId: string | undefined) =>
+      ifaceId != null && (deviceOf(deviceId)?.interfaces ?? []).some((i) => i.id === ifaceId);
+    const reachable = (a: string, b: string) =>
+      !!deviceOf(a) && !!deviceOf(b) && (sameProject || (cutIds.has(a) && cutIds.has(b)));
+
+    const links: Link[] = [];
+    for (const l of cut.links) {
+      if (!reachable(l.sourceId, l.targetId)) continue;
+      let next: Link = { ...l, layerId: layerOf(l.layerId) };
+      if (next.sourceIfaceId != null && !hasPort(next.sourceId, next.sourceIfaceId))
+        next = { ...next, sourceIfaceId: undefined };
+      if (next.targetIfaceId != null && !hasPort(next.targetId, next.targetIfaceId))
+        next = { ...next, targetIfaceId: undefined };
+      links.push(next);
+    }
+    const cables = cut.cables.filter(
+      (c) =>
+        !model.rackCables.has(c.id) &&
+        reachable(c.aEnd.deviceId, c.bEnd.deviceId) &&
+        hasPort(c.aEnd.deviceId, c.aEnd.ifaceId) &&
+        hasPort(c.bEnd.deviceId, c.bEnd.ifaceId),
+    );
+
+    history.dispatch(
+      transaction('Paste', [
+        ...devices.map((d) => new AddDeviceCommand(d)),
+        ...objects.map((o) => new AddObjectCommand(o)),
+        ...links.map((l) => new AddLinkCommand(l)),
+        ...cables.map((c) => new AddRackCableCommand(c)),
+      ]),
+      model,
+    );
+    for (const d of devices) index.insert(d.id, deviceBox(d));
+    for (const o of objects) index.insert(o.id, objBox(o));
+    history.commitCoalesceBoundary();
+    set({
+      rev: get().rev + 1,
+      selection: new Set([...devices, ...objects].map((m) => m.id)),
+      canUndo: history.canUndo,
+      canRedo: history.canRedo,
+      dirty: true,
+    });
+    return true;
   }
 
   /**
@@ -1367,10 +1576,14 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     canUndo: false,
     canRedo: false,
     dirty: false,
+    docIdentity: 0,
+    docRevision: 0,
+    readOnly: false,
     mode: 'select',
     projection: 'flat',
     flowMode: false,
     flowFailed: [],
+    flowTarget: null,
     projectName: model.project.name,
     activeLayerId: firstLayerId(),
     activeViewId: null,
@@ -2764,18 +2977,46 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       const ids = [...get().selection].filter((id) => movable(id));
       clipboard = ids.map((id) => ({ ...movable(id)! }));
       pasteOffset = 0;
+      cutPayload = null;
     },
 
     cutSelection() {
-      get().copySelection();
+      // A cut is a move (#51): hold exactly what the delete is about to remove —
+      // the unlocked selection plus the links and rack cables that cascade with
+      // it — so paste can put the same entities back. Nothing removable (all
+      // locked) stays a plain copy, as before.
+      const { deviceIds, linkIds, objectIds } = get().deletable([...get().selection]);
+      if (deviceIds.length === 0 && linkIds.length === 0 && objectIds.length === 0) {
+        get().copySelection();
+        return;
+      }
+      const cutDevices = new Set(deviceIds);
+      const linkSet = new Set(linkIds);
+      for (const id of deviceIds) for (const lid of model.adjacency.get(id) ?? []) linkSet.add(lid);
+      const movables = [...deviceIds, ...objectIds].map((id) => movable(id)!);
+      clipboard = movables.map((m) => ({ ...m }));
+      pasteOffset = 0;
+      cutPayload = {
+        projectId: model.project.id,
+        movables,
+        links: [...linkSet].map((id) => model.links.get(id)!),
+        cables: [...model.rackCables.values()].filter(
+          (c) => cutDevices.has(c.aEnd.deviceId) || cutDevices.has(c.bEnd.deviceId),
+        ),
+      };
       get().deleteSelection();
     },
 
     hasClipboard() {
-      return clipboard.length > 0;
+      return clipboard.length > 0 || (cutPayload?.links.length ?? 0) > 0;
+    },
+
+    clipboardDevices() {
+      return clipboard.filter((m): m is Device => m.kind === 'device');
     },
 
     paste() {
+      if (cutPayload && pasteCut(cutPayload)) return;
       if (clipboard.length === 0) return;
       pasteOffset += 24;
       const clones = remapCloneGroups(
@@ -3214,7 +3455,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     },
 
     setFlowMode(on) {
-      set(on ? { flowMode: true } : { flowMode: false, flowFailed: [] });
+      set(on ? { flowMode: true } : { flowMode: false, flowFailed: [], flowTarget: null });
     },
     toggleFlowFailed(id) {
       const cur = get().flowFailed;
@@ -3222,6 +3463,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     },
     clearFlowFailed() {
       set({ flowFailed: [] });
+    },
+    setFlowTarget(id) {
+      set({ flowTarget: id });
     },
 
     endEdit() {
@@ -3233,8 +3477,19 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       if (ruleGuard && ruleGuard.seq !== history.seq) get().runValidation();
     },
 
-    markSaved() {
+    markSaved(saved) {
+      if (
+        saved &&
+        (saved.identity !== get().docIdentity || saved.revision !== get().docRevision)
+      ) {
+        return false;
+      }
       set({ dirty: false });
+      return true;
+    },
+
+    setReadOnly(on) {
+      if (get().readOnly !== on) set({ readOnly: on });
     },
 
     deleteSelection() {
@@ -3739,6 +3994,14 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         .map(sanitizeStoredRule)
         .filter((r): r is CustomRuleSpec => r !== null);
       const loadedEnforced = strings(doc.enforcedRules);
+      // Last moment the outgoing document is still readable (pending autosave).
+      for (const fn of [...beforeSwapListeners]) {
+        try {
+          fn();
+        } catch {
+          /* a listener's failure must not block the load */
+        }
+      }
       model = fromDocument(doc);
       baseDoc = doc;
       history.clear();
@@ -3773,6 +4036,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         canUndo: false,
         canRedo: false,
         dirty: false,
+        // A different document: new identity, fresh revision (nothing edited yet).
+        docIdentity: get().docIdentity + 1,
+        docRevision: 0,
         projectName: doc.project.name,
         activeLayerId: model.layers.keys().next().value ?? 'default',
         activeViewId: null,
@@ -3793,9 +4059,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     },
 
     newProject(now) {
-      const doc = createEmptyDocument(now);
-      get().loadDoc(doc);
-      set({ dirty: false });
+      // loadDoc already leaves it clean, with a new identity (no file, no draft binding).
+      get().loadDoc(createEmptyDocument(now));
     },
 
     visibleDevices(viewport) {
@@ -3809,11 +4074,46 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     },
 
     visibleLinks(viewport) {
-      // A link is visible if either endpoint is in (or near) the viewport.
+      // A link is visible if its drawn route crosses the viewport — not just if an
+      // endpoint does: a long cable with both ends off-screen still draws where it
+      // passes through (#34). Each link's cached route bounds reject almost every
+      // off-screen link in one numeric compare; survivors keep the old fast path
+      // (an endpoint device in view), else their route is tested leg by leg — the
+      // straight run, the orthogonal elbow, or each waypoint segment.
+      const cull = linkCullBounds(get().rev);
       const visible = new Set(index.query(viewport));
+      const minX = viewport.x;
+      const minY = viewport.y;
+      const maxX = viewport.x + viewport.width;
+      const maxY = viewport.y + viewport.height;
+      const { links, bounds, pads } = cull;
       const out: Link[] = [];
-      for (const l of model.links.values()) {
-        if (visible.has(l.sourceId) || visible.has(l.targetId)) out.push(l);
+      for (let i = 0; i < links.length; i++) {
+        const k = i * 4;
+        if (bounds[k]! > maxX || bounds[k + 1]! > maxY || bounds[k + 2]! < minX || bounds[k + 3]! < minY)
+          continue;
+        const l = links[i]!;
+        if (visible.has(l.sourceId) || visible.has(l.targetId)) {
+          out.push(l);
+          continue;
+        }
+        const a = model.devices.get(l.sourceId)!;
+        const b = model.devices.get(l.targetId)!;
+        const pad = pads[i]!;
+        const hit =
+          pad >= 0
+            ? segmentHitsRect(
+                a.x + a.width / 2,
+                a.y + a.height / 2,
+                b.x + b.width / 2,
+                b.y + b.height / 2,
+                minX - pad,
+                minY - pad,
+                maxX + pad,
+                maxY + pad,
+              )
+            : polylineIntersectsBox(routePoints(l, a, b), viewport);
+        if (hit) out.push(l);
       }
       return out;
     },
@@ -4225,9 +4525,14 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           ? `${plan.notRacked} link${plan.notRacked === 1 ? ' has an end' : 's have an end'} outside a rack`
           : '',
         ...plan.noFreePort.map((s) => `${s.device.name} is out of free ports`),
+        ...plan.portConflicts.map(
+          (p) => `${p.device.name}:${p.port} is already cabled${p.cableLabel ? ` (${p.cableLabel})` : ''} — free it or rename the link's port`,
+        ),
       ].filter(Boolean);
       if (!plan.items.length) {
-        const why = plan.alreadyPatched > 0 ? 'Every link between racked gear already has a cable' : 'No links between racked gear to patch';
+        const why = plan.portConflicts.length > 0
+          ? 'Nothing patched'
+          : plan.alreadyPatched > 0 ? 'Every link between racked gear already has a cable' : 'No links between racked gear to patch';
         set({ flash: `${why}${tail.length ? ` — ${tail.join(', ')}` : ''}.` });
         return 0;
       }

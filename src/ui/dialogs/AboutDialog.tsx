@@ -1,5 +1,6 @@
 import { NexIcon } from '@/ui/icons/NexIcon';
 import { VideoReel } from '@/ui/deck/VideoReel';
+import { useModalDialog } from './useModalDialog';
 import styles from './ImportDialog.module.css';
 
 /**
@@ -8,11 +9,12 @@ import styles from './ImportDialog.module.css';
  * the local-first guarantee plainly and points at the code that enforces it.
  */
 export function AboutDialog({ onClose }: { onClose: () => void }) {
+  const { titleId, dialogProps } = useModalDialog(onClose);
   return (
     <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.dialog} onClick={(e) => e.stopPropagation()}>
+      <div className={styles.dialog} {...dialogProps} onClick={(e) => e.stopPropagation()}>
         <div className={styles.head}>
-          <h2>About NexMap</h2>
+          <h2 id={titleId}>About NexMap</h2>
           <button className={styles.close} onClick={onClose} aria-label="Close">
             <NexIcon name="close" />
           </button>

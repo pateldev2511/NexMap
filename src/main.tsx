@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App.tsx';
+import { UpdateToast } from './ui/UpdateToast';
 import { installNetGuard } from './lib/netguard';
 import { installInputDebugLogger } from './input/debugLog';
 import './styles/global.css';
@@ -23,12 +24,22 @@ if (!rootEl) throw new Error('Root element #root not found');
 createRoot(rootEl).render(
   <StrictMode>
     <App />
+    {/* Beside App, not inside it: worker status can arrive on any screen. */}
+    <UpdateToast />
   </StrictMode>,
 );
 
 // Offline support (Phase 7). Register only in production builds — the dev server
 // must not be intercepted by a cached app shell.
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  // A page loaded without a controlling worker is a first visit (or storage was
+  // cleared): once the worker has precached the build, say that offline use is ready.
+  const firstVisit = !navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('message', (e: MessageEvent<{ type?: string }>) => {
+    if (firstVisit && e.data?.type === 'nexmap:offline-ready') {
+      window.dispatchEvent(new CustomEvent('nexmap:offline-ready'));
+    }
+  });
   window.addEventListener('load', () => {
     navigator.serviceWorker
       .register('/sw.js')

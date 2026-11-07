@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
+    "e2e:preview": "playwright test -c playwright.preview.config.ts",
     "e2e:install": "playwright install chromium",
     "typecheck": "tsc -b --noEmit",
     "gen:readme-media": "vite-node scripts/gen-readme-media.ts",
@@ -22,10 +23,10 @@
     "deploy:check": "npm run build && wrangler deploy --dry-run"
   },
   "dependencies": {
-    "dompurify": "^3.4.7",
+    "dompurify": "^3.4.17",
     "fflate": "^0.8.3",
-    "jspdf": "^2.5.2",
-    "nanoid": "^5.0.7",
+    "jspdf": "^4.2.1",
+    "nanoid": "^5.1.16",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^4.5.5"

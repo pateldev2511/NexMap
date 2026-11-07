@@ -1,19 +1,31 @@
 import { useEffect, useState } from 'react';
 
 /**
- * "A new version is available — reload" toast. The service worker can fetch a
- * newer build in the background while the app is open; without a nudge, the user
- * sits on a stale shell until a hard refresh. main.tsx dispatches the
- * `nexmap:update-available` event when an updated worker installs.
+ * Service-worker status toast. Two messages, both dispatched by main.tsx:
+ *  - `nexmap:update-available` — a newer build installed while the app is open;
+ *    without a nudge the user sits on the old build until the next reload.
+ *  - `nexmap:offline-ready` — the first visit finished caching the whole app, so
+ *    from now on NexMap opens and works without a connection. Shown once, then fades.
  */
 export function UpdateToast() {
-  const [show, setShow] = useState(false);
+  const [show, setShow] = useState<'update' | 'offline' | null>(null);
 
   useEffect(() => {
-    const onUpdate = () => setShow(true);
+    const onUpdate = () => setShow('update');
+    const onOffline = () => setShow((s) => s ?? 'offline');
     window.addEventListener('nexmap:update-available', onUpdate);
-    return () => window.removeEventListener('nexmap:update-available', onUpdate);
+    window.addEventListener('nexmap:offline-ready', onOffline);
+    return () => {
+      window.removeEventListener('nexmap:update-available', onUpdate);
+      window.removeEventListener('nexmap:offline-ready', onOffline);
+    };
   }, []);
+
+  useEffect(() => {
+    if (show !== 'offline') return;
+    const t = window.setTimeout(() => setShow(null), 6000);
+    return () => window.clearTimeout(t);
+  }, [show]);
 
   if (!show) return null;
 
@@ -39,23 +51,29 @@ export function UpdateToast() {
         color: 'var(--chrome-fg)',
       }}
     >
-      <span>A new version of NexMap is available.</span>
+      <span>
+        {show === 'update'
+          ? 'A new version of NexMap is available.'
+          : 'NexMap is ready to work offline.'}
+      </span>
+      {show === 'update' && (
+        <button
+          onClick={() => window.location.reload()}
+          style={{
+            border: 'none',
+            background: 'var(--accent)',
+            color: '#fff',
+            borderRadius: 7,
+            padding: '6px 12px',
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          Reload
+        </button>
+      )}
       <button
-        onClick={() => window.location.reload()}
-        style={{
-          border: 'none',
-          background: 'var(--accent)',
-          color: '#fff',
-          borderRadius: 7,
-          padding: '6px 12px',
-          fontWeight: 600,
-          cursor: 'pointer',
-        }}
-      >
-        Reload
-      </button>
-      <button
-        onClick={() => setShow(false)}
+        onClick={() => setShow(null)}
         aria-label="Dismiss"
         style={{
           border: 'none',

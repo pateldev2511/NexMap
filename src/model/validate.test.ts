@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { validate, resetIssueIds } from './validate';
 import { createDevice, createLink, createVlan, createSubnet, createRack } from './schema';
-import type { Device } from './types';
+import type { Device, Subnet } from './types';
+import { cidrsOverlap, ipInCidr, isValidCidr } from '@/lib/ipcidr';
 
 const LAYER = 'layer-1';
 
@@ -247,5 +248,229 @@ describe('validate — per-port IP addresses (schema v5)', () => {
       interfaces: [{ id: 'i1', name: 'Gi0/1' }, { id: 'i2', name: 'Gi0/2' }],
     });
     expect(validate({ devices: [a], links: [] })).toEqual([]);
+  });
+});
+
+describe('validate — IPv6 addresses (#30)', () => {
+  const v6 = (name: string, mgmt: string, port?: string): Device =>
+    createDevice('router', 0, 0, LAYER, {
+      name,
+      managementIp: mgmt,
+      interfaces: port ? [{ id: `${name}-i1`, name: 'Gi0/1', ip: port }] : [],
+    });
+  const codes = (devices: Device[]) => validate({ devices, links: [] }).map((i) => i.code);
+
+  it.each([':', '1:2', '1:2:3:4:5:6:7', '1::2:3:4:5:6:7:8', '2001:db8:::1'])(
+    'flags malformed IPv6 %s as an invalid IP',
+    (ip) => {
+      expect(codes([v6('R1', ip)])).toContain('invalid-ip');
+    },
+  );
+
+  it.each(['2001:db8::1', '::1', '::ffff:192.0.2.1', 'fe80::1ff:fe23:4567:890a'])(
+    'accepts well-formed IPv6 %s',
+    (ip) => {
+      expect(codes([v6('R1', ip)])).toEqual([]);
+    },
+  );
+
+  it('accepts an IPv6 address with a /0–128 prefix and rejects a bad one', () => {
+    expect(codes([v6('R1', '2001:db8::1/64')])).toEqual([]);
+    expect(codes([v6('R1', '2001:db8::1/128')])).toEqual([]);
+    expect(codes([v6('R1', '2001:db8::1/129')])).toEqual(['invalid-cidr']);
+    expect(codes([v6('R1', '1:2/64')])).toEqual(['invalid-cidr']);
+  });
+
+  it.each([
+    ['2001:db8::1', '2001:0db8:0:0:0:0:0:1'],
+    ['2001:db8::1', '2001:DB8::1'],
+    ['2001:db8::1/64', '2001:db8:0::1'],
+    ['::ffff:192.0.2.1', '::ffff:c000:201'],
+  ])('treats %s and %s as one address', (x, y) => {
+    const a = v6('R1', x);
+    const b = v6('R2', y);
+    const dup = validate({ devices: [a, b], links: [] }).find((i) => i.code === 'duplicate-ip');
+    expect(dup?.objectIds.sort()).toEqual([a.id, b.id].sort());
+    expect(dup?.address).toBe(x.replace('/64', ''));
+    expect(dup?.message).toBe(`IP ${x.replace('/64', '')} is assigned to 2 interfaces.`);
+  });
+
+  it('finds an equivalent duplicate between a port and another device', () => {
+    const a = v6('R1', '10.0.0.1', '2001:db8::a');
+    const b = v6('R2', '2001:0db8::000a');
+    const dup = validate({ devices: [a, b], links: [] }).find((i) => i.code === 'duplicate-ip');
+    expect(dup?.objectIds.sort()).toEqual([a.id, b.id].sort());
+  });
+
+  it('does not conflate an IPv4 address with its IPv4-mapped IPv6 form', () => {
+    expect(codes([v6('R1', '192.0.2.1'), v6('R2', '::ffff:192.0.2.1')])).not.toContain('duplicate-ip');
+  });
+
+  it('names an IPv6 subnet as unsupported instead of calling it invalid', () => {
+    const sn = createSubnet('2001:db8::/64');
+    const issues = validate({ devices: [], links: [], subnets: [sn] });
+    expect(issues.map((i) => [i.code, i.severity, i.objectIds])).toEqual([
+      ['ipv6-subnet-unsupported', 'info', [sn.id]],
+    ]);
+    // A malformed IPv6-looking CIDR is still just invalid.
+    expect(validate({ devices: [], links: [], subnets: [createSubnet('1:2/64')] })[0]?.code).toBe(
+      'invalid-subnet-cidr',
+    );
+  });
+});
+
+describe('validate — subnet gateways (#31)', () => {
+  const gw = (cidr: string, gateway?: string) => {
+    const sn = createSubnet(cidr, { gateway });
+    return { sn, issues: validate({ devices: [], links: [], subnets: [sn] }) };
+  };
+
+  it.each([
+    ['10.0.0.0/24', '10.0.0.1'],
+    ['10.0.0.0/24', '10.0.0.254'],
+    ['10.0.0.0/24', '10.0.0.1/24'], // a prefix on the gateway is tolerated
+    ['10.0.0.0/30', '10.0.0.2'],
+    ['10.0.0.0/31', '10.0.0.0'], // RFC 3021: both /31 addresses are hosts
+    ['10.0.0.0/31', '10.0.0.1'],
+    ['10.0.0.7/32', '10.0.0.7'], // a /32's only address
+    ['10.0.0.5/24', '10.0.0.1'], // an unmasked CIDR still names 10.0.0.0/24
+  ])('accepts %s with gateway %s', (cidr, g) => {
+    expect(gw(cidr, g).issues).toEqual([]);
+  });
+
+  it('keeps the missing-gateway finding for an empty gateway', () => {
+    expect(gw('10.0.0.0/24').issues.map((i) => i.code)).toEqual(['subnet-no-gateway']);
+    expect(gw('10.0.0.0/24', '   ').issues.map((i) => i.code)).toEqual(['subnet-no-gateway']);
+  });
+
+  it.each(['router', '10.0.0.256', '2001:db8::1'])('flags malformed gateway %s', (g) => {
+    const { sn, issues } = gw('10.0.0.0/24', g);
+    expect(issues).toEqual([
+      {
+        id: expect.any(String),
+        severity: 'error',
+        code: 'subnet-gateway-invalid',
+        message: `Gateway "${g}" on 10.0.0.0/24 is not an IPv4 address — use a host in 10.0.0.1–10.0.0.254.`,
+        objectIds: [sn.id],
+      },
+    ]);
+  });
+
+  it('flags a gateway outside its subnet', () => {
+    const { sn, issues } = gw('10.0.0.0/24', '192.0.2.1');
+    expect(issues).toEqual([
+      {
+        id: expect.any(String),
+        severity: 'warn',
+        code: 'subnet-gateway-outside',
+        message: 'Gateway 192.0.2.1 is outside 10.0.0.0/24 — use a host in 10.0.0.1–10.0.0.254.',
+        objectIds: [sn.id],
+      },
+    ]);
+    // A neighbouring /31 address and a /32 that isn't its own address are both off-subnet.
+    expect(gw('10.0.0.0/31', '10.0.0.2').issues[0]?.code).toBe('subnet-gateway-outside');
+    expect(gw('10.0.0.7/32', '10.0.0.8').issues[0]?.message).toBe(
+      'Gateway 10.0.0.8 is outside 10.0.0.7/32 — use 10.0.0.7.',
+    );
+  });
+
+  it('flags the network and broadcast addresses as unusable gateways', () => {
+    expect(gw('10.0.0.0/24', '10.0.0.0').issues.map((i) => [i.code, i.severity, i.message])).toEqual([
+      [
+        'subnet-gateway-unusable',
+        'warn',
+        'Gateway 10.0.0.0 is the network address of 10.0.0.0/24 — use a host in 10.0.0.1–10.0.0.254.',
+      ],
+    ]);
+    expect(gw('10.0.0.0/30', '10.0.0.3').issues.map((i) => i.message)).toEqual([
+      'Gateway 10.0.0.3 is the broadcast address of 10.0.0.0/30 — use a host in 10.0.0.1–10.0.0.2.',
+    ]);
+  });
+
+  it('does not judge the gateway of an invalid subnet', () => {
+    expect(gw('10.0.0.0/33', 'router').issues.map((i) => i.code)).toEqual(['invalid-subnet-cidr']);
+  });
+});
+
+describe('validate — subnet overlap at scale (#43)', () => {
+  /** The original pairwise rule, kept as the reference the sweep must match exactly. */
+  function naiveOverlaps(subnets: Subnet[]) {
+    const out: string[] = [];
+    for (let i = 0; i < subnets.length; i++) {
+      for (let j = i + 1; j < subnets.length; j++) {
+        const a = subnets[i]!;
+        const b = subnets[j]!;
+        if (isValidCidr(a.cidr) && isValidCidr(b.cidr) && cidrsOverlap(a.cidr, b.cidr)) {
+          out.push(`Subnets ${a.cidr} and ${b.cidr} overlap.|${a.id},${b.id}`);
+        }
+      }
+    }
+    return out;
+  }
+  const overlaps = (subnets: Subnet[]) =>
+    validate({ devices: [], links: [], subnets })
+      .filter((i) => i.code === 'overlapping-subnet')
+      .map((i) => `${i.message}|${i.objectIds.join(',')}`);
+
+  it('reports every nested, duplicate and same-network overlap, in the original order', () => {
+    const subnets = [
+      createSubnet('10.0.0.0/8'),
+      createSubnet('10.1.0.0/16'),
+      createSubnet('10.1.2.0/24'),
+      createSubnet('10.1.2.0/24'), // duplicate
+      createSubnet('10.1.2.5/24'), // same network, unmasked text
+      createSubnet('192.168.0.0/24'),
+      createSubnet('not a cidr'),
+      createSubnet('10.1.2.128/25'),
+      createSubnet('0.0.0.0/0'), // overlaps everything valid
+      createSubnet('192.168.1.0/24'),
+      createSubnet('10.1.2.0/32'),
+    ];
+    expect(overlaps(subnets)).toEqual(naiveOverlaps(subnets));
+    expect(overlaps(subnets).length).toBeGreaterThan(20);
+  });
+
+  it('matches the pairwise rule on random plans', () => {
+    let seed = 7;
+    const rnd = (n: number) => {
+      seed = (seed * 1103515245 + 12345) % 2 ** 31;
+      return seed % n;
+    };
+    for (let round = 0; round < 25; round++) {
+      const subnets = Array.from({ length: 60 }, () =>
+        createSubnet(`10.${rnd(4)}.${rnd(8)}.${rnd(4) * 64}/${[8, 16, 22, 24, 26, 30, 32][rnd(7)]}`),
+      );
+      expect(overlaps(subnets)).toEqual(naiveOverlaps(subnets));
+    }
+  });
+
+  it('re-validates an unchanged plan to the same findings with fresh ids', () => {
+    const subnets = [createSubnet('10.0.0.0/16'), createSubnet('10.0.1.0/24', { gateway: 'x' })];
+    resetIssueIds();
+    const first = validate({ devices: [], links: [], subnets });
+    resetIssueIds();
+    const again = validate({ devices: [], links: [], subnets: [...subnets] });
+    expect(again).toEqual(first);
+    // Editing a subnet in place (same object, new text) is never served stale.
+    subnets[1]!.gateway = '10.0.1.1';
+    expect(validate({ devices: [], links: [], subnets }).map((i) => i.code)).toEqual([
+      'subnet-no-gateway',
+      'overlapping-subnet',
+    ]);
+  });
+
+  it('places addresses with the same verdict as the per-subnet membership test', () => {
+    const subnets = [
+      createSubnet('10.0.0.0/24'),
+      createSubnet('10.0.0.128/25'),
+      createSubnet('172.16.0.0/12'),
+      createSubnet('bogus'),
+    ];
+    const ips = ['10.0.0.1', '10.0.0.200', '10.0.1.1', '172.31.255.255', '172.32.0.0', '9.255.255.255'];
+    const devices = ips.map((ip) => dev(ip, ip));
+    const outside = validate({ devices, links: [], subnets })
+      .filter((i) => i.code === 'ip-outside-subnet')
+      .map((i) => i.message.split(' ')[0]);
+    expect(outside).toEqual(ips.filter((ip) => !subnets.some((s) => ipInCidr(ip, s.cidr))));
   });
 });

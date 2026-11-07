@@ -128,8 +128,12 @@
   display: flex;
   gap: 5px;
   min-width: 0;
-  justify-content: flex-end;
   align-items: center;
+  /* Right-aligned by the first child's auto margin, NOT justify-content: flex-end.
+     In a scroll container, flex-end pushes overflow off the START edge, where it
+     can never be scrolled to (New/Open/Save ended up at negative x on phones). An
+     auto margin collapses to 0 when space runs out, so overflow goes to the end and
+     the strip scrolls. */
   /* This child SHRINKS (min-width 0) while its buttons don't (flex 0 0 auto),
      so it must contain its own overflow at EVERY width — not just below the
      breakpoints. Without this, wider font metrics (Linux) made the buttons
@@ -144,13 +148,34 @@
   display: none;
 }
 
-/* When the topbar gets tight, collapse action buttons to icons (tooltips remain)
-   so they never overlap. The More trigger (a plain .topbarBtn) collapses too;
-   its aria-label keeps the accessible name stable regardless of the span. */
-@media (max-width: 1240px) {
-  .topbarActions > .topbarBtn span {
-    display: none;
-  }
+.topbarActions > :first-child {
+  margin-inline-start: auto;
+}
+
+/* Fade whichever edge has more buttons beyond it (set by AppShell), so a strip
+   that scrolls looks like one. */
+.topbarActions[data-more-start='true'] {
+  mask-image: linear-gradient(90deg, transparent, #000 28px);
+}
+.topbarActions[data-more-end='true'] {
+  mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+}
+.topbarActions[data-more-start='true'][data-more-end='true'] {
+  mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+}
+
+/* When the labelled buttons don't fit, ActionStrip sets data-compact and they show
+   icons only (tooltips remain). Labels are hidden visually, not with display:none,
+   so each button keeps its short accessible name ("New", "Save") instead of
+   falling back to its tooltip ("New project (Alt+N)"). Out of flow, so the flex
+   gap ignores them. */
+.topbarActions[data-compact='true'] > .topbarBtn span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .topbarBtn {
@@ -425,6 +450,40 @@ select.topbarBtn {
 }
 
 @media (max-width: 640px) {
+  /* Phones: the actions get a full-width second row instead of the few pixels
+     left beside the brand, title and panel toggles. */
+  .shell {
+    --topbar-h: 84px;
+  }
+
+  .topbar {
+    flex-wrap: wrap;
+    align-content: center;
+    row-gap: 2px;
+  }
+
+  .topbarSpacer {
+    display: none;
+  }
+
+  .topbarActions {
+    order: 1;
+    flex: 1 0 100%;
+  }
+
+  .panelToggles {
+    margin-inline-start: auto;
+  }
+
+  .panelToggles .topbarBtn span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
   .brand {
     font-size: 13px;
   }
