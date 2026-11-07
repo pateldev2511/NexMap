@@ -1,215 +1,180 @@
-# NexMap
+<p align="center">
+  <a href="https://nexmap.xyz/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/brand/nexmap-lockup-dark.svg">
+      <img alt="NexMap" src="docs/brand/nexmap-lockup-light.svg" width="380">
+    </picture>
+  </a>
+</p>
 
-**NexMap is a local-first network infrastructure designer that validates your
-diagram while you draw it.**
+<h3 align="center">Draw your network. NexMap checks it while you draw.</h3>
 
-**▶ Try it live: [nexmap.xyz](https://nexmap.xyz/)** — runs entirely in your
-browser, no login, nothing leaves your device.
+<p align="center">
+  A free network and server-rack designer that runs in your web browser.<br>
+  No sign-up, no install, and your work never leaves your computer.
+</p>
 
-It runs in the browser, has no login, and keeps project data on the user's
-machine through IndexedDB and `.nexmap` files. The long-term goal is an open
-source alternative to heavyweight network diagramming tools: fast enough for
-daily design work, structured enough for real infrastructure documentation, and
-pleasant enough to present.
+<p align="center">
+  <a href="https://nexmap.xyz/"><b>▶ Open NexMap</b></a> ·
+  <a href="docs/guide/getting-started.md">Getting started</a> ·
+  <a href="docs/README.md">User guide</a> ·
+  <a href="docs/guide/faq.md">FAQ</a>
+</p>
 
-> **Project status:** work in progress. NexMap is feature-rich, but it is not a
-> stable release yet. Expect UI polish gaps, changing file/schema details, missing
-> contributor docs, and rough edges around advanced workflows.
+<p align="center">
+  <a href="https://nexmap.xyz/"><img alt="Live at nexmap.xyz" src="https://img.shields.io/badge/live-nexmap.xyz-2f6bff?style=flat-square"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-0bb4d4?style=flat-square"></a>
+  <img alt="Works offline" src="https://img.shields.io/badge/works-offline-7a5cff?style=flat-square">
+  <img alt="No account needed" src="https://img.shields.io/badge/account-not%20needed-555555?style=flat-square">
+</p>
 
-[![NexMap — local-first network diagram designer](public/og.png)](https://nexmap.xyz/)
+<p align="center">
+  <img src="docs/assets/screens/network.jpg" alt="The NexMap Network Designer: a device library on the left, a branch-office network diagram in the middle, and the selected PC's details on the right" width="100%">
+</p>
 
-## Demo
+## What is NexMap?
 
-The editor renders the same model in a flat 2D view and an isometric 3D view. The
-loop below is generated straight from NexMap's own export pipeline (a real starter
-template, no mockups) — flat device-model icons in 2D, true 3D models on an
-isometric stage. Regenerate it any time with `npm run gen:readme-media`.
+NexMap is like a drawing app made for networks. You drag in routers,
+switches, Wi-Fi access points, computers and servers, connect them with
+lines, and you have a clear picture of how everything is wired together.
 
-![NexMap flat ↔ isometric demo](docs/assets/nexmap-demo.gif)
+What makes it different is that **NexMap understands what you draw**. As you
+work, it quietly checks your design and points out real problems, such as two
+devices sharing the same address, a network that has no way out to the
+internet, or a single cable that would take everything down if it failed. You
+don't need to know what to look for; NexMap tells you, and usually offers to
+fix it.
 
-| Flat (2D) | Isometric (3D) |
+It can also plan the **physical** side: which shelf of a server rack each box
+goes in, which port each cable plugs into, and whether the power supply can
+take the load.
+
+## Who is it for?
+
+- **Anyone setting up a home or small-office network** who wants to see it
+  clearly and get it right the first time.
+- **IT staff and network engineers** documenting real infrastructure, from a
+  branch office to a data center.
+- **Students and teachers** learning how networks fit together.
+- **Consultants and installers** who need a clean diagram, an installation
+  sheet and a parts list to hand over.
+
+## Try it in three steps
+
+1. **Open [nexmap.xyz](https://nexmap.xyz/)** in any modern browser and choose
+   **Network Designer**.
+2. **Pick a starting point**: a blank page, or one of 18 ready-made examples such as
+   *Home Wi-Fi*, *Small office* or *Three-tier campus*.
+3. **Drag, connect and fix.** Drag devices from the library on the left,
+   connect them, and watch the **Validation** tab at the bottom tell you what
+   needs attention.
+
+That's it: no account, nothing to install. NexMap saves your work in your
+browser as you go, and you can save a copy to your computer at any time.
+
+➡️ The **[Getting started guide](docs/guide/getting-started.md)** walks
+through your first diagram with pictures.
+
+## A quick tour
+
+### It checks your work as you draw
+
+Mistakes show up in the **Validation** tab as you make them. Click one and
+NexMap takes you straight to the field that needs fixing, explains what's
+wrong, and suggests the right value. Many problems can be fixed in one click.
+
+<p align="center">
+  <img src="docs/assets/screens/validation-fix.jpg" alt="A validation finding opened in the IP Plan: the gateway field is outlined in red with a note saying the address is outside the subnet and which addresses would work" width="90%">
+</p>
+
+### Stress-test it: what if something breaks?
+
+Turn on **Stress-test** and click any device to "unplug" it. NexMap shows
+instantly what loses its connection, and what keeps working through a
+backup path. Click it again to plug it back in.
+
+<p align="center">
+  <img src="docs/assets/screens/stress-test.jpg" alt="Stress-test mode: the core switch is failed and seven devices below it turn red, with a message saying seven devices are isolated" width="90%">
+</p>
+
+### See it flat or in 3D
+
+Switch between a clean flat diagram and a 3D (isometric) view with one
+click: same design, two ways to present it.
+
+<p align="center">
+  <img src="docs/assets/nexmap-demo.gif" alt="The same network switching between the flat view and the 3D view" width="80%">
+</p>
+
+### Plan the server rack too
+
+The **Rack Designer** shows real-looking equipment in real racks. Mount gear
+at any height, plug cables port to port, check that power and space add up,
+and export an installation packet for whoever does the work.
+
+<p align="center">
+  <img src="docs/assets/screens/rack.jpg" alt="The Rack Designer showing a 42U rack filled with switches, firewalls, servers, storage and UPS units drawn like the real hardware" width="90%">
+</p>
+
+### Bring your data in, take results out
+
+- **Import** spreadsheets (CSV), diagrams from draw.io and GraphML, network
+  scans (Nmap) and NetBox exports.
+- **Export** a picture (PNG, JPG, SVG), a PDF, an interactive web page, device
+  and cable lists (CSV), or a complete ZIP handoff package.
+
+## Your data stays yours
+
+NexMap is built to be private by design:
+
+- **No account, no login, no tracking.**
+- **Nothing is uploaded.** Your designs are saved in your browser and in files
+  on your own computer. The app even blocks itself from sending data anywhere.
+- **Works offline.** After your first visit, NexMap opens and works without an
+  internet connection.
+- **Free and open source** under the [MIT license](LICENSE).
+
+> [!TIP]
+> Browser storage can be wiped if you clear your browsing data. For anything
+> you care about, use **Save** to keep a `.nexmap` file on your computer.
+
+## Learn more
+
+| | |
 | --- | --- |
-| ![Flat view](docs/assets/nexmap-screenshot.svg) | ![Isometric view](docs/assets/nexmap-iso.svg) |
+| 🚀 [Getting started](docs/guide/getting-started.md) | Your first diagram, step by step |
+| 🗺️ [The Network Designer](docs/guide/network-designer.md) | Every part of the screen, explained |
+| ✅ [Checking your design](docs/guide/checking-your-design.md) | Validation, health, rules and stress-testing |
+| 🗄️ [The Rack Designer](docs/guide/rack-designer.md) | Racks, gear, cables and power |
+| 🔁 [Import and export](docs/guide/import-export.md) | Every file type NexMap reads and writes |
+| 💾 [Saving, privacy and offline](docs/guide/saving-and-privacy.md) | Where your work lives and how to keep it safe |
+| ⌨️ [Keyboard shortcuts](docs/guide/shortcuts.md) | Work faster |
+| 📖 [Glossary](docs/guide/glossary.md) | Networking words in plain English |
+| ❓ [FAQ](docs/guide/faq.md) | Quick answers |
 
-## Current State
+## For developers
 
-NexMap already has the core of a usable local network designer:
-
-- **Canvas editing:** drag/drop device library (icons track the active view), pan/zoom,
-  marquee select, lasso, smart snap/alignment guides, grouping, lock/unlock, z-order,
-  copy/cut/paste, keyboard nudge, context menus, resize handles, and undo/redo. Moving a
-  group carries its connectors rigidly (bends and all) when both endpoints move.
-- **Pointer-native input:** one unified gesture core drives mouse, trackpad, pen, and
-  touch — wheel-pan or wheel-zoom (configurable), pinch-to-zoom, two-finger pan, and a
-  survivor-keeps-panning multitouch model. Double-click empty canvas to quick-create a
-  device at the point; a "quiet canvas" fades chrome once you're heads-down and a floating
-  selection toolbar puts the common actions right by the selection.
-- **Annotations & callouts:** movable rich-text callout boxes (heading / subheading /
-  body with **bold**, *italic*, `code`, bullet/numbered lists, and alignment) connected to
-  any device by an editable colored dotted leader line — drag the anchor handle onto a
-  target or use the toolbar. Callouts render in flat, isometric, and every export.
-- **Connectors:** semantic links (VLAN/trunk, LACP, circuit IDs, interfaces), drag-to-relink
-  endpoints, waypoints, straight/orthogonal routing, manual color, and a thickness slider.
-- **Flat + isometric rendering:** toggle between 2D and isometric view without
-  changing the canonical flat model. Flat mode uses detailed flat device-model
-  icons; isometric mode renders true 3D models on a lit stage with grounded
-  shadows and cable-on-floor connectors, and an animated tilt plays on switch.
-  Both projections cover grid, upright labels, hit testing, editing, and export.
-- **Component detail:** FossFLOW-style floating info cards above each node (name +
-  rich-text description), inline rename on canvas, vendor/model/role combo fields
-  with presets, and per-node icon-size / label-height controls.
-- **Starter templates:** 18 one-click templates on the start screen, grouped into
-  Home & small office (Wi-Fi, mesh, smart home, home office, gaming, home lab,
-  apartment) and Enterprise & data center (branch, three-tier campus, DMZ, data
-  center rack, WAN hub-and-spoke, HA core, hybrid cloud, wireless campus).
-- **Network model:** typed devices, links, text notes, shapes/zones, image/SVG
-  underlays, VLANs, subnets, racks, layers, saved views, and `.nexmap` documents.
-- **Validation:** duplicate IP/name, invalid IP/CIDR, missing link endpoints,
-  overlapping subnets, VLAN range/duplicates, IP outside subnet, missing gateway,
-  trunk/access mismatch, orphaned devices, and rack RU collisions/overflow.
-- **Import:** CSV devices/links/IP plans/VLANs, GraphML, uncompressed draw.io XML,
-  topology JSON, NetBox-style JSON/CSV flows, Nmap XML, image underlays, and
-  sanitized SVG underlays. Imports preview before commit and undo as one action.
-- **Export:** PNG, JPG, SVG, PDF, inventory CSV, links CSV, and ZIP packages with
-  `.nexmap`, renders, CSVs, and validation reports. Export can honor the current
-  isometric projection.
-- **Local persistence:** IndexedDB autosave, recovery dialog, Web Locks
-  single-writer protection, File System Access save/open when supported, download
-  fallback elsewhere, offline/PWA shell, and settings for theme/connect behavior.
-- **Rack designer:** a dedicated elevation editor with realistic per-vendor faceplate
-  art (Cisco/Arista/Juniper switches, Dell/HPE servers, APC UPS, Panduit patch panels,
-  firewalls, PDUs) plus a parametric fallback for everything else; single-rack and
-  side-by-side row views, front/rear faces, drag-to-mount at any U, port-to-port cabling
-  with color and labels, and PNG/PDF/CSV cable-schedule export. Push device names off the
-  faceplates into a callout column with **Annotate all**, **Hide names**, and generated
-  **title block** / **legend** blocks for document-grade elevations.
-- **Tooltips:** a body-level tooltip singleton that can't be clipped by scroll
-  containers, covering the toolbars, zoom clusters, dialogs, and canvas affordances.
-- **Polish already underway:** auto-layout, canvas search, alignment/distribution,
-  presentation/read-only mode, responsive shell, keyboard shortcuts, light/dark themes,
-  and an error boundary around the canvas.
-
-## What Is Not Ready Yet
-
-These are the main reasons the project should still be treated as WIP:
-
-- No stable release process or published package yet.
-- Project governance is still informal. The [contributor guide](CONTRIBUTING.md),
-  [security policy](SECURITY.md), [code of conduct](CODE_OF_CONDUCT.md) and issue
-  templates are in place.
-- File format/schema may still evolve before a stable `1.0`; the current shape and
-  its compatibility rules are in [`docs/FORMAT.md`](docs/FORMAT.md).
-- Advanced routing is still basic; obstacle avoidance and cable tracing are
-  future work.
-- Browser/E2E coverage is still lighter than the unit coverage.
-- Accessibility, mobile/tablet ergonomics, and large-diagram performance still
-  need more real-user testing.
-
-## Architecture
-
-![NexMap architecture](docs/assets/nexmap-architecture.svg)
-
-```mermaid
-flowchart LR
-  UI["React UI\ncanvas, panels, dialogs"] --> Store["Zustand store\nsingle writer"]
-  Store --> History["Command history\nundo / redo"]
-  Store --> Model["Typed model\n.nexmap document"]
-  Model --> Validate["Validation engine"]
-  Model --> Render["SVG renderer\nflat or isometric"]
-  Import["Import parsers\nCSV / GraphML / draw.io / JSON / Nmap / media"] --> Store
-  Model --> Export["Export pipeline\nPNG / JPG / SVG / PDF / CSV / ZIP"]
-  Store --> Persistence["Local persistence\nIndexedDB / File System Access / Web Locks"]
-  Persistence --> Files["Local .nexmap files"]
-```
-
-```mermaid
-flowchart TD
-  Draw["Draw or import topology"] --> Edit["Edit devices, links, layers, views"]
-  Edit --> Validate["Validate while editing"]
-  Validate --> Fix["Fix warnings/errors"]
-  Fix --> Present["Present in flat or isometric view"]
-  Present --> Export["Export image, PDF, CSV, ZIP, or .nexmap"]
-```
-
-## Quick Start
+NexMap is a React + TypeScript app with no backend. To run it locally:
 
 ```bash
 npm install
-npm run dev        # Vite dev server, usually http://localhost:5173
-npm test           # Vitest unit tests
-npm run typecheck  # TypeScript project check
-npm run lint       # ESLint
-npm run build      # production build
+npm run dev
 ```
 
-If port `5173` is busy, Vite will choose another local port.
+Then open the address it prints (usually http://localhost:5173).
+**[DEVELOPING.md](docs/DEVELOPING.md)** covers the architecture, tests,
+deployment and project layout, and **[CONTRIBUTING.md](CONTRIBUTING.md)** explains how to
+send a change. The file format is documented in
+[`docs/FORMAT.md`](docs/FORMAT.md).
 
-## Deploy (Cloudflare)
+## Project status
 
-NexMap builds to a static SPA, so it hosts as plain assets — there is no backend,
-no database, and no stored or synced project data on the server. It deploys to
-both Cloudflare Workers (Static Assets) and Cloudflare Pages. The live instance
-runs at [nexmap.xyz](https://nexmap.xyz/).
-
-```bash
-npm run deploy:check     # build + wrangler dry-run (validate, no upload)
-npm run deploy:workers   # build + deploy to Cloudflare Workers  (*.workers.dev)
-npm run deploy:pages     # build + deploy to Cloudflare Pages     (*.pages.dev)
-```
-
-The first deploy prompts `wrangler login` (one-time OAuth). Config lives in
-`wrangler.toml` (assets-only). The SPA fallback is handled by
-`not_found_handling = "single-page-application"` there — not by a `_redirects`
-rule, which Cloudflare's asset validator rejects as a loop. Caching and security
-headers come from `public/_headers`, which Vite copies into `dist/`.
-
-For Pages via the dashboard instead of the CLI: build command `npm run build`,
-output directory `dist`.
-
-## Project Layout
-
-```text
-src/
-  model/        pure types, schema, migrations, validation
-  store/        Zustand store, command history, single-writer model updates
-  canvas/       SVG canvas, flat/iso projection, gestures, toolbar, rendering
-  io/           import and export pipelines
-  persistence/ IndexedDB drafts, File System Access, Web Locks, recovery
-  lib/          CSV, IP/CIDR, spatial index, layout, geometry helpers
-  ui/           shell, sidebars, inspector, bottom panels, dialogs
-scripts/        documentation media generation (real renders via the export pipeline)
-docs/assets/    README visuals and generated documentation media
-```
-
-## Data And Privacy
-
-NexMap is designed to be local-first:
-
-- No account system.
-- No required backend.
-- No hidden cloud sync.
-- Autosaves live in browser storage.
-- Durable project files are saved as `.nexmap` JSON on the user's machine.
-
-Clearing browser data can remove autosaved drafts. Export or save a `.nexmap`
-file when the project matters.
-
-## Roadmap
-
-The detailed roadmap lives in [`TODOS.md`](TODOS.md). Near-term open-source work
-should focus on:
-
-- release notes and a stable release process;
-- better connector routing and cable tracing;
-- word-level rich-text editing and swatch chips in callout legends;
-- guided discovery import;
-- performance and accessibility passes on large diagrams.
-
-## Tech Stack
-
-React 18, TypeScript, Vite, Zustand, Vitest, SVG rendering, IndexedDB, File System
-Access API where available, Web Locks, fflate, DOMPurify, and jsPDF.
+NexMap is under active development and hasn't reached version 1.0 yet. It's
+already usable for real work, but expect some rough edges, and the file format
+may still change (older files are always upgraded when opened). Found a
+problem or have an idea? [Open an issue](https://github.com/pateldev2511/NexMap/issues).
+See [SECURITY.md](SECURITY.md) to report a security problem privately.
 
 ## License
 
-See [`LICENSE`](LICENSE).
+[MIT](LICENSE) © 2026 Dev

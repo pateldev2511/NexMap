@@ -13,6 +13,15 @@ the cables down to the hardware, with a user control to dial the motion.
 
 ### Added
 
+- **A new logo: the routed N.** The letter N drawn as one network cable through
+  two nodes, with a signal on the link. It's the app icon, the favicon, the
+  home-screen icon and the link preview, and in the app the cable draws itself
+  in and the signal travels along it (still under reduced motion). The brand
+  guide and every asset live in `docs/brand/`.
+- **A user guide anyone can follow.** The README now explains NexMap in plain
+  language with real screenshots, and `docs/guide/` walks through getting
+  started, both designers, checking a design, import/export, saving and
+  privacy, shortcuts, a glossary of networking terms and an FAQ.
 - **Findings open the field to fix.** Click a validation finding, or Tab to it and
   press Enter. A bad subnet CIDR or gateway opens the IP Plan with that field
   focused and marked until it's fixed. A duplicate IP lists every device and port
@@ -771,6 +780,12 @@ the cables down to the hardware, with a user control to dial the motion.
 - Refreshed brand assets: new app icon, Open Graph image, and theme color.
 
 ### Fixed
+
+- **Every canvas tool is reachable on a phone.** The floating canvas toolbar
+  was wider than a phone screen and cut off at both ends, hiding Select and
+  Lasso. It now fits the screen and scrolls sideways.
+- **The Export dialog's options line up again.** The "Highlight risks" row was
+  missing its label, which pushed it and the Filename row out of alignment.
 
 **Files, drafts and tabs**
 

@@ -21,41 +21,43 @@ NexMap must never make a network request for application or project data.
 
 ## Development
 
-Requires Node 22+.
+Requires Node 22+. [`docs/DEVELOPING.md`](docs/DEVELOPING.md) has every
+script, the architecture and the project layout.
 
 ```bash
 npm install
 npm run dev         # Vite dev server, http://localhost:5173
-npm test            # Vitest unit tests
-npm run lint        # ESLint
-npm run typecheck   # TypeScript project check
-npm run build       # production build (tsc -b && vite build)
 ```
 
-The dev server intentionally disables the CSP meta and the netguard so Vite HMR
-works. To exercise the real local-first enforcement, run a production build
-(`npm run build && npm run preview`).
+The dev server intentionally disables the CSP meta, the netguard and the
+service worker so Vite HMR works. To exercise the real local-first enforcement
+and offline support, run a production build (`npm run build && npm run preview`)
+and `npm run e2e:preview`.
 
 ## Before you open a PR
 
 Run the same gates CI runs — all must pass:
 
 ```bash
-npm run lint && npm test && npm run build
+npm run lint && npm test && npm run build && npm run e2e && npm run e2e:preview
 ```
 
 - Add or update tests for any logic change (we prefer too many tests to too few).
 - Keep the diff focused; one logical change per PR.
 - Match the existing code style — Prettier + ESLint are configured
   (`npm run format` applies Prettier).
+- If you change the UI, refresh the guide's pictures with
+  `npm run docs:screenshots` (with `npm run dev` running) and check the guide in
+  [`docs/guide/`](docs/guide/) still describes it.
 - Update `CHANGELOG.md` under `## [Unreleased]` for user-facing changes.
 
 ## Project layout
 
-See the "Project Layout" section in [`README.md`](README.md). In short:
+See [`docs/DEVELOPING.md`](docs/DEVELOPING.md#project-layout). In short:
 `model/` (types, schema, validation), `store/` (Zustand + command history),
-`canvas/` (SVG rendering, flat/iso projection), `io/` (import/export),
-`persistence/` (IndexedDB / File System Access / Web Locks), `ui/`, `lib/`.
+`canvas/` (SVG rendering, projections), `rack/` (Rack Designer), `io/`
+(import/export), `persistence/` (IndexedDB / File System Access / Web Locks),
+`ui/`, `lib/`.
 
 ## Commit messages
 
