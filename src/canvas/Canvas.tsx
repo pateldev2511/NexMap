@@ -69,6 +69,7 @@ import {
 import { isoProjectPx, isoUnprojectPx, type IsoTile } from './iso';
 import type { Box } from '@/lib/spatial-index';
 import { noteCanvasCopy } from '@/io/import/canvasClipboard';
+import { exportInventoryCsv } from '@/io/export/csvExport';
 import { registerPasteCanvas } from '@/io/import/usePasteToCanvas';
 import styles from './Canvas.module.css';
 
@@ -79,6 +80,16 @@ import styles from './Canvas.module.css';
  * marquee, resize, and link rubber-banding. Wrapped because setPointerCapture
  * throws on an already-released pointer.
  */
+/**
+ * After a canvas copy/cut: put the copied devices on the system clipboard as an
+ * inventory CSV (useful pasted into a spreadsheet; it also marks the clipboard as
+ * this canvas's own, see io/import/canvasClipboard). Shapes-only copies get the
+ * plain marker.
+ */
+function markCanvasCopy(devices: Device[]): void {
+  noteCanvasCopy(devices.length > 0 ? exportInventoryCsv(devices) : undefined);
+}
+
 function capturePointer(el: Element | null, pointerId: number): void {
   try {
     el?.setPointerCapture(pointerId);
@@ -415,13 +426,13 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       // event decides internal vs. external CSV/image (usePasteToCanvas, #52).
       if (mod && (e.key === 'c' || e.key === 'C')) {
         store().copySelection();
-        if (store().hasClipboard()) noteCanvasCopy();
+        if (store().hasClipboard()) markCanvasCopy(store().clipboardDevices());
         return true;
       }
       if (mod && (e.key === 'x' || e.key === 'X')) {
         store().cutSelection();
         store().runValidation();
-        if (store().hasClipboard()) noteCanvasCopy();
+        if (store().hasClipboard()) markCanvasCopy(store().clipboardDevices());
         return true;
       }
       if (mod && (e.key === 'g' || e.key === 'G')) {
@@ -1426,7 +1437,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
               shortcut: '⌘C',
               onClick: () => {
                 s.copySelection();
-                if (s.hasClipboard()) noteCanvasCopy();
+                if (s.hasClipboard()) markCanvasCopy(s.clipboardDevices());
               },
             },
             {
@@ -1435,7 +1446,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
               onClick: () => {
                 s.cutSelection();
                 s.runValidation();
-                if (s.hasClipboard()) noteCanvasCopy();
+                if (s.hasClipboard()) markCanvasCopy(s.clipboardDevices());
               },
             },
             {

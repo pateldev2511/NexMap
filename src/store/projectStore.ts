@@ -739,6 +739,8 @@ export interface ProjectStore {
   cutSelection(): void;
   paste(): void;
   hasClipboard(): boolean;
+  /** Devices on the canvas clipboard (copy or cut), for the system-clipboard text. */
+  clipboardDevices(): Device[];
   /** Toggle locked on selected devices (one undoable entry). */
   toggleLockSelection(): void;
   /** Move unlocked selected devices by a delta as one undoable entry. */
@@ -2960,6 +2962,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     hasClipboard() {
       return clipboard.length > 0 || (cutPayload?.links.length ?? 0) > 0;
+    },
+
+    clipboardDevices() {
+      return clipboard.filter((m): m is Device => m.kind === 'device');
     },
 
     paste() {

@@ -71,7 +71,7 @@ describe('pasteSource — internal vs. external', () => {
 
 describe('the copy marker', () => {
   it('a canvas copy arms the next native copy event to write it', () => {
-    noteCanvasCopy(1000);
+    noteCanvasCopy(undefined, 1000);
     const set = new Map<string, string>();
     const dt = { ...clip({}), setData: (t: string, v: string) => void set.set(t, v) };
     const e = new Event('copy', { cancelable: true }) as ClipboardEvent;
@@ -87,8 +87,26 @@ describe('the copy marker', () => {
     expect(e2.defaultPrevented).toBe(false);
   });
 
+  it('a copy with devices writes their CSV, which this tab still pastes as its own copy', () => {
+    const csv = 'name,type\nedge-rtr,Router';
+    noteCanvasCopy(csv, 1000);
+    const set = new Map<string, string>();
+    const e = new Event('copy', { cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(e, 'clipboardData', {
+      value: { ...clip({}), setData: (t: string, v: string) => void set.set(t, v) },
+    });
+    expect(writeMarkerOnEvent(e, 1010)).toBe(true);
+    expect(set.get('text/plain')).toBe(csv);
+    // Same text back (even without the custom type) → the full-fidelity internal paste.
+    expect(pasteSource(clip({ 'text/plain': `${csv}\n` }), true)).toEqual({ kind: 'internal' });
+    // Different text copied since → imported.
+    const other = 'name,type\nother,Switch';
+    expect(pasteSource(clip({ 'text/plain': other }), true)).toEqual({ kind: 'text', text: other });
+    noteCanvasCopy(undefined, 2000);
+  });
+
   it('a stale arm (no copy event followed) expires', () => {
-    noteCanvasCopy(1000);
+    noteCanvasCopy(undefined, 1000);
     const e = new Event('copy', { cancelable: true }) as ClipboardEvent;
     Object.defineProperty(e, 'clipboardData', { value: { ...clip({}), setData: () => {} } });
     expect(writeMarkerOnEvent(e, 5000)).toBe(false);

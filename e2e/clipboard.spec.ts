@@ -104,14 +104,19 @@ test('copy a device, copy CSV elsewhere, paste → the CSV wins (#52)', async ({
   expect((await counts(page)).devices).toBe(11); // the CSV row, not a device clone
 });
 
-test('copy a device, paste → an internal paste, the clipboard says so (#52)', async ({ page }) => {
+test('copy a device, paste → an internal paste; the clipboard holds its CSV (#52)', async ({ page }) => {
   await openBranchOffice(page);
   await selectOneDevice(page);
+  const name = await page.evaluate(() => {
+    const s = (window as unknown as NexWindow).__nexmap.getState();
+    return s.devicesAll()[2]!.name;
+  });
   await page.keyboard.press('ControlOrMeta+c');
-  // The system clipboard now holds NexMap's marker, not stale text.
+  // The system clipboard now holds the copied device as inventory CSV (useful in a
+  // spreadsheet), not stale text, and NexMap still recognizes it as its own copy.
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-    .toContain('NexMap selection');
+    .toMatch(new RegExp(`^name,type,[^\\n]*\\n${name},`));
   await page.keyboard.press('ControlOrMeta+v');
   await expect.poll(async () => (await counts(page)).devices).toBe(11);
 });

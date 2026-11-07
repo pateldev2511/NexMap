@@ -22,8 +22,14 @@
 
 /** Custom clipboard type carried alongside the text marker when the browser allows it. */
 export const MARKER_TYPE = 'application/x-nexmap-selection';
-/** What the marker reads like if it's pasted somewhere else. */
+/**
+ * The marker's text when the copy has no devices (only shapes or callouts). A copy
+ * with devices writes them as an inventory CSV instead, which is useful pasted into
+ * a spreadsheet and imports as devices into another NexMap tab.
+ */
 export const MARKER_TEXT = 'NexMap selection (paste it onto a NexMap canvas)';
+/** The exact text this tab last wrote, so its own paste is recognized as internal. */
+let lastText = MARKER_TEXT;
 
 /** A canvas copy arms the native copy/cut event that follows it for this long. */
 const ARM_MS = 1000;
@@ -40,11 +46,12 @@ function copyingPageText(): boolean {
  * native event write and starts the async one. Steps aside when the user has page
  * text selected — their text copy wins the system clipboard.
  */
-export function noteCanvasCopy(now: number = performance.now()): void {
+export function noteCanvasCopy(text: string = MARKER_TEXT, now: number = performance.now()): void {
   if (copyingPageText()) return;
   armedAt = now;
+  lastText = text;
   try {
-    void navigator.clipboard?.writeText(MARKER_TEXT).catch(() => {
+    void navigator.clipboard?.writeText(text).catch(() => {
       /* refused (no permission / focus): the native event or the fallback covers it */
     });
   } catch {
@@ -61,7 +68,7 @@ export function writeMarkerOnEvent(e: ClipboardEvent, now: number = performance.
   if (now - armedAt > ARM_MS) return false;
   armedAt = Number.NEGATIVE_INFINITY;
   if (!e.clipboardData || copyingPageText()) return false;
-  e.clipboardData.setData('text/plain', MARKER_TEXT);
+  e.clipboardData.setData('text/plain', lastText);
   try {
     e.clipboardData.setData(MARKER_TYPE, '1');
   } catch {
@@ -86,7 +93,9 @@ export type PasteSource =
 
 /** Whether this clipboard holds the canvas's own marker. */
 export function isCanvasMarker(dt: ClipboardDataLike): boolean {
-  return dt.types.includes(MARKER_TYPE) || dt.getData('text/plain').trim() === MARKER_TEXT;
+  if (dt.types.includes(MARKER_TYPE)) return true;
+  const text = dt.getData('text/plain').trim();
+  return text === MARKER_TEXT || text === lastText.trim();
 }
 
 /**
