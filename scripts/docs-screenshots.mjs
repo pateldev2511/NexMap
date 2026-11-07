@@ -126,7 +126,7 @@ for (const theme of ['light', 'dark']) {
   await page.getByRole('button', { name: /Gateway 192\.0\.2\.1 is outside/ }).click();
   await page.waitForTimeout(400);
   await shot(page, 'validation-fix');
-  await crop(page, 'validation-fix-crop', { x: 0, y: 612, width: 1000, height: 190 });
+  await crop(page, 'validation-fix-crop', { x: 0, y: 624, width: 1000, height: 176 });
   await page.context().close();
 }
 
