@@ -1,9 +1,16 @@
 /* NexMap service worker (Phase 7) — offline support via runtime caching.
- * Strategy: same-origin GET → stale-while-revalidate (serve cache fast, refresh in
- * background). Navigations fall back to the cached app shell when offline. NexMap
- * never makes network requests for project data, so caching the app is enough to
- * run fully offline after the first load. */
-const CACHE = 'nexmap-v1';
+ * NexMap never makes network requests for project data, so caching the app is
+ * enough to run fully offline after the first load. Strategy per request:
+ *  - Page navigations → network-first, so every deploy reaches returning visitors on
+ *    their next load. The last good page is kept as the offline app shell.
+ *  - Hashed build assets (/assets/*) → cache-first. Their names change with their
+ *    content, so a cached copy is never stale.
+ *  - Everything else (icons, manifest) → stale-while-revalidate.
+ * An HTML response is only ever cached for a navigation: the host answers a missing
+ * asset with the SPA's index.html (status 200), and caching that as a script or
+ * stylesheet would break the app on every later load. */
+const CACHE = 'nexmap-v2'; // bump to drop every entry cached by an older worker
+const SHELL = '/';
 
 self.addEventListener('install', () => self.skipWaiting());
 
@@ -18,6 +25,55 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+const isHtml = (res) => (res.headers.get('content-type') || '').includes('text/html');
+
+/** A response worth keeping: a success, and HTML only for a page. */
+const cacheable = (req, res) => !!res && res.ok && (req.mode === 'navigate') === isHtml(res);
+
+const offline = () => new Response('Offline', { status: 503, statusText: 'Offline' });
+
+async function page(req, cache) {
+  try {
+    const res = await fetch(req);
+    if (cacheable(req, res)) {
+      await cache.put(SHELL, res.clone());
+      return res;
+    }
+    // A server error is no better than the last good shell.
+    if (!res.ok) return (await cache.match(SHELL)) || res;
+    return res;
+  } catch {
+    return (await cache.match(SHELL)) || offline();
+  }
+}
+
+async function asset(req, cache) {
+  const cached = await cache.match(req);
+  if (cached) return cached;
+  try {
+    const res = await fetch(req);
+    if (cacheable(req, res)) await cache.put(req, res.clone());
+    return res;
+  } catch {
+    return offline();
+  }
+}
+
+async function staleWhileRevalidate(event, req, cache) {
+  const cached = await cache.match(req);
+  const network = fetch(req)
+    .then(async (res) => {
+      if (cacheable(req, res)) await cache.put(req, res.clone());
+      return res;
+    })
+    .catch(() => null);
+  if (cached) {
+    event.waitUntil(network);
+    return cached;
+  }
+  return (await network) || offline();
+}
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
@@ -27,24 +83,9 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     (async () => {
       const cache = await caches.open(CACHE);
-      const cached = await cache.match(req);
-      const network = fetch(req)
-        .then((res) => {
-          if (res && res.ok) cache.put(req, res.clone());
-          return res;
-        })
-        .catch(() => null);
-
-      // Stale-while-revalidate: serve cache immediately, else wait for network.
-      const fresh = cached || (await network);
-      if (fresh) return fresh;
-
-      // Offline navigation fallback → cached app shell.
-      if (req.mode === 'navigate') {
-        const shell = (await cache.match('/index.html')) || (await cache.match('/'));
-        if (shell) return shell;
-      }
-      return new Response('Offline', { status: 503, statusText: 'Offline' });
+      if (req.mode === 'navigate') return page(req, cache);
+      if (url.pathname.startsWith('/assets/')) return asset(req, cache);
+      return staleWhileRevalidate(event, req, cache);
     })(),
   );
 });
