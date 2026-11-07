@@ -4225,9 +4225,14 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           ? `${plan.notRacked} link${plan.notRacked === 1 ? ' has an end' : 's have an end'} outside a rack`
           : '',
         ...plan.noFreePort.map((s) => `${s.device.name} is out of free ports`),
+        ...plan.portConflicts.map(
+          (p) => `${p.device.name}:${p.port} is already cabled${p.cableLabel ? ` (${p.cableLabel})` : ''} — free it or rename the link's port`,
+        ),
       ].filter(Boolean);
       if (!plan.items.length) {
-        const why = plan.alreadyPatched > 0 ? 'Every link between racked gear already has a cable' : 'No links between racked gear to patch';
+        const why = plan.portConflicts.length > 0
+          ? 'Nothing patched'
+          : plan.alreadyPatched > 0 ? 'Every link between racked gear already has a cable' : 'No links between racked gear to patch';
         set({ flash: `${why}${tail.length ? ` — ${tail.join(', ')}` : ''}.` });
         return 0;
       }
