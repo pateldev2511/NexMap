@@ -25,6 +25,8 @@ export interface TemplateDevice {
   bay?: 'left' | 'right';
   /** Optional vendor/model catalog id for richer specs and model-aware rack art. */
   catalogId?: string;
+  /** The feed a rack UPS backs (a PDU's feed is picked for it). Absent → A. */
+  feed?: 'A' | 'B';
 }
 
 export interface TemplateRack {
@@ -130,7 +132,7 @@ export const RACK_TEMPLATES: readonly RackTemplate[] = [
           d('cable-mgr', 30, 'cm-03'), d('router', 29, 'router-01', undefined, 'cisco-asr1001x'), d('router', 28, 'router-02', undefined, 'juniper-mx204'),
           d('firewall', 27, 'fw-01', undefined, 'palo-pa3220'), d('firewall', 26, 'fw-02', undefined, 'forti-100f'), d('lb', 25, 'lb-01', undefined, 'f5-i2800'), d('lb', 24, 'lb-02', undefined, 'f5-i2800'),
           d('server-1u', 23, 'mgmt-01', undefined, 'dell-r650'), d('storage', 18, 'san-01', undefined, 'netapp-fas2750'),
-          d('ups', 3, 'ups-b', undefined, 'apc-srt2200'), d('ups', 1, 'ups-a', undefined, 'apc-srt2200'), pduA, pduB,
+          { ...d('ups', 3, 'ups-b', undefined, 'apc-srt2200'), feed: 'B' }, d('ups', 1, 'ups-a', undefined, 'apc-srt2200'), pduA, pduB,
         ],
       },
     ],
@@ -147,7 +149,7 @@ export const RACK_TEMPLATES: readonly RackTemplate[] = [
           d('blade', 33, 'blade-01'), d('blade', 27, 'blade-02'),
           d('server-2u', 25, 'esxi-01', undefined, 'dell-r750'), d('server-2u', 23, 'esxi-02', undefined, 'hpe-dl380-g11'), d('server-2u', 21, 'esxi-03', undefined, 'lenovo-sr650'),
           d('storage', 17, 'san-01', undefined, 'dell-me5024'), d('storage', 13, 'san-02', undefined, 'netapp-fas2750'),
-          d('ups', 3, 'ups-b', undefined, 'apc-srt2200'), d('ups', 1, 'ups-a', undefined, 'apc-srt2200'), pduA, pduB,
+          { ...d('ups', 3, 'ups-b', undefined, 'apc-srt2200'), feed: 'B' }, d('ups', 1, 'ups-a', undefined, 'apc-srt2200'), pduA, pduB,
         ],
       },
     ],

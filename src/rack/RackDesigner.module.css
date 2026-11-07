@@ -1232,6 +1232,29 @@
   border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--chrome-border));
 }
 
+.powerOver {
+  color: var(--sev-warn);
+  border-color: color-mix(in srgb, var(--sev-warn) 40%, var(--chrome-border));
+}
+
+.ratingPair {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ratingPair input {
+  width: 0;
+  flex: 1;
+}
+
+.ratingPair span {
+  color: var(--chrome-fg-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .cordList {
   display: flex;
   flex-direction: column;
@@ -1253,6 +1276,10 @@
 
 .cordList i {
   color: var(--chrome-fg-muted);
+}
+
+.cordList .fateBad {
+  color: var(--sev-warn);
 }
 
 .fieldHint {
@@ -1585,4 +1612,15 @@
   padding-left: 19px;
   font: 10px var(--font-mono);
   color: var(--chrome-fg-muted);
+}
+
+/* The one-line verdict above the "If feed A fails" legend. */
+.failureVerdict {
+  align-self: center;
+  max-width: 100%;
+  margin: -6px 0 14px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--chrome-fg);
 }

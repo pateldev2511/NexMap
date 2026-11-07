@@ -61,6 +61,23 @@ describe('parsePartsList · what each line is', () => {
     for (const [text, label] of cases) expect([text, one(text).label]).toEqual([text, label]);
   });
 
+  it('a PDU line keeps its stated rating; anything else, or half a rating, gets none', () => {
+    expect(one('2x vertical PDU 30A 208V')).toMatchObject({ qty: 2, rating: { amps: 30, volts: 208 } });
+    expect(one('PDU, 16 A, 230 V').rating).toEqual({ amps: 16, volts: 230, phases: 1 });
+    expect(one('PDU 30A 208V 3-phase').rating).toEqual({ amps: 30, volts: 208, phases: 3 });
+    expect(one('PDU three phase 16A 400V').rating?.phases).toBe(3);
+    expect(one('PDU 3ph 32A 400V').rating?.phases).toBe(3);
+    expect(one('3x PDU 30A 208V').rating?.phases).toBe(1); // a quantity of 3 is not three-phase
+    expect(one('PDU 30A').rating).toBeUndefined();
+    expect(one('server 2U 208V 10A').rating).toBeUndefined();
+  });
+
+  it('a UPS line keeps its stated output watts, never its VA', () => {
+    expect(one('APC UPS 3000VA/2700W 2U').outputW).toBe(2700);
+    expect(one('rack UPS 1500VA').outputW).toBeUndefined();
+    expect(one('server 750W').outputW).toBeUndefined();
+  });
+
   it('a "2U" on the line sets the height', () => {
     expect(one('shelf 3U').span).toBe(3);
   });

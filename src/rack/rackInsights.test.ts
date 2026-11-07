@@ -125,3 +125,66 @@ describe('rackInsights — PDU feeds', () => {
     expect(run([dev({ id: 's1', powerFeed: 'AB' })]).filter((i) => i.action === 'add-pdu')).toEqual([]);
   });
 });
+
+describe('rackInsights — PDU load', () => {
+  const strip = (id: string, feed: 'A' | 'B', over: Partial<Device> = {}) =>
+    dev({ id, name: `PDU ${feed}`, type: 'ups', mount: 'rail', side: 'rear', bay: feed === 'A' ? 'right' : 'left', ru: 1, ruSpan: 24, watts: 0, powerFeed: feed, ratedAmps: 10, ratedVolts: 200, interfaces: Array.from({ length: 8 }, (_, i) => ({ id: `${id}o${i}`, name: `C13-${i + 1}` })), ...over });
+  // Two 2 kW strips (10 A × 200 V) and dual-corded gear.
+  const run = (gear: Device[], a: Partial<Device> = {}) =>
+    rackInsights({ racks: [rack()], devices: [strip('pa', 'A', a), strip('pb', 'B'), ...gear], cables: [] }).filter((i) => i.action === 'review-pdu');
+  const gear = (watts: number[]) => watts.map((w, i) => dev({ id: `s${i}`, ru: 2 + i * 2, watts: w, powerFeed: 'AB' }));
+
+  it('warns that a strip trips when the other feed fails', () => {
+    // 2.4 kW of dual-corded gear: 1.2 kW per strip normally, all of it on one if a feed goes.
+    const hits = run(gear([1200, 1200]));
+    expect(hits.map((h) => h.id)).toEqual(['pdu-failover-pa', 'pdu-failover-pb']);
+    expect(hits[0]).toMatchObject({ title: 'PDU A trips if feed B fails', severity: 'warn', rackId: 'r1', deviceId: 'pa', actionLabel: 'Review PDU' });
+    expect(hits[0]!.detail).toBe("Rack 1: 2.40 kW lands on it when feed B goes; it's rated 2.00 kW (10 A × 200 V).");
+  });
+
+  it('warns that a strip is over its rating in normal operation', () => {
+    const hits = run([dev({ id: 's0', ru: 2, watts: 2500, powerFeed: 'A' })]);
+    expect(hits).toEqual([expect.objectContaining({ id: 'pdu-over-pa', title: 'PDU A is over its rating', detail: 'Rack 1: 2.50 kW on a 2.00 kW (10 A × 200 V) strip.' })]);
+  });
+
+  it('notes a strip past 80% under failover, and stays quiet below it', () => {
+    expect(run(gear([1700]))).toEqual([
+      expect.objectContaining({ id: 'pdu-80-pa', severity: 'info', detail: 'Rack 1: 85% of 2.00 kW (10 A × 200 V). Many electrical codes cap continuous load at 80%.' }),
+      expect.objectContaining({ id: 'pdu-80-pb' }),
+    ]);
+    expect(run(gear([1500]))).toEqual([]);
+  });
+
+  it('checks a three-phase strip against √3 × A × V', () => {
+    // 2.9 kW on failover trips the 10 A × 200 V single-phase strip (2 kW) but is only 84%
+    // of the same rating three-phase (3.46 kW).
+    const hits = run(gear([1450, 1450]), { ratedPhases: 3 });
+    expect(hits.map((h) => h.id).sort()).toEqual(['pdu-80-pa', 'pdu-failover-pb']);
+    expect(hits.find((h) => h.id === 'pdu-80-pa')!.detail).toContain('84% of 3.46 kW (10 A × 200 V 3-phase)');
+  });
+
+  it('leaves a strip without a full rating unchecked', () => {
+    const hits = run(gear([5000]), { ratedVolts: undefined });
+    expect(hits.map((h) => h.deviceId)).toEqual(['pb']);
+  });
+});
+
+describe('rackInsights — UPS load', () => {
+  it('warns that a UPS overloads if the other feed fails, and skips an unrated one', () => {
+    const ups = (id: string, feed: 'A' | 'B', ratedWatts?: number) =>
+      dev({ id, name: id, type: 'ups', ru: 1, ruSpan: 2, watts: 0, powerFeed: feed, interfaces: [], ...(ratedWatts ? { ratedWatts } : {}) });
+    const gear = [dev({ id: 's1', ru: 5, watts: 1500, powerFeed: 'AB' })];
+    const run = (devices: Device[]) => rackInsights({ racks: [rack()], devices, cables: [] }).filter((i) => i.id.startsWith('ups-'));
+    expect(run([ups('ups-a', 'A', 2000), ups('ups-b', 'B', 1200), ...gear])).toEqual([
+      expect.objectContaining({
+        id: 'ups-failover-ups-b',
+        title: 'ups-b overloads if feed A fails',
+        detail: 'Rack 1: 1.50 kW lands on feed B when feed A goes, against 1.20 kW of UPS output.',
+        action: 'review-pdu',
+        actionLabel: 'Review UPS',
+        deviceId: 'ups-b',
+      }),
+    ]);
+    expect(run([ups('ups-a', 'A'), ups('ups-b', 'B'), ...gear])).toEqual([]);
+  });
+});

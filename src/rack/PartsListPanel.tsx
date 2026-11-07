@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import { parsePartsList, planMount } from './partsList';
+import { pduRatingLabel } from './powerCords';
 import type { Rack } from '@/model/types';
 import styles from './RackDesigner.module.css';
 
@@ -69,7 +70,7 @@ export function PartsListPanel({ rack, onClose }: { rack: Rack; onClose: () => v
               <span className={styles.partsQty}>{l.qty}×</span>
               <span className={styles.partsLabel}>
                 {l.preset ? l.label : <em>Not recognised: “{l.raw}”</em>}
-                {l.preset && <small> · {l.preset.mount === 'rail' ? '0U rail' : `${l.span}U`}</small>}
+                {l.preset && <small> · {l.preset.mount === 'rail' ? '0U rail' : `${l.span}U`}{l.rating ? ` · ${pduRatingLabel({ ratedAmps: l.rating.amps, ratedVolts: l.rating.volts, ratedPhases: l.rating.phases })}` : ''}{l.outputW ? ` · ${l.outputW} W output` : ''}</small>}
               </span>
               <span className={styles.partsWhere}>
                 {!l.preset ? 'skipped' : missing > 0 ? `${where ? `${where}; ` : ''}${missing} won’t fit` : where}

@@ -27,6 +27,11 @@ export interface CatalogModel {
    * than guessed. Sources: docs/CATALOG-DEPTHS.md.
    */
   depthMm?: number;
+  /**
+   * A UPS's output rating in watts (not VA), where the model name pins down one variant.
+   * Sources: docs/CATALOG-UPS.md.
+   */
+  outputW?: number;
 }
 
 export const RACK_CATALOG: readonly CatalogModel[] = [
@@ -71,9 +76,9 @@ export const RACK_CATALOG: readonly CatalogModel[] = [
   { id: 'synology-rs422', vendor: 'Synology', model: 'RS422+', type: 'storage', span: 1, ports: 2, watts: 38, weightKg: 4.4, depthMm: 328 },
   // UPS (power sources → 0 W draw)
   { id: 'apc-srt2200', vendor: 'APC', model: 'Smart-UPS SRT 2200', type: 'ups', span: 2, ports: 0, watts: 0, weightKg: 23, depthMm: 584 },
-  { id: 'eaton-5px3000', vendor: 'Eaton', model: '5PX 3000', type: 'ups', span: 2, ports: 0, watts: 0, weightKg: 28, depthMm: 648 },
-  { id: 'cyberpower-or1500', vendor: 'CyberPower', model: 'OR1500LCDRM1U', type: 'ups', span: 1, ports: 0, watts: 0, weightKg: 13, depthMm: 389 },
-  { id: 'cyberpower-or600', vendor: 'CyberPower', model: 'OR600ERM1U', type: 'ups', span: 1, ports: 0, watts: 0, weightKg: 7.8, depthMm: 235 },
+  { id: 'eaton-5px3000', vendor: 'Eaton', model: '5PX 3000', type: 'ups', span: 2, ports: 0, watts: 0, weightKg: 28, depthMm: 648, outputW: 2700 },
+  { id: 'cyberpower-or1500', vendor: 'CyberPower', model: 'OR1500LCDRM1U', type: 'ups', span: 1, ports: 0, watts: 0, weightKg: 13, depthMm: 389, outputW: 900 },
+  { id: 'cyberpower-or600', vendor: 'CyberPower', model: 'OR600ERM1U', type: 'ups', span: 1, ports: 0, watts: 0, weightKg: 7.8, depthMm: 235, outputW: 360 },
   // Patch panels
   { id: 'panduit-24', vendor: 'Panduit', model: '24-port Cat6 patch', type: 'patch-panel', span: 1, ports: 24, watts: 0, weightKg: 1.5, depthMm: 30 },
   // No depth: the sourced 48-port panel (DP48688TGY) is 2U, not this 1U part.
@@ -100,13 +105,15 @@ export function catalogSpecLabel(m: CatalogModel): string {
 }
 
 /** The spec fields a model stamps on a device, as one source for every place that applies one. */
-export function catalogFields(m: CatalogModel): Pick<Device, 'vendor' | 'model' | 'watts' | 'weightKg' | 'depthMm'> {
+export function catalogFields(m: CatalogModel): Pick<Device, 'vendor' | 'model' | 'watts' | 'weightKg' | 'depthMm' | 'ratedWatts'> {
   return {
     vendor: m.vendor,
     model: m.model,
     watts: m.watts || undefined,
     weightKg: m.weightKg || undefined,
     depthMm: m.depthMm || undefined,
+    // Only a model with a published output sets it: one without must not wipe a typed-in rating.
+    ...(m.outputW ? { ratedWatts: m.outputW } : {}),
   };
 }
 

@@ -13,6 +13,7 @@
 import { RACK_CATALOG, type CatalogModel } from './rackCatalog';
 import { RACK_DEVICE_PRESETS, presetByKey, presetSpan, type RackDevicePreset } from './rackDevicePresets';
 import { canFit, isFullDepth, railChannel, slotOf, type Slot } from './rackModel';
+import { isPdu, isRackUps } from './rackPower';
 import type { Device, DeviceType, Rack } from '@/model/types';
 
 /** At most this many of one line (a stray "1000x" shouldn't fill a tab with devices). */
@@ -31,6 +32,10 @@ export interface PartsLine {
   span: number;
   /** "Cisco Catalyst 9300-48P" / "Patch panel (24)" — what the preview shows. */
   label: string;
+  /** A PDU line's "30A 208V" (and "3-phase"), when it states both amps and volts. */
+  rating?: { amps: number; volts: number; phases: 1 | 3 };
+  /** A UPS line's output watts ("1500VA/900W" → 900; a VA figure alone is not watts). */
+  outputW?: number;
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -152,6 +157,23 @@ function statedSpan(text: string): number | null {
 }
 
 /**
+ * "30A 208V" / "16 A, 230 V" written on the line, else null. Both halves or nothing;
+ * "3-phase" / "3ph" / "three phase" marks a three-phase strip.
+ */
+function statedRating(text: string): { amps: number; volts: number; phases: 1 | 3 } | null {
+  const amps = Number(text.match(/\b(\d{1,3}(?:\.\d)?)\s*a(?:mps?)?\b/i)?.[1] ?? NaN);
+  const volts = Number(text.match(/\b(\d{2,3})\s*v(?:olts?|ac)?\b/i)?.[1] ?? NaN);
+  const phases = /\b(?:3|three)[\s-]*(?:phase|ph|φ)\b|\b3[\s-]?ø/i.test(text) ? 3 : 1;
+  return amps > 0 && volts > 0 ? { amps, volts, phases } : null;
+}
+
+/** "900W" / "2700 W" written on the line, else null. VA is apparent power, not watts. */
+function statedWatts(text: string): number | null {
+  const w = Number(text.match(/\b(\d{2,5})\s*w(?:atts?)?\b/i)?.[1] ?? NaN);
+  return w > 0 ? w : null;
+}
+
+/**
  * Read a pasted parts list. One line per item; blank lines, "#"/"//" comments and
  * header-ish lines ("Qty Description …") are skipped.
  */
@@ -167,6 +189,8 @@ export function parsePartsList(text: string): PartsLine[] {
     const catalog = matchCatalog(rest);
     const preset = catalog ? presetForCatalog(catalog) : matchPreset(rest);
     const span = catalog?.span ?? (preset?.mount === 'rail' ? null : statedSpan(rest)) ?? preset?.span ?? 1;
+    const rating = preset && isPdu(preset) ? statedRating(rest) : null;
+    const outputW = preset && isRackUps({ ...preset, name: rest }) ? statedWatts(rest) : null;
     out.push({
       line: i + 1,
       raw,
@@ -175,6 +199,8 @@ export function parsePartsList(text: string): PartsLine[] {
       ...(catalog ? { catalog } : {}),
       span,
       label: catalog ? `${catalog.vendor} ${catalog.model}` : preset ? preset.label : rest,
+      ...(rating ? { rating } : {}),
+      ...(outputW ? { outputW } : {}),
     });
   });
   return out;

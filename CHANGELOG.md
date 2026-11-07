@@ -13,6 +13,53 @@ the cables down to the hardware, with a user control to dial the motion.
 
 ### Added
 
+- **The UPS behind each feed.** A rack UPS's Power tab says which feed it backs
+  and takes its output rating in watts (nameplate W, not VA). The feed's load,
+  normal and if the other feed fails, is checked against it. Smart suggestions
+  warn when a UPS is over its rating or would overload on failover. The failure
+  view, verdicts and each unit's fate count an overloaded UPS as taking its whole
+  feed down, and the power-strips table and CSV list each UPS-backed feed. Three
+  catalog UPSes carry their published output (Eaton 5PX 3000, CyberPower
+  OR1500LCDRM1U and OR600ERM1U; sources in docs/CATALOG-UPS.md). The APC SRT 2200
+  doesn't, since its watts depend on the voltage variant. A pasted "UPS
+  3000VA/2700W" line sets the rating from the W figure. The enterprise templates'
+  ups-b now backs feed B. A UPS without a rating, or on both feeds, isn't checked.
+- **Each unit's fate on its Power tab.** In either rack view, a selected unit's Power
+  tab says what happens to it when each feed fails: "stays up on PDU 2", or "loses
+  power" and why (single-corded, no PDU or no free outlet on the other feed, or its
+  strip trips). A PDU says it goes down with its feed, or holds or trips under the
+  load shifted onto it ("trips: 2.40 kW on 2.08 kW").
+- **Power strips in the install packet.** Under the power cords, a **Power strips**
+  table lists every PDU with its rating, its load now and if the other feed fails
+  (with the percent of its rating), and a status: over its rating, trips if the
+  other feed fails, past 80% then, ok, or no rating. The two "If feed A/B fails"
+  verdicts print under it. The same rows export as a "Power strips" CSV from the
+  export drawer.
+- **Fail a feed and see what goes dark.** Row view's Color menu has "If feed A
+  fails" and "If feed B fails". Every unit that would lose power turns red: single-
+  corded gear on the failed feed, dual-corded gear whose other cord has no PDU or no
+  free outlet, and gear on a surviving strip that trips under the shifted load
+  (orange). The failed feed's strips go grey and everything that stays up green, with
+  a one-line verdict above the legend ("If feed A fails: 4 units lose power (1
+  single-corded, 3 on a tripped strip) · PDU 2 trips"). A rack with no PDU drawn is
+  judged by feed alone; a strip with no rating never trips. A unit with no live cord
+  even with both feeds up is reported as having no power now, not as lost to the
+  failure, and a dual-corded unit with one cord unplugged loads its other strip with
+  its full draw.
+- **PDU ratings and the failover check.** A PDU's Power tab takes its rating
+  (amps × volts, and a Circuit choice: single-phase, or three-phase with line-to-line
+  volts, rated √3 × A × V) and shows its load: normal, and what it carries if
+  the other feed fails, when every dual-corded unit shifts its full draw onto it.
+  Smart suggestions warn when a strip is over its rating, when it would trip if the
+  other feed failed, and note when it would run past 80% then. A strip that trips on
+  failover also becomes the rack's redundancy risk in the health score. A pasted
+  parts-list line like "2x PDU 30A 208V" (or "… 3-phase") sets the rating; nothing is filled in by
+  default, and a strip without a rating isn't checked. The inspector's A/B feed
+  line now totals the selected unit's rack rather than every rack.
+- **Power cords in the install packet.** The install packet (PDF or PNG, and the
+  "Diagram + cable table" export) now has a **Power cords** table under the
+  connections: rack, device, U, feed, PDU and outlet for every cord. Only racks with
+  at least one PDU appear in it.
 - **Power-cord plan.** NexMap now works out which PDU outlet each unit's power
   cord plugs into: one cord for single-corded gear, one on each feed for
   dual-corded gear. Each cord takes the free outlet on its feed nearest the unit's
@@ -668,6 +715,9 @@ the cables down to the hardware, with a user control to dial the motion.
 
 ### Fixed
 
+- Tables in a rack PNG export (connections, power cords, power strips) were dark
+  text on the dark page: the title, every other row and the notes were unreadable.
+  Each table now sits on its own white card.
 - A 0U PDU in the rack library's gear thumbnail no longer draws negative-height
   outlets, which filled the console with SVG errors. A strip too short for all its
   outlets now draws as many as fit.
