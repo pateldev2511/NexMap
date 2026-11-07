@@ -7,6 +7,7 @@ import type { NexWindow } from './support';
  *   #51 cut + paste is a move — links come back
  *   #52 ⌘V reaches an external CSV, even with devices on the canvas clipboard
  *   #35 presentation ignores paste and editing shortcuts
+ *   #56 New project is Alt/Option+N
  */
 
 test.use({ permissions: ['clipboard-read', 'clipboard-write'] });
@@ -155,4 +156,23 @@ test('presentation ignores paste and editing keys; zoom and exit still work (#35
   await expect.poll(() => deviceNames(page)).toContain('AuditPasted');
   await page.keyboard.press('ControlOrMeta+z');
   await expect.poll(() => counts(page)).toEqual({ devices: 10, links: 9 });
+});
+
+test('Alt/Option+N starts a new project after the unsaved-work confirm (#56)', async ({
+  page,
+}) => {
+  await openBranchOffice(page);
+  // Make an edit so there is unsaved work to confirm away.
+  await selectOneDevice(page);
+  await page.keyboard.press('ArrowRight');
+
+  const asked = new Promise<string>((resolve) => {
+    page.once('dialog', (d) => {
+      resolve(d.message());
+      void d.accept();
+    });
+  });
+  await page.keyboard.press('Alt+n');
+  expect(await asked).toMatch(/Discard unsaved changes/);
+  await expect.poll(() => counts(page)).toEqual({ devices: 0, links: 0 });
 });

@@ -208,7 +208,7 @@ export function App() {
       <button
         className={shell.topbarBtn}
         onClick={handleNew}
-        title="New project (Ctrl+N)"
+        title="New project (Alt+N)"
       >
         <NexIcon name="new-file" />
         <span>New</span>
@@ -357,6 +357,10 @@ export function App() {
   useQuietChrome(); // M3c: earned-quiet chrome demotion driver
   const presentingRef = useRef(presentation);
   presentingRef.current = presentation;
+  // The registered handler outlives renders; reach the current handleNew (it
+  // reads `dirty` for the unsaved-work confirm) rather than a stale capture.
+  const handleNewRef = useRef(handleNew);
+  handleNewRef.current = handleNew;
   useEffect(() => {
     keyboardRouter.install();
     const unregister = keyboardRouter.registerApp((e) => {
@@ -369,7 +373,15 @@ export function App() {
           e.preventDefault();
           return true;
         }
-        if (e.key === '?') return true;
+        if (e.key === '?' || (e.altKey && e.code === 'KeyN')) return true;
+      }
+      // New project: Alt/Option+N (#56). ⌘N/Ctrl+N is the browser's New Window and
+      // can't be intercepted, so it isn't offered. Matched by code: Option+N on
+      // macOS is a dead key (e.key is 'Dead'/'˜'), not 'n'.
+      if (e.altKey && !e.metaKey && !e.ctrlKey && e.code === 'KeyN') {
+        e.preventDefault();
+        handleNewRef.current();
+        return true;
       }
       if (e.metaKey || e.ctrlKey) {
         const k = e.key.toLowerCase();
@@ -541,7 +553,7 @@ export function App() {
               const st = useProjectStore.getState;
               // Commands relevant in both designers.
               const generic: PaletteCommand[] = [
-                { id: 'new', label: 'New project', hint: '⌘N', group: 'File', run: handleNew },
+                { id: 'new', label: 'New project', hint: '⌥N', group: 'File', run: handleNew },
                 { id: 'open', label: 'Open .nexmap…', hint: '⌘O', group: 'File', run: () => void handleOpen() },
                 { id: 'save', label: 'Save', hint: '⌘S', group: 'File', run: () => void persistence.save() },
                 { id: 'undo', label: 'Undo', hint: '⌘Z', group: 'Edit', run: doUndo },
