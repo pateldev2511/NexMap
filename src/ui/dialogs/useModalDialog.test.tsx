@@ -158,6 +158,20 @@ describe('useModalDialog', () => {
     expect(canvasKeys).toEqual(['Delete']); // the canvas has the keyboard back
   });
 
+  it("keeps Save/Open/Print chords from falling through to the browser's own", () => {
+    render(<Modal title="Export" onClose={() => {}} />);
+    for (const target of [screen.getByRole('textbox', { name: 'Name' }), document.body]) {
+      for (const key of ['s', 'o', 'p']) {
+        for (const mod of [{ metaKey: true }, { ctrlKey: true }]) {
+          // fireEvent returns false when the default was prevented.
+          expect(fireEvent.keyDown(target, { key, ...mod })).toBe(false);
+        }
+      }
+    }
+    // Plain typing in a field is untouched.
+    expect(fireEvent.keyDown(screen.getByRole('textbox', { name: 'Name' }), { key: 's' })).toBe(true);
+  });
+
   it('keeps a paste inside the dialog away from the canvas paste-import', () => {
     const onPaste = vi.fn();
     window.addEventListener('paste', onPaste);

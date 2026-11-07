@@ -40,6 +40,15 @@ function pushModal(entry: OpenModal): void {
   else stack.push(entry);
 }
 
+/**
+ * Chords the app owns (Save, Open, Print). The overlay keeps them from the app while
+ * a dialog is open; without this they would fall through to the browser's own Save
+ * Page / Open File / Print instead of doing nothing.
+ */
+function blockBrowserChord(e: { key: string; metaKey: boolean; ctrlKey: boolean; preventDefault(): void }) {
+  if ((e.metaKey || e.ctrlKey) && ['s', 'o', 'p'].includes(e.key.toLowerCase())) e.preventDefault();
+}
+
 function focusables(root: HTMLElement): HTMLElement[] {
   return [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
     (el) => !el.closest('[inert], [hidden]') && (el.checkVisibility?.() ?? true),
@@ -66,6 +75,7 @@ export function useModalDialog(onClose?: () => void) {
         e.preventDefault();
         stack[stack.length - 1]?.close();
       }
+      blockBrowserChord(e);
       return true;
     });
     // Focus that escapes (a click on the page behind, a programmatic focus) comes back.
@@ -89,6 +99,8 @@ export function useModalDialog(onClose?: () => void) {
 
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
     if (!isTop(token)) return;
+    // Text fields bypass the router overlay, so cover them here too.
+    blockBrowserChord(e);
     if (e.key === 'Escape') {
       // Ours alone: the router (and the canvas behind it) never sees it.
       e.stopPropagation();

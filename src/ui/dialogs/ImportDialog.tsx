@@ -24,6 +24,7 @@ import {
 } from '@/io/import/graphImport';
 import type { Subnet, Vlan } from '@/model/types';
 import { NexIcon } from '@/ui/icons/NexIcon';
+import { useModalDialog } from './useModalDialog';
 import styles from './ImportDialog.module.css';
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif']);
@@ -83,6 +84,7 @@ function svgSize(svg: string): { width: number; height: number } {
  * bad import never half-corrupts the project and Undo reverts it in one step.
  */
 export function ImportDialog({ onClose }: { onClose: () => void }) {
+  const { titleId, dialogProps } = useModalDialog(onClose);
   const store = useProjectStore.getState;
   const [kind, setKind] = useState<ImportKind>('devices');
   const [text, setText] = useState<string | null>(null);
@@ -330,9 +332,9 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.dialog} onClick={(e) => e.stopPropagation()}>
+      <div className={styles.dialog} {...dialogProps} onClick={(e) => e.stopPropagation()}>
         <div className={styles.head}>
-          <h2>Import</h2>
+          <h2 id={titleId}>Import</h2>
           <button className={styles.close} onClick={onClose} aria-label="Close">
             <NexIcon name="close" />
           </button>
