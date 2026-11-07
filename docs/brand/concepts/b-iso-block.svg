@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="b-top" x1="96" y1="96" x2="416" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4c8dff"/>
+      <stop offset="1" stop-color="#2f6bff"/>
+    </linearGradient>
+    <linearGradient id="b-left" x1="80" y1="200" x2="256" y2="460" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7a5cff"/>
+      <stop offset="1" stop-color="#4b33c9"/>
+    </linearGradient>
+    <linearGradient id="b-right" x1="256" y1="200" x2="432" y2="460" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#0891b2"/>
+    </linearGradient>
+  </defs>
+  <!-- top face: the network map -->
+  <path d="M256 56 L440 162 L256 268 L72 162 Z" fill="url(#b-top)"/>
+  <!-- left face: rack units -->
+  <path d="M72 162 L256 268 L256 472 L72 366 Z" fill="url(#b-left)"/>
+  <!-- right face -->
+  <path d="M440 162 L256 268 L256 472 L440 366 Z" fill="url(#b-right)"/>
+  <g stroke="#ffffff" stroke-opacity="0.55" stroke-width="10" stroke-linecap="round">
+    <path d="M104 230 L224 299"/>
+    <path d="M104 278 L224 347"/>
+    <path d="M104 326 L224 395"/>
+  </g>
+  <g fill="#ffffff">
+    <circle cx="214" cy="304" r="7"/><circle cx="214" cy="352" r="7"/><circle cx="214" cy="400" r="7"/>
+  </g>
+  <!-- the map on top: three nodes, two links (drawn in iso) -->
+  <g fill="none" stroke="#ffffff" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M168 150 L256 200 L344 150"/>
+    <path d="M256 200 L256 112" stroke-opacity="0.6"/>
+  </g>
+  <g fill="#ffffff">
+    <ellipse cx="168" cy="150" rx="22" ry="13"/>
+    <ellipse cx="344" cy="150" rx="22" ry="13"/>
+    <ellipse cx="256" cy="112" rx="18" ry="10.5" fill-opacity="0.8"/>
+    <ellipse cx="256" cy="200" rx="28" ry="16"/>
+  </g>
+  <!-- right face: two status LEDs, drawn on the face's slope -->
+  <g fill="#ffffff">
+    <path d="M296 306 L316 294 L316 306 L296 318 Z" fill-opacity="0.9"/>
+    <path d="M330 286 L350 274 L350 286 L330 298 Z" fill-opacity="0.55"/>
+  </g>
+</svg>

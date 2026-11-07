@@ -18,6 +18,7 @@
     "e2e:install": "playwright install chromium",
     "typecheck": "tsc -b --noEmit",
     "gen:readme-media": "vite-node scripts/gen-readme-media.ts",
+    "docs:screenshots": "node scripts/docs-screenshots.mjs",
     "deploy:pages": "npm run build && wrangler pages deploy dist --project-name=nexmap",
     "deploy:workers": "npm run build && wrangler deploy",
     "deploy:check": "npm run build && wrangler deploy --dry-run"

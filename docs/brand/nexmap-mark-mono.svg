@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none" stroke="currentColor">
+  <title>NexMap</title>
+  <path d="M152 388 V152 L360 360 V124" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="152" cy="152" r="40" fill="currentColor" stroke="none"/>
+  <circle cx="360" cy="360" r="40" fill="currentColor" stroke="none"/>
+</svg>

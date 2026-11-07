@@ -1,12 +1,14 @@
 import { useId } from 'react';
 
 /**
- * NexMapLogo — bespoke brand mark + wordmark, drawn from scratch as SVG.
+ * NexMapLogo — the brand mark + wordmark (docs/brand/README.md).
  *
- * The mark is a stylized network: a bright core node linked to three satellites
- * inside a rounded "app tile", echoing NexMap's domain (nodes + links on a fabric).
- * Links animate a one-shot draw-in; the core breathes. All motion is CSS and is
- * neutralised by the global reduced-motion kill switch.
+ * The mark is the "routed N": the letter drawn as one network cable that runs up,
+ * across and up again through two nodes, with a signal on the link between them.
+ * Coordinates are the 512-unit master (docs/brand/nexmap-mark.svg) scaled to 48.
+ * The cable draws in once and the signal travels the link; both animations END
+ * on the static mark, so the global reduced-motion kill switch (which runs every
+ * animation once, instantly) leaves exactly the logo as drawn.
  */
 export function NexMapLogo({
   size = 40,
@@ -18,9 +20,10 @@ export function NexMapLogo({
   className?: string;
 }) {
   const uid = useId().replace(/:/g, '');
-  const g1 = `nxg-${uid}`;
-  const g2 = `nxc-${uid}`;
-  const gl = `nxl-${uid}`;
+  const tile = `nxt-${uid}`;
+  const sheen = `nxs-${uid}`;
+  const cable = `nxc-${uid}`;
+  const glow = `nxg-${uid}`;
 
   return (
     <span
@@ -37,73 +40,75 @@ export function NexMapLogo({
         style={{ flex: 'none' }}
       >
         <defs>
-          <linearGradient id={g1} x1="4" y1="4" x2="44" y2="44" gradientUnits="userSpaceOnUse">
-            <stop stopColor="var(--accent-3)" />
-            <stop offset="0.5" stopColor="var(--accent)" />
-            <stop offset="1" stopColor="var(--accent-2)" />
+          <linearGradient id={tile} x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+            <stop stopColor="#141d3a" />
+            <stop offset="1" stopColor="#060a16" />
           </linearGradient>
-          <linearGradient id={gl} x1="12" y1="12" x2="36" y2="36" gradientUnits="userSpaceOnUse">
-            <stop stopColor="var(--accent-2)" />
-            <stop offset="1" stopColor="var(--accent)" />
+          <linearGradient id={sheen} x1="24" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
+            <stop stopColor="#ffffff" stopOpacity="0.1" />
+            <stop offset="1" stopColor="#ffffff" stopOpacity="0" />
           </linearGradient>
-          <radialGradient id={g2} cx="0.5" cy="0.4" r="0.7">
+          <linearGradient id={cable} x1="14" y1="36.75" x2="34" y2="11.25" gradientUnits="userSpaceOnUse">
+            <stop stopColor="#7a5cff" />
+            <stop offset="0.5" stopColor="#2f6bff" />
+            <stop offset="1" stopColor="#22d3ee" />
+          </linearGradient>
+          <radialGradient id={glow} cx="0.5" cy="0.5" r="0.5">
             <stop stopColor="#ffffff" />
-            <stop offset="0.5" stopColor="var(--accent-2)" />
-            <stop offset="1" stopColor="var(--accent)" />
+            <stop offset="0.4" stopColor="#8af5ff" />
+            <stop offset="1" stopColor="#22d3ee" stopOpacity="0" />
           </radialGradient>
         </defs>
 
         {/* App tile */}
-        <rect x="2" y="2" width="44" height="44" rx="12" fill={`url(#${g1})`} />
+        <rect width="48" height="48" rx="10.9" fill={`url(#${tile})`} />
+        <rect width="48" height="48" rx="10.9" fill={`url(#${sheen})`} />
         <rect
-          x="2.75"
-          y="2.75"
-          width="42.5"
-          height="42.5"
-          rx="11.25"
-          fill="none"
-          stroke="rgba(255,255,255,0.22)"
-          strokeWidth="1.5"
+          x="0.75"
+          y="0.75"
+          width="46.5"
+          height="46.5"
+          rx="10.15"
+          stroke="#ffffff"
+          strokeOpacity="0.1"
+          strokeWidth="0.5"
         />
 
-        {/* Links (satellites → core), one-shot draw-in */}
-        <g
-          stroke="rgba(255,255,255,0.9)"
-          strokeWidth="2"
+        {/* The N: one cable, drawn in once */}
+        <path
+          d="M14.25 36.375 V14.25 L33.75 33.75 V11.625"
+          stroke={`url(#${cable})`}
+          strokeWidth="4.5"
           strokeLinecap="round"
+          strokeLinejoin="round"
+          pathLength={1}
           style={{
-            strokeDasharray: 40,
-            strokeDashoffset: 40,
+            strokeDasharray: 1,
+            strokeDashoffset: 1,
             animation: 'nxlogo-draw 900ms var(--ease-out, ease) forwards',
           }}
-        >
-          <line x1="24" y1="24" x2="13" y2="14" />
-          <line x1="24" y1="24" x2="35" y2="16" />
-          <line x1="24" y1="24" x2="24" y2="36" />
-        </g>
-
-        {/* Satellite nodes */}
-        <g fill="#ffffff">
-          <circle cx="13" cy="14" r="3" />
-          <circle cx="35" cy="16" r="3" />
-          <circle cx="24" cy="36" r="3" />
-        </g>
-
-        {/* Core node (breathing glow) */}
-        <circle
-          cx="24"
-          cy="24"
-          r="6.5"
-          fill={`url(#${g2})`}
-          style={{ transformOrigin: '24px 24px', animation: 'nxlogo-pulse 3s ease-in-out infinite' }}
         />
-        <circle cx="24" cy="24" r="6.5" fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth="1.5" />
+
+        {/* The two nodes it runs through */}
+        <circle cx="14.25" cy="14.25" r="3.2" fill="#060a16" stroke="#ffffff" strokeWidth="1.4" />
+        <circle cx="33.75" cy="33.75" r="3.2" fill="#060a16" stroke="#ffffff" strokeWidth="1.4" />
+
+        {/* The signal: travels the link, comes to rest at its centre */}
+        <g style={{ animation: 'nxlogo-signal 4.2s ease-in-out 900ms infinite' }}>
+          <circle cx="24" cy="24" r="4.1" fill={`url(#${glow})`} />
+          <circle cx="24" cy="24" r="1.15" fill="#ffffff" />
+        </g>
 
         <style>{`
           @keyframes nxlogo-draw { to { stroke-dashoffset: 0; } }
-          @keyframes nxlogo-pulse {
-            0%,100% { transform: scale(1); filter: drop-shadow(0 0 2px rgba(255,255,255,0.4)); }
-            50% { transform: scale(1.08); filter: drop-shadow(0 0 6px rgba(255,255,255,0.7)); }
+          /* From the centre to node B, reappear at node A, back to the centre,
+             then rest. The rest pose (centre) is the last frame on purpose. */
+          @keyframes nxlogo-signal {
+            0%   { transform: translate(0, 0); opacity: 1; }
+            22%  { transform: translate(7px, 7px); opacity: 0; }
+            23%  { transform: translate(-7px, -7px); opacity: 0; }
+            45%  { transform: translate(0, 0); opacity: 1; }
+            100% { transform: translate(0, 0); opacity: 1; }
           }
         `}</style>
       </svg>
