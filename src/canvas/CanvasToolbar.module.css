@@ -10,6 +10,21 @@
   border-radius: 9px;
   padding: 3px;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.1);
+  /* Never wider than the canvas: on a phone the centred bar overflowed BOTH
+     edges, putting Select and Lasso off-screen with no way to reach them. It
+     now starts at its left edge and scrolls sideways (touch, trackpad). */
+  max-width: calc(100% - 24px);
+  overflow-x: auto;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+
+.toolbar::-webkit-scrollbar {
+  display: none;
+}
+
+.toolbar > * {
+  flex: none;
 }
 
 .tool {

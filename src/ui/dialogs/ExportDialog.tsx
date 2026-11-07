@@ -317,17 +317,22 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
               </>
             )}
             {!isCsv && (
-              <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                <input
-                  type="checkbox"
-                  checked={highlightHealth}
-                  onChange={(e) => setHighlightHealth(e.target.checked)}
-                />
-                Highlight risks (SPOF / conflicts)
-              </label>
+              <>
+                {/* The grid is label | control pairs: this row needs its label cell. */}
+                <label>Risks</label>
+                <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={highlightHealth}
+                    onChange={(e) => setHighlightHealth(e.target.checked)}
+                  />
+                  Highlight risks (SPOF / conflicts)
+                </label>
+              </>
             )}
-            <label>Filename</label>
+            <label htmlFor="export-filename">Filename</label>
             <input
+              id="export-filename"
               value={fileName}
               placeholder={`${projectName} (auto)`}
               onChange={(e) => setFileName(e.target.value)}

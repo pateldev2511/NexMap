@@ -46,6 +46,10 @@ for (const [width, height] of [
       await expect(button).toBeInViewport();
     }
 
+    // The canvas toolbar too: every tool, first to last, can be reached.
+    const tools = page.getByRole('toolbar', { name: 'Canvas tools' }).getByRole('button');
+    for (const i of [0, (await tools.count()) - 1]) await tools.nth(i).click({ trial: true });
+
     // The panel toggles beside the strip are never covered by it.
     for (const name of ['Library', 'Inspector']) {
       await page.getByRole('button', { name, exact: true }).click({ trial: true });
