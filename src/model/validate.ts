@@ -8,13 +8,15 @@
  * M5; here it's just a function so it's trivially testable and worker-portable.
  */
 import {
-  cidrsOverlap,
-  ipInCidr,
+  canonicalIp,
+  isValidIpWithPrefix,
   isValidIpv4,
   isValidIpv6,
   parseCidr,
+  parseIpv4,
   stripPrefix,
 } from '@/lib/ipcidr';
+import { intToIpv4, usableHostRange } from '@/lib/ipam';
 import type { Device, Link, Rack, Subnet, ValidationIssue, Vlan } from './types';
 import { depthProblems, slotOf, slotsCollide } from '@/rack/rackModel';
 
@@ -101,11 +103,15 @@ function allAddresses(devices: Device[]): AddressRef[] {
   return out;
 }
 
-/** Rule: duplicate IP addresses across devices and their ports. */
+/**
+ * Rule: duplicate IP addresses across devices and their ports. Addresses meet in
+ * their canonical spelling, so "2001:db8::1" and "2001:0db8:0:0:0:0:0:1" collide;
+ * text that isn't an address buckets as itself (invalid-ip reports it).
+ */
 function checkDuplicateIps(devices: Device[]): ValidationIssue[] {
   const byIp = new Map<string, string[]>();
   for (const { ip: raw, deviceId } of allAddresses(devices)) {
-    const ip = stripPrefix(raw);
+    const ip = canonicalIp(raw) ?? stripPrefix(raw);
     if (!ip) continue;
     const list = byIp.get(ip) ?? [];
     list.push(deviceId);
@@ -122,20 +128,24 @@ function checkDuplicateIps(devices: Device[]): ValidationIssue[] {
         code: 'duplicate-ip',
         message: `IP ${ip} is assigned to ${ids.length} interfaces.`,
         objectIds,
+        address: ip,
       });
     }
   }
   return issues;
 }
 
-/** Rule: every IP (management or per-port) is a valid IPv4/IPv6, /prefix a valid CIDR. */
+/**
+ * Rule: every IP (management or per-port) is a valid IPv4/IPv6, and a /prefix on it
+ * fits its family (/0–32 or /0–128).
+ */
 function checkInvalidIpCidr(devices: Device[]): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   for (const { ip, deviceId } of allAddresses(devices)) {
     const raw = ip.trim();
     if (!raw) continue;
     if (raw.includes('/')) {
-      if (!parseCidr(raw)) {
+      if (!isValidIpWithPrefix(raw)) {
         issues.push({
           id: issueId(),
           severity: 'error',
@@ -220,56 +230,174 @@ function checkVlanRange(vlans: Vlan[]): ValidationIssue[] {
   return issues;
 }
 
-/** Rule: subnet CIDRs must be valid and not overlap. */
+/** A finding before this run stamps it with an issue id. */
+type Finding = Omit<ValidationIssue, 'id'>;
+
+/** A valid subnet's index in the plan and its inclusive address range (uint32). */
+interface SubnetRange {
+  index: number;
+  start: number;
+  end: number;
+}
+
+/**
+ * Rule: a valid subnet's gateway is a usable host inside it. Missing, malformed,
+ * off-subnet and network/broadcast gateways each get their own finding, and each
+ * says which addresses would do (the project's /31 and /32 host rules apply).
+ */
+function gatewayFinding(s: Subnet): Finding | null {
+  const raw = s.gateway?.trim();
+  const objectIds = [s.id];
+  if (!raw) {
+    return { severity: 'warn', code: 'subnet-no-gateway', message: `Subnet ${s.cidr} has no gateway.`, objectIds };
+  }
+  const hosts = usableHostRange(s.cidr)!;
+  const first = intToIpv4(hosts.firstInt);
+  const fix = hosts.count === 1 ? `use ${first}` : `use a host in ${first}–${intToIpv4(hosts.lastInt)}`;
+  const ip = stripPrefix(raw);
+  const v = parseIpv4(ip);
+  if (v === null) {
+    return {
+      severity: 'error',
+      code: 'subnet-gateway-invalid',
+      message: `Gateway "${raw}" on ${s.cidr} is not an IPv4 address — ${fix}.`,
+      objectIds,
+    };
+  }
+  const { network, prefix } = parseCidr(s.cidr)!;
+  if (v < network || v > network + 2 ** (32 - prefix) - 1) {
+    return {
+      severity: 'warn',
+      code: 'subnet-gateway-outside',
+      message: `Gateway ${ip} is outside ${s.cidr} — ${fix}.`,
+      objectIds,
+    };
+  }
+  if (v < hosts.firstInt || v > hosts.lastInt) {
+    return {
+      severity: 'warn',
+      code: 'subnet-gateway-unusable',
+      message: `Gateway ${ip} is the ${v === network ? 'network' : 'broadcast'} address of ${s.cidr} — ${fix}.`,
+      objectIds,
+    };
+  }
+  return null;
+}
+
+/**
+ * Every overlapping pair, from one sorted sweep instead of comparing all pairs.
+ * CIDR blocks never partly overlap — two either nest or are disjoint — so with the
+ * ranges ordered by start (broader first) the still-open ranges form a chain of
+ * containers, and each new range overlaps exactly the ones left open. Pairs come
+ * back in the original (i, j) order so the findings match the pairwise rule's.
+ */
+function overlapFindings(subnets: Subnet[], ranges: SubnetRange[]): Finding[] {
+  const sorted = [...ranges].sort((a, b) => a.start - b.start || b.end - a.end || a.index - b.index);
+  const open: SubnetRange[] = [];
+  const pairs: [number, number][] = [];
+  for (const r of sorted) {
+    while (open.length && open[open.length - 1]!.end < r.start) open.pop();
+    for (const o of open) pairs.push(o.index < r.index ? [o.index, r.index] : [r.index, o.index]);
+    open.push(r);
+  }
+  pairs.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+  return pairs.map(([i, j]) => {
+    const a = subnets[i]!;
+    const b = subnets[j]!;
+    return {
+      severity: 'warn',
+      code: 'overlapping-subnet',
+      message: `Subnets ${a.cidr} and ${b.cidr} overlap.`,
+      objectIds: [a.id, b.id],
+    };
+  });
+}
+
+/** The IP plan parsed once: its findings, and the merged ranges it covers (sorted). */
+interface PlanCheck {
+  key: string;
+  findings: Finding[];
+  covered: [number, number][];
+}
+
+/**
+ * The plan checks read only each subnet's id, CIDR and gateway, so the last
+ * result is kept and reused while those are unchanged — an edit elsewhere in the
+ * diagram never re-checks a 1,000-subnet plan. Keyed on content, not identity, so
+ * a subnet edited in place is never served stale.
+ */
+let lastPlan: PlanCheck | null = null;
+
+function checkPlan(subnets: Subnet[]): PlanCheck {
+  const key = subnets.map((s) => `${s.id}\u0000${s.cidr}\u0000${s.gateway ?? ''}`).join('\u0001');
+  if (lastPlan?.key === key) return lastPlan;
+  const findings: Finding[] = [];
+  const ranges: SubnetRange[] = [];
+  subnets.forEach((s, index) => {
+    const p = parseCidr(s.cidr);
+    if (!p) {
+      findings.push(
+        s.cidr.includes(':') && isValidIpWithPrefix(s.cidr.trim())
+          ? {
+              severity: 'info',
+              code: 'ipv6-subnet-unsupported',
+              message: `"${s.cidr}" is an IPv6 prefix — the IP Plan checks IPv4 subnets only, so its overlaps and gateway aren't checked.`,
+              objectIds: [s.id],
+            }
+          : {
+              severity: 'error',
+              code: 'invalid-subnet-cidr',
+              message: `"${s.cidr}" is not a valid subnet CIDR.`,
+              objectIds: [s.id],
+            },
+      );
+      return;
+    }
+    ranges.push({ index, start: p.network, end: p.network + 2 ** (32 - p.prefix) - 1 });
+    const gw = gatewayFinding(s);
+    if (gw) findings.push(gw);
+  });
+  findings.push(...overlapFindings(subnets, ranges));
+
+  const covered: [number, number][] = [];
+  for (const r of [...ranges].sort((a, b) => a.start - b.start)) {
+    const last = covered[covered.length - 1];
+    if (last && r.start <= last[1] + 1) last[1] = Math.max(last[1], r.end);
+    else covered.push([r.start, r.end]);
+  }
+  lastPlan = { key, findings, covered };
+  return lastPlan;
+}
+
+/** Rule: subnet CIDRs must be valid, have a usable gateway, and not overlap. */
 function checkSubnets(subnets: Subnet[]): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-  for (const s of subnets) {
-    if (!parseCidr(s.cidr)) {
-      issues.push({
-        id: issueId(),
-        severity: 'error',
-        code: 'invalid-subnet-cidr',
-        message: `"${s.cidr}" is not a valid subnet CIDR.`,
-        objectIds: [s.id],
-      });
-    } else if (!s.gateway?.trim()) {
-      issues.push({
-        id: issueId(),
-        severity: 'warn',
-        code: 'subnet-no-gateway',
-        message: `Subnet ${s.cidr} has no gateway.`,
-        objectIds: [s.id],
-      });
-    }
+  return checkPlan(subnets).findings.map((f) => ({ id: issueId(), ...f, objectIds: [...f.objectIds] }));
+}
+
+/** True if `v` falls in one of the sorted, disjoint `covered` ranges (binary search). */
+function isCovered(covered: [number, number][], v: number): boolean {
+  let lo = 0;
+  let hi = covered.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const [start, end] = covered[mid]!;
+    if (v < start) hi = mid - 1;
+    else if (v > end) lo = mid + 1;
+    else return true;
   }
-  // Pairwise overlap.
-  for (let i = 0; i < subnets.length; i++) {
-    for (let j = i + 1; j < subnets.length; j++) {
-      const a = subnets[i]!;
-      const b = subnets[j]!;
-      if (parseCidr(a.cidr) && parseCidr(b.cidr) && cidrsOverlap(a.cidr, b.cidr)) {
-        issues.push({
-          id: issueId(),
-          severity: 'warn',
-          code: 'overlapping-subnet',
-          message: `Subnets ${a.cidr} and ${b.cidr} overlap.`,
-          objectIds: [a.id, b.id],
-        });
-      }
-    }
-  }
-  return issues;
+  return false;
 }
 
 /** Rule: every IP (management or per-port) should fall within one of the defined subnets. */
 function checkIpOutsideSubnet(devices: Device[], subnets: Subnet[]): ValidationIssue[] {
-  const cidrs = subnets.map((s) => s.cidr).filter((c) => parseCidr(c));
-  if (cidrs.length === 0) return [];
+  const { covered } = checkPlan(subnets);
+  if (covered.length === 0) return [];
   const issues: ValidationIssue[] = [];
   for (const { ip: raw, deviceId } of allAddresses(devices)) {
     const ip = stripPrefix(raw);
-    if (!isValidIpv4(ip)) continue; // IPv6/invalid handled elsewhere
-    if (!cidrs.some((c) => ipInCidr(ip, c))) {
+    const v = parseIpv4(ip);
+    if (v === null) continue; // IPv6/invalid handled elsewhere
+    if (!isCovered(covered, v)) {
       issues.push({
         id: issueId(),
         severity: 'warn',

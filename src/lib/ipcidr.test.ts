@@ -3,6 +3,9 @@ import {
   parseIpv4,
   isValidIpv4,
   isValidIpv6,
+  parseIpv6,
+  canonicalIp,
+  isValidIpWithPrefix,
   parseCidr,
   isValidCidr,
   ipInCidr,
@@ -37,6 +40,82 @@ describe('isValidIpv6', () => {
     expect(isValidIpv6('192.168.1.1')).toBe(false);
     expect(isValidIpv6('2001::db8::1')).toBe(false); // double ::
     expect(isValidIpv6('xyz')).toBe(false);
+  });
+
+  // #30: colon placement and group count, not just "has a colon and hex groups".
+  it.each([
+    ['::', true],
+    ['::1', true],
+    ['1::', true],
+    ['2001:db8::1', true],
+    ['2001:0db8:0000:0000:0000:0000:0000:0001', true],
+    ['2001:DB8:0:0:0:0:0:1', true],
+    ['1:2:3:4:5:6:7::', true], // :: standing for one group
+    ['::ffff:192.0.2.1', true], // IPv4-mapped tail
+    ['64:ff9b::192.0.2.33', true],
+    [':', false],
+    [':::', false],
+    ['1:2', false], // too few groups, no ::
+    ['1:2:3:4:5:6:7', false],
+    ['1:2:3:4:5:6:7:8:9', false],
+    ['1::2:3:4:5:6:7:8', false], // :: with eight explicit groups
+    [':1:2:3:4:5:6:7', false], // lone leading colon
+    ['1:2:3:4:5:6:7:', false], // lone trailing colon
+    ['1:::2', false],
+    ['12345::1', false], // group too long
+    ['g::1', false],
+    ['::1.2.3', false],
+    ['1.2.3.4::', false], // dotted quad only allowed at the end
+    ['fe80::1%eth0', false], // zone ids aren't supported
+  ])('isValidIpv6(%s) is %s', (ip, ok) => {
+    expect(isValidIpv6(ip)).toBe(ok);
+  });
+
+  it('parses to eight 16-bit groups', () => {
+    expect(parseIpv6('2001:db8::1')).toEqual([0x2001, 0xdb8, 0, 0, 0, 0, 0, 1]);
+    expect(parseIpv6('::ffff:192.0.2.1')).toEqual([0, 0, 0, 0, 0, 0xffff, 0xc000, 0x201]);
+    expect(parseIpv6('1:2')).toBeNull();
+  });
+});
+
+describe('canonicalIp', () => {
+  it.each([
+    ['2001:db8::1', '2001:db8::1'],
+    ['2001:0db8:0:0:0:0:0:1', '2001:db8::1'],
+    ['2001:DB8::0:1', '2001:db8::1'],
+    ['2001:db8:0:0:1:0:0:1', '2001:db8::1:0:0:1'], // leftmost of equal runs
+    ['2001:0:0:1:0:0:0:1', '2001:0:0:1::1'], // longest run wins
+    ['2001:db8:0:1:1:1:1:1', '2001:db8:0:1:1:1:1:1'], // a single 0 group isn't compressed
+    ['0:0:0:0:0:0:0:0', '::'],
+    ['::ffff:c000:201', '::ffff:192.0.2.1'],
+    ['2001:db8::1/64', '2001:db8::1'],
+    [' 10.0.0.1/24 ', '10.0.0.1'],
+  ])('%s → %s', (raw, canon) => {
+    expect(canonicalIp(raw)).toBe(canon);
+  });
+
+  it('is null for anything that is not an address', () => {
+    expect(canonicalIp('1:2')).toBeNull();
+    expect(canonicalIp('router')).toBeNull();
+    expect(canonicalIp('')).toBeNull();
+  });
+});
+
+describe('isValidIpWithPrefix', () => {
+  it.each([
+    ['10.0.0.5/24', true],
+    ['10.0.0.5/32', true],
+    ['10.0.0.5/33', false],
+    ['2001:db8::1/64', true],
+    ['2001:db8::/0', true],
+    ['2001:db8::1/128', true],
+    ['2001:db8::1/129', false],
+    ['2001:db8::1/', false],
+    ['2001:db8::1/064', false],
+    ['1:2/64', false],
+    ['10.0.0.5', false], // no prefix
+  ])('%s is %s', (raw, ok) => {
+    expect(isValidIpWithPrefix(raw)).toBe(ok);
   });
 });
 

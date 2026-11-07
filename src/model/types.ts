@@ -538,4 +538,6 @@ export interface ValidationIssue {
   message: string;
   /** Object IDs this issue points at, for jump-to-object (DA-DES-2.5). */
   objectIds: string[];
+  /** For an address finding (duplicate IP): the canonical address, so the UI can open the field that holds it. */
+  address?: string;
 }

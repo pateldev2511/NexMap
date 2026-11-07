@@ -132,6 +132,13 @@
   outline: none;
 }
 
+/* A field a validation finding points at; clears as soon as the finding does. */
+.cellInvalid,
+.cellInvalid:hover,
+.cellInvalid:focus {
+  border-color: var(--sev-error);
+}
+
 .rowDelete {
   display: grid;
   place-items: center;
@@ -208,8 +215,51 @@
   background: var(--sev-info);
 }
 
+.issueBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+}
+
+/* The message is the row's open action — a real button, so Tab + Enter reach it. */
 .issueMsg {
   color: var(--chrome-fg);
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.issueMsg:focus-visible,
+.issueChip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* One chip per affected object of a multi-object finding (both duplicates, etc.). */
+.issueTargets {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.issueChip {
+  font: inherit;
+  font-size: 11px;
+  padding: 0 7px;
+  color: var(--chrome-fg);
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.issueChip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* One-click Conductor fix for issues that have a safe, deterministic remedy. */

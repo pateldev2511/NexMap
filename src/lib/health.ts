@@ -272,9 +272,10 @@ export function analyzeHealth(devices: Device[], links: Link[]): HealthReport {
 
 /**
  * Maximum number of edge-disjoint paths between two devices (= the network's redundancy
- * between them, by Menger's theorem). 0 = no path; 1 = a single chain (any link cut isolates
- * them); ≥2 = redundant. Unit-capacity max-flow via BFS-augmenting (Edmonds–Karp). OPT-IN
- * only — do not call in the debounced sweep.
+ * between them, by Menger's theorem). 0 = no path; 1 = some single link cut separates
+ * them (see `pathRedundancy` for which); ≥2 = no single link cut does. Unit-capacity
+ * max-flow via BFS-augmenting (Edmonds–Karp). OPT-IN only — do not call in the
+ * debounced sweep.
  */
 export function edgeDisjointPaths(
   devices: Device[],
@@ -332,4 +333,62 @@ export function edgeDisjointPaths(
     flow++;
   }
   return flow;
+}
+
+export interface PathRedundancy {
+  /** Edge-disjoint paths between the pair; 0 when either device is missing or unreached. */
+  paths: number;
+  /**
+   * With exactly one path: the links whose loss alone separates the pair, in path
+   * order — never links on unrelated branches. Empty otherwise.
+   */
+  criticalLinkIds: string[];
+}
+
+/**
+ * The opt-in redundancy check between two devices, with the links that make a single
+ * path fragile. A link separates the pair iff it lies on every path between them,
+ * i.e. it is a bridge (and not one of a parallel bundle) on any one path — so one BFS
+ * path intersected with the bridges names them all.
+ */
+export function pathRedundancy(
+  devices: Device[],
+  links: Link[],
+  sourceId: string,
+  targetId: string,
+): PathRedundancy {
+  const paths = edgeDisjointPaths(devices, links, sourceId, targetId);
+  if (paths !== 1) return { paths, criticalLinkIds: [] };
+
+  const has = new Set(devices.map((d) => d.id));
+  const byNode = new Map<string, Link[]>();
+  const pairCount = new Map<string, number>();
+  for (const l of links) {
+    if (l.sourceId === l.targetId || !has.has(l.sourceId) || !has.has(l.targetId)) continue;
+    (byNode.get(l.sourceId) ?? byNode.set(l.sourceId, []).get(l.sourceId)!).push(l);
+    (byNode.get(l.targetId) ?? byNode.set(l.targetId, []).get(l.targetId)!).push(l);
+    const k = [l.sourceId, l.targetId].sort().join('|');
+    pairCount.set(k, (pairCount.get(k) ?? 0) + 1);
+  }
+  // One path, source → target, remembering the link used to reach each device.
+  const via = new Map<string, Link | null>([[sourceId, null]]);
+  const queue = [sourceId];
+  for (let i = 0; i < queue.length && !via.has(targetId); i++) {
+    const u = queue[i]!;
+    for (const l of byNode.get(u) ?? []) {
+      const v = l.sourceId === u ? l.targetId : l.sourceId;
+      if (via.has(v)) continue;
+      via.set(v, l);
+      queue.push(v);
+    }
+  }
+  const { bridges } = cutVerticesAndBridges(buildAdjacency(devices, links));
+  const criticalLinkIds: string[] = [];
+  for (let cur = targetId; cur !== sourceId; ) {
+    const l = via.get(cur)!;
+    const k = [l.sourceId, l.targetId].sort().join('|');
+    if (bridges.has(k) && pairCount.get(k) === 1) criticalLinkIds.push(l.id);
+    cur = l.sourceId === cur ? l.targetId : l.sourceId;
+  }
+  return { paths, criticalLinkIds: criticalLinkIds.reverse() };
 }

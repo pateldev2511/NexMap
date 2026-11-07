@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { analyzeHealth, articulationPoints, edgeDisjointPaths } from './health';
+import { analyzeHealth, articulationPoints, edgeDisjointPaths, pathRedundancy } from './health';
 import type { Device, Link } from '@/model/types';
 
 let n = 0;
@@ -151,5 +151,40 @@ describe('edgeDisjointPaths', () => {
   it('counts parallel links as separate disjoint paths', () => {
     const devices = ['A', 'B'].map(dev);
     expect(edgeDisjointPaths(devices, [link('A', 'B'), link('A', 'B')], 'A', 'B')).toBe(2);
+  });
+});
+
+describe('pathRedundancy (#42)', () => {
+  it('names only the links on the path, not unrelated branch links', () => {
+    // A – B – C, with branches B – X – Y and a redundant loop C – P – Q – C.
+    const ab = link('A', 'B');
+    const bc = link('B', 'C');
+    const branch = [link('B', 'X'), link('X', 'Y')];
+    const loop = [link('C', 'P'), link('P', 'Q'), link('Q', 'C')];
+    const devices = ['A', 'B', 'C', 'X', 'Y', 'P', 'Q'].map(dev);
+    const r = pathRedundancy(devices, [ab, bc, ...branch, ...loop], 'A', 'Q');
+    expect(r).toEqual({ paths: 1, criticalLinkIds: [ab.id, bc.id] });
+  });
+
+  it('leaves a redundant segment and a parallel bundle off the critical list', () => {
+    const ab1 = link('A', 'B');
+    const ab2 = link('A', 'B'); // parallel pair: no single cut
+    const bc = link('B', 'C');
+    const ring = [link('C', 'D'), link('D', 'E'), link('E', 'C')];
+    const devices = ['A', 'B', 'C', 'D', 'E'].map(dev);
+    expect(pathRedundancy(devices, [ab1, ab2, bc, ...ring], 'A', 'E')).toEqual({
+      paths: 1,
+      criticalLinkIds: [bc.id],
+    });
+  });
+
+  it('tracks the topology: remove the link, add a backup, delete an endpoint', () => {
+    const devices = ['A', 'B'].map(dev);
+    const direct = link('A', 'B');
+    expect(pathRedundancy(devices, [direct], 'A', 'B')).toEqual({ paths: 1, criticalLinkIds: [direct.id] });
+    expect(pathRedundancy(devices, [], 'A', 'B')).toEqual({ paths: 0, criticalLinkIds: [] });
+    const backup = link('A', 'B');
+    expect(pathRedundancy(devices, [direct, backup], 'A', 'B')).toEqual({ paths: 2, criticalLinkIds: [] });
+    expect(pathRedundancy([dev('A')], [direct], 'A', 'B')).toEqual({ paths: 0, criticalLinkIds: [] });
   });
 });
