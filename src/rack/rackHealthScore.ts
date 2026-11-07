@@ -7,7 +7,7 @@
  *   capacity     — not over watts/weight; U not jammed past 90%
  *   redundancy   — powered gear is dual-corded, A/B load is even, and no rated PDU
  *                  or UPS gives out when the other feed fails
- *   cabling      — no health issues touching this rack; no missing cable lengths
+ *   cabling      — no health issues touching this rack's gear or cables; no missing lengths
  *   inventory    — devices carry an asset tag + vendor/model for handoff
  *
  * The lowest dimension becomes the "biggest risk" headline. Thresholds reuse the app's
@@ -104,11 +104,15 @@ export function rackHealthScore(
       : `${nameOf(tripping!.pduId)} trips if feed ${tripping!.feed === 'A' ? 'B' : 'A'} fails.`;
   }
 
-  // cabling: issues touching this rack's devices + cables missing an estimated length.
-  const rackIssues = issues.filter((i) => i.objectIds.some((id) => inRackIds.has(id)));
+  // cabling: issues touching this rack's devices or cables + cables missing an estimated length.
   const rackCables = cables.filter(
     (c) => inRackIds.has(c.aEnd.deviceId) || inRackIds.has(c.bEnd.deviceId),
   );
+  // Per-cable findings (speed/media/VLAN mismatch, no length) name only the cable, so a
+  // cable with an end here makes its finding this rack's too — a cross-rack run counts
+  // against both racks. Each finding counts once per rack however many ids it names.
+  const touching = new Set([...inRackIds, ...rackCables.map((c) => c.id)]);
+  const rackIssues = issues.filter((i) => i.objectIds.some((id) => touching.has(id)));
   const missingLen = rackCables.filter((c) => c.lengthFt == null).length;
   let cabling = 1;
   let cablingRisk = 'Cabling is clean.';
