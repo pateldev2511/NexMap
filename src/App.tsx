@@ -37,7 +37,15 @@ import type { CustomRuleSpec } from '@/model/types';
 import { keyboardRouter } from './input/router';
 import { useQuietChrome } from './ui/useQuietChrome';
 import { ValidationAnnouncer } from './ui/ValidationAnnouncer';
-import { applyReduceMotion, getReduceMotion, applyMotionLevel, getMotionLevel } from './lib/prefs';
+import {
+  applyReduceMotion,
+  getReduceMotion,
+  applyMotionLevel,
+  getMotionLevel,
+  readPref,
+  writePref,
+  removePref,
+} from './lib/prefs';
 import { installTooltips } from './ui/tooltip';
 import { ReadOnlyBanner, ErrorToast, NoticeToast } from './ui/dialogs/ReadOnlyBanner';
 import { NexIcon } from './ui/icons/NexIcon';
@@ -56,11 +64,11 @@ type Theme = 'light' | 'dark';
 
 function useTheme(): [Theme, () => void] {
   const [theme, setTheme] = useState<Theme>(() =>
-    localStorage.getItem('nexmap.theme') === 'dark' ? 'dark' : 'light',
+    readPref('nexmap.theme') === 'dark' ? 'dark' : 'light',
   );
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem('nexmap.theme', theme);
+    writePref('nexmap.theme', theme);
   }, [theme]);
   return [theme, () => setTheme((t) => (t === 'light' ? 'dark' : 'light'))];
 }
@@ -111,7 +119,7 @@ export function App() {
   const [presentation, setPresentation] = useState(false);
   const [showPages, setShowPages] = useState(false);
   const [mode, setMode] = useState<DesignerMode | null>(() => {
-    const m = localStorage.getItem('nexmap.mode');
+    const m = readPref('nexmap.mode');
     return m === 'rack' || m === 'network' ? m : null;
   });
   const [showSettings, setShowSettings] = useState(false);
@@ -181,7 +189,7 @@ export function App() {
 
   function pickMode(m: DesignerMode) {
     setMode(m);
-    localStorage.setItem('nexmap.mode', m);
+    writePref('nexmap.mode', m);
     // Rack jumps straight into its own empty state; network shows the template start screen.
     setFirstRunDone(m === 'rack');
   }
@@ -193,7 +201,7 @@ export function App() {
     // lingering recoverable would otherwise pop a recovery prompt over the
     // chooser after switching.
     persistence.discardDraft();
-    localStorage.removeItem('nexmap.mode');
+    removePref('nexmap.mode');
     setMode(null);
     setFirstRunDone(false);
   }

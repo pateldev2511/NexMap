@@ -5,27 +5,18 @@
  * migrate. "Returning" = localStorage had ANY prior NexMap state when this
  * module first loaded (before this session wrote anything).
  */
-const hadPriorState =
-  typeof localStorage !== 'undefined' &&
-  (() => {
-    try {
-      return localStorage.length > 0;
-    } catch {
-      return false;
-    }
-  })();
+import { readPref, storedPrefCount, writePref } from '@/lib/prefs';
+
+// Through the guarded prefs layer: a blocked localStorage throws even on access.
+const hadPriorState = storedPrefCount() > 0;
 
 const FLAG = 'nexmap.hint.rackWheelPan';
 
 /** True exactly once, and only for returning users. Marks the flag either way. */
 export function consumeRackWheelHint(): boolean {
-  try {
-    if (localStorage.getItem(FLAG)) return false;
-    localStorage.setItem(FLAG, '1');
-    return hadPriorState;
-  } catch {
-    return false;
-  }
+  if (readPref(FLAG)) return false;
+  writePref(FLAG, '1');
+  return hadPriorState;
 }
 
 export const RACK_WHEEL_HINT_EVENT = 'nexmap:rack-wheel-hint';

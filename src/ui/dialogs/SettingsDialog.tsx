@@ -8,6 +8,8 @@ import {
   setReduceMotion,
   getMotionLevel,
   setMotionLevel,
+  clearPrefs,
+  prefsPersistent,
   type ConnectMode,
   type MotionLevel,
 } from '@/lib/prefs';
@@ -61,7 +63,7 @@ export function SettingsDialog({
     )
       return;
     try {
-      localStorage.clear();
+      clearPrefs();
       if (idbAvailable)
         await new Promise<void>((res) => {
           const r = indexedDB.deleteDatabase('nexmap');
@@ -197,6 +199,14 @@ export function SettingsDialog({
                 idbAvailable
                   ? 'IndexedDB — autosave & recovery enabled'
                   : 'IndexedDB unavailable — autosave is OFF (export often!)'
+              }
+            />
+            <Status
+              ok={prefsPersistent()}
+              label={
+                prefsPersistent()
+                  ? 'Local storage — settings are remembered'
+                  : 'Local storage blocked — settings last for this session only'
               }
             />
             <div
