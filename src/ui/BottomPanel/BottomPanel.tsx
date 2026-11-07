@@ -21,6 +21,7 @@ import { severityRank } from '@/model/validate';
 import type { Device, Link, Rack, Subnet, ValidationIssue, Vlan } from '@/model/types';
 import { stripPrefix } from '@/lib/ipcidr';
 import { subnetUsage, type SubnetUsage } from '@/lib/ipam';
+import { pathRedundancy } from '@/lib/health';
 import styles from './BottomPanel.module.css';
 
 /**
@@ -106,7 +107,7 @@ export function BottomPanel() {
           {tab === 'vlans' && <VlanTable vlans={vlans} />}
           {tab === 'racks' && <RackTable racks={racks} devices={devices} />}
           {tab === 'validation' && <ValidationList issues={issues} />}
-          {tab === 'health' && <HealthPanel devices={devices} />}
+          {tab === 'health' && <HealthPanel devices={devices} links={links} />}
           {tab === 'rules' && <RulesPanel />}
         </div>
       )}
@@ -1193,20 +1194,49 @@ const OffenderList = memo(function OffenderList({
   );
 });
 
-function HealthPanel({ devices }: { devices: Device[] }) {
+/**
+ * The path-redundancy line for a checked pair. It is re-derived from the diagram as
+ * it stands on every render, so removing a link, adding a backup, deleting an
+ * endpoint or undoing any of it updates the verdict instead of leaving a stale one.
+ */
+function redundancyText(
+  devices: Device[],
+  links: Link[],
+  checked: { a: string; b: string; aName: string; bName: string },
+): string {
+  const byId = new Map(devices.map((d) => [d.id, d]));
+  const gone = [checked.a, checked.b].filter((id) => !byId.has(id));
+  if (gone.length > 0) {
+    const names = gone.map((id) => (id === checked.a ? checked.aName : checked.bName));
+    return `${names.join(' and ')} ${gone.length === 1 ? 'was' : 'were'} removed — pick two devices and check again.`;
+  }
+  const { paths, criticalLinkIds } = pathRedundancy(devices, links, checked.a, checked.b);
+  if (paths === 0) return 'No path between them.';
+  if (paths > 1) return `${paths} edge-disjoint paths — redundant; no single link cut separates them.`;
+  const linkById = new Map(links.map((l) => [l.id, l]));
+  const names = criticalLinkIds.map((id) => {
+    const l = linkById.get(id)!;
+    return `${byId.get(l.sourceId)?.name ?? '?'} – ${byId.get(l.targetId)?.name ?? '?'}`;
+  });
+  const shown = names.slice(0, 3).join(', ') + (names.length > 3 ? ` +${names.length - 3} more` : '');
+  return `1 path — no redundancy: losing ${names.length === 1 ? 'the link' : 'any of'} ${shown} separates them.`;
+}
+
+function HealthPanel({ devices, links }: { devices: Device[]; links: Link[] }) {
   const health = useProjectStore((s) => s.health);
   const focus = useProjectStore((s) => s.focusObject);
-  const checkRedundancy = useProjectStore((s) => s.checkRedundancy);
   const [a, setA] = useState('');
   const [b, setB] = useState('');
-  const [result, setResult] = useState<number | null>(null);
+  // The pair last checked (names kept so a deleted endpoint can still be named).
+  const [checked, setChecked] = useState<{ a: string; b: string; aName: string; bName: string } | null>(null);
 
   const scoreTone =
     health.score >= 85 ? styles.usage_low : health.score >= 60 ? styles.usage_mid : styles.usage_high;
 
+  const nameOf = (id: string) => devices.find((d) => d.id === id)?.name ?? id;
   const run = () => {
     if (!a || !b || a === b) return;
-    setResult(checkRedundancy(a, b));
+    setChecked({ a, b, aName: nameOf(a), bName: nameOf(b) });
   };
 
   return (
@@ -1248,13 +1278,13 @@ function HealthPanel({ devices }: { devices: Device[] }) {
 
       <div className={styles.redundancy}>
         <span className={styles.redundancyTitle}>Path redundancy</span>
-        <select value={a} onChange={(e) => { setA(e.target.value); setResult(null); }} aria-label="From device">
+        <select value={a} onChange={(e) => { setA(e.target.value); setChecked(null); }} aria-label="From device">
           <option value="">From…</option>
           {devices.map((d) => (
             <option key={d.id} value={d.id}>{d.name}</option>
           ))}
         </select>
-        <select value={b} onChange={(e) => { setB(e.target.value); setResult(null); }} aria-label="To device">
+        <select value={b} onChange={(e) => { setB(e.target.value); setChecked(null); }} aria-label="To device">
           <option value="">To…</option>
           {devices.map((d) => (
             <option key={d.id} value={d.id}>{d.name}</option>
@@ -1263,15 +1293,9 @@ function HealthPanel({ devices }: { devices: Device[] }) {
         <button className={styles.addRow} onClick={run} disabled={!a || !b || a === b}>
           Check
         </button>
-        {result !== null && (
-          <span className={styles.redundancyResult}>
-            {result === 0
-              ? 'No path between them.'
-              : result === 1
-                ? '1 path — no redundancy (any single link cut isolates them).'
-                : `${result} edge-disjoint paths — redundant.`}
-          </span>
-        )}
+        <span className={styles.redundancyResult} role="status" title="Updates as you edit the diagram">
+          {checked ? redundancyText(devices, links, checked) : ''}
+        </span>
       </div>
     </div>
   );
