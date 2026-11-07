@@ -207,7 +207,7 @@ export function App() {
       <button
         className={shell.topbarBtn}
         onClick={handleNew}
-        title="New project (Ctrl+N)"
+        title="New project (Alt+N)"
       >
         <NexIcon name="new-file" />
         <span>New</span>
@@ -354,9 +354,34 @@ export function App() {
   // text undo, not model undo — and Cmd+Z mid-drag is consumed by the
   // router's gesture-cancel stage before it can pop history.
   useQuietChrome(); // M3c: earned-quiet chrome demotion driver
+  const presentingRef = useRef(presentation);
+  presentingRef.current = presentation;
+  // The registered handler outlives renders; reach the current handleNew (it
+  // reads `dirty` for the unsaved-work confirm) rather than a stale capture.
+  const handleNewRef = useRef(handleNew);
+  handleNewRef.current = handleNew;
   useEffect(() => {
     keyboardRouter.install();
     const unregister = keyboardRouter.registerApp((e) => {
+      // Presenting is read-only (#35): no undo/redo or open, and no editor-only
+      // overlays (export, palette, help) opening unseen behind it. Swallowed so the
+      // browser's own ⌘O / ⌘K don't fire either. Save still works.
+      if (presentingRef.current) {
+        const k = e.key.toLowerCase();
+        if ((e.metaKey || e.ctrlKey) && ['z', 'o', 'e', 'k'].includes(k)) {
+          e.preventDefault();
+          return true;
+        }
+        if (e.key === '?' || (e.altKey && e.code === 'KeyN')) return true;
+      }
+      // New project: Alt/Option+N (#56). ⌘N/Ctrl+N is the browser's New Window and
+      // can't be intercepted, so it isn't offered. Matched by code: Option+N on
+      // macOS is a dead key (e.key is 'Dead'/'˜'), not 'n'.
+      if (e.altKey && !e.metaKey && !e.ctrlKey && e.code === 'KeyN') {
+        e.preventDefault();
+        handleNewRef.current();
+        return true;
+      }
       if (e.metaKey || e.ctrlKey) {
         const k = e.key.toLowerCase();
         if (k === 'z') {
@@ -526,7 +551,7 @@ export function App() {
               const st = useProjectStore.getState;
               // Commands relevant in both designers.
               const generic: PaletteCommand[] = [
-                { id: 'new', label: 'New project', hint: '⌘N', group: 'File', run: handleNew },
+                { id: 'new', label: 'New project', hint: '⌥N', group: 'File', run: handleNew },
                 { id: 'open', label: 'Open .nexmap…', hint: '⌘O', group: 'File', run: () => void handleOpen() },
                 { id: 'save', label: 'Save', hint: '⌘S', group: 'File', run: () => void persistence.save() },
                 { id: 'undo', label: 'Undo', hint: '⌘Z', group: 'Edit', run: doUndo },

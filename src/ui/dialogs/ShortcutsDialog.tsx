@@ -8,7 +8,7 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
   {
     title: 'File',
     items: [
-      ['Ctrl/Cmd + N', 'New project'],
+      ['Alt/Option + N', 'New project'],
       ['Ctrl/Cmd + O', 'Open .nexmap'],
       ['Ctrl/Cmd + S', 'Save'],
       ['Ctrl/Cmd + E', 'Export'],
@@ -21,6 +21,8 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
       ['Ctrl/Cmd + Shift + Z', 'Redo'],
       ['Ctrl/Cmd + A', 'Select all'],
       ['Ctrl/Cmd + D', 'Duplicate selection'],
+      ['Ctrl/Cmd + C / X', 'Copy / cut selection'],
+      ['Ctrl/Cmd + V', 'Paste devices, CSV rows or an image'],
       ['Double-click text', 'Edit text on canvas'],
       ['Delete / Backspace', 'Delete selection'],
     ],
