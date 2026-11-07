@@ -253,6 +253,7 @@ function DeviceInspector({ device }: { device: Device }) {
           <div className={styles.ipRow}>
             <input
               className={mgmtErr ? styles.invalid : ''}
+              data-address-field={`${device.id}:mgmt`}
               value={device.managementIp ?? ''}
               placeholder="10.0.0.1 or 10.0.0.1/24"
               onChange={(e) => set('managementIp', e.target.value)}
@@ -522,6 +523,7 @@ function InterfacesSection({ device }: { device: Device }) {
           />
           <input
             className={`${styles.ifaceIp}${ipError(iface.ip) ? ` ${styles.invalid}` : ''}`}
+            data-address-field={`${device.id}:${iface.id}`}
             value={iface.ip ?? ''}
             placeholder="port IP"
             aria-label="Interface IP"

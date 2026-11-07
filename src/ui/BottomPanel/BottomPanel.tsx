@@ -1,4 +1,4 @@
-import { Fragment, memo, useState } from 'react';
+import { Fragment, memo, useEffect, useRef, useState } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import { getPanelOpen, setPanelOpen } from '@/lib/prefs';
 import { NexIcon } from '@/ui/icons/NexIcon';
@@ -19,7 +19,7 @@ import {
 import type { CustomRuleSpec } from '@/model/types';
 import { severityRank } from '@/model/validate';
 import type { Device, Link, Rack, Subnet, ValidationIssue, Vlan } from '@/model/types';
-import { stripPrefix } from '@/lib/ipcidr';
+import { canonicalIp, stripPrefix } from '@/lib/ipcidr';
 import { subnetUsage, type SubnetUsage } from '@/lib/ipam';
 import { pathRedundancy } from '@/lib/health';
 import styles from './BottomPanel.module.css';
@@ -30,6 +30,62 @@ import styles from './BottomPanel.module.css';
  * (DA-DES-2.5) via focusObject. Collapsed by default so the canvas leads.
  */
 type Tab = 'inventory' | 'links' | 'ipplan' | 'vlans' | 'racks' | 'validation' | 'health' | 'rules';
+
+/** A table field to focus once its tab renders — what opening a finding asks for. */
+interface Reveal {
+  id: string;
+  field: string;
+  tick: number;
+}
+
+/**
+ * The IP Plan / VLAN field each finding is about, so opening it lands on the input
+ * to repair (and that input stays marked until the finding clears).
+ */
+const FINDING_FIELD: Record<string, 'cidr' | 'gateway' | 'vlanId'> = {
+  'invalid-subnet-cidr': 'cidr',
+  'ipv6-subnet-unsupported': 'cidr',
+  'overlapping-subnet': 'cidr',
+  'subnet-no-gateway': 'gateway',
+  'subnet-gateway-invalid': 'gateway',
+  'subnet-gateway-outside': 'gateway',
+  'subnet-gateway-unusable': 'gateway',
+  'duplicate-vlan': 'vlanId',
+  'invalid-vlan-range': 'vlanId',
+};
+
+/** The first finding on one object's field, for the table's invalid marker. */
+function fieldIssue(issues: ValidationIssue[], id: string, field: string): string | undefined {
+  return issues.find((i) => FINDING_FIELD[i.code] === field && i.objectIds.includes(id))?.message;
+}
+
+/** A device's address fields holding `address` (canonical): "mgmt" or a port's id. */
+function addressFields(device: Device, address: string): { key: string; label: string }[] {
+  const same = (ip?: string) => !!ip?.trim() && (canonicalIp(ip) ?? stripPrefix(ip)) === address;
+  const out = same(device.managementIp) ? [{ key: 'mgmt', label: 'management IP' }] : [];
+  for (const iface of device.interfaces ?? []) {
+    if (same(iface.ip)) out.push({ key: iface.id, label: iface.name || 'port' });
+  }
+  return out;
+}
+
+/**
+ * Focus the Inspector field (data-address-field) once the device's Inspector has
+ * rendered — a few frames at most; if the Inspector is collapsed, the device is
+ * still selected and centered, which is the canvas jump everything else gets.
+ */
+function focusAddressField(deviceId: string, key: string): void {
+  const selector = `[data-address-field="${deviceId}:${key}"]`;
+  let tries = 0;
+  const attempt = () => {
+    const el = document.querySelector<HTMLInputElement>(selector);
+    if (el) {
+      el.focus();
+      el.select();
+    } else if (++tries < 10) requestAnimationFrame(attempt);
+  };
+  requestAnimationFrame(attempt);
+}
 
 export function BottomPanel() {
   // Open/closed survives reloads (M3c). Collapsed, the tab strip stays as a
@@ -56,6 +112,31 @@ export function BottomPanel() {
   const errorCount = issues.filter(
     (i) => i.severity === 'error' || i.severity === 'critical',
   ).length;
+  const [reveal, setReveal] = useState<Reveal | null>(null);
+
+  /**
+   * Open the object a finding is about, where it can be repaired: a subnet or VLAN
+   * row in its own tab (focused on the field at fault), a device's address field in
+   * the Inspector, otherwise the device/link on the canvas (rack findings point at
+   * their devices, so they land there too).
+   */
+  const openFinding = (issue: ValidationIssue, id: string, addressKey?: string) => {
+    const tabFor: Tab | null = subnets.some((x) => x.id === id)
+      ? 'ipplan'
+      : vlans.some((x) => x.id === id)
+        ? 'vlans'
+        : null;
+    if (tabFor) {
+      setTab(tabFor);
+      const field = FINDING_FIELD[issue.code] ?? (tabFor === 'ipplan' ? 'cidr' : 'vlanId');
+      setReveal((r) => ({ id, field, tick: (r?.tick ?? 0) + 1 }));
+      return;
+    }
+    store().focusObject(id);
+    const device = store().getDevice(id);
+    const key = addressKey ?? (device && issue.address ? addressFields(device, issue.address)[0]?.key : undefined);
+    if (key) focusAddressField(id, key);
+  };
 
   const tabs: { key: Tab; label: string; count: number; err?: boolean }[] = [
     { key: 'inventory', label: 'Inventory', count: devices.length },
@@ -76,6 +157,7 @@ export function BottomPanel() {
             key={t.key}
             className={`${styles.tab} ${open && tab === t.key ? styles.active : ''}`}
             onClick={() => {
+              setReveal(null); // a finding's focus request is spent once you move on
               if (open && tab === t.key) setOpen(false);
               else {
                 setTab(t.key);
@@ -103,10 +185,12 @@ export function BottomPanel() {
         <div className={styles.body}>
           {tab === 'inventory' && <InventoryTable devices={devices} />}
           {tab === 'links' && <LinksTable links={links} />}
-          {tab === 'ipplan' && <SubnetTable subnets={subnets} vlans={vlans} />}
-          {tab === 'vlans' && <VlanTable vlans={vlans} />}
+          {tab === 'ipplan' && (
+            <SubnetTable subnets={subnets} vlans={vlans} issues={issues} reveal={reveal} />
+          )}
+          {tab === 'vlans' && <VlanTable vlans={vlans} issues={issues} reveal={reveal} />}
           {tab === 'racks' && <RackTable racks={racks} devices={devices} />}
-          {tab === 'validation' && <ValidationList issues={issues} />}
+          {tab === 'validation' && <ValidationList issues={issues} onOpen={openFinding} />}
           {tab === 'health' && <HealthPanel devices={devices} links={links} />}
           {tab === 'rules' && <RulesPanel />}
         </div>
@@ -200,19 +284,41 @@ function Cell({
   onCommit,
   type = 'text',
   placeholder,
+  label,
+  invalid,
+  focusTick,
 }: {
   value: string;
   onCommit: (v: string) => void;
   type?: string;
   placeholder?: string;
+  label?: string;
+  /** The validation finding on this field, if any — marks it until it's fixed. */
+  invalid?: string;
+  /** Bumped by a finding's open action: focus this field (and select its text). */
+  focusTick?: number;
 }) {
   const endEdit = useProjectStore((s) => s.endEdit);
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!focusTick) return;
+    const el = ref.current;
+    el?.scrollIntoView?.({ block: 'nearest' });
+    el?.focus();
+    el?.select();
+  }, [focusTick]);
   return (
     <input
-      className={styles.cellInput}
+      ref={ref}
+      className={`${styles.cellInput}${invalid ? ` ${styles.cellInvalid}` : ''}`}
       type={type}
       value={value}
       placeholder={placeholder}
+      aria-label={label}
+      aria-invalid={invalid ? true : undefined}
+      // data-tip, not title: the tooltip layer migrates a title once and would
+      // keep showing the old finding after it clears.
+      data-tip={invalid}
       onChange={(e) => onCommit(e.target.value)}
       onBlur={endEdit}
     />
@@ -239,7 +345,19 @@ function UsageBar({ usage }: { usage: SubnetUsage }) {
   );
 }
 
-function SubnetTable({ subnets, vlans }: { subnets: Subnet[]; vlans: Vlan[] }) {
+function SubnetTable({
+  subnets,
+  vlans,
+  issues,
+  reveal,
+}: {
+  subnets: Subnet[];
+  vlans: Vlan[];
+  issues: ValidationIssue[];
+  reveal: Reveal | null;
+}) {
+  const tickFor = (id: string, field: string) =>
+    reveal && reveal.id === id && reveal.field === field ? reveal.tick : undefined;
   const update = useProjectStore((s) => s.updateSubnet);
   const del = useProjectStore((s) => s.deleteSubnet);
   const add = useProjectStore((s) => s.addSubnet);
@@ -276,6 +394,9 @@ function SubnetTable({ subnets, vlans }: { subnets: Subnet[]; vlans: Vlan[] }) {
                   value={sn.cidr}
                   onCommit={(v) => set(sn, 'cidr', v)}
                   placeholder="10.0.0.0/24"
+                  label="Subnet CIDR"
+                  invalid={fieldIssue(issues, sn.id, 'cidr')}
+                  focusTick={tickFor(sn.id, 'cidr')}
                 />
               </td>
               <td>
@@ -286,6 +407,9 @@ function SubnetTable({ subnets, vlans }: { subnets: Subnet[]; vlans: Vlan[] }) {
                   value={sn.gateway ?? ''}
                   onCommit={(v) => set(sn, 'gateway', v)}
                   placeholder="10.0.0.1"
+                  label="Gateway"
+                  invalid={fieldIssue(issues, sn.id, 'gateway')}
+                  focusTick={tickFor(sn.id, 'gateway')}
                 />
               </td>
               <td>
@@ -333,7 +457,15 @@ function SubnetTable({ subnets, vlans }: { subnets: Subnet[]; vlans: Vlan[] }) {
   );
 }
 
-function VlanTable({ vlans }: { vlans: Vlan[] }) {
+function VlanTable({
+  vlans,
+  issues,
+  reveal,
+}: {
+  vlans: Vlan[];
+  issues: ValidationIssue[];
+  reveal: Reveal | null;
+}) {
   const update = useProjectStore((s) => s.updateVlan);
   const del = useProjectStore((s) => s.deleteVlan);
   const add = useProjectStore((s) => s.addVlan);
@@ -360,6 +492,9 @@ function VlanTable({ vlans }: { vlans: Vlan[] }) {
                   type="number"
                   value={String(v.vlanId)}
                   onCommit={(x) => set(v, 'vlanId', Number(x))}
+                  label="VLAN ID"
+                  invalid={fieldIssue(issues, v.id, 'vlanId')}
+                  focusTick={reveal?.id === v.id ? reveal.tick : undefined}
                 />
               </td>
               <td>
@@ -543,8 +678,53 @@ const CONDUCTOR_FIX: Record<string, { label: string; title: string; run: () => v
   },
 };
 
-function ValidationList({ issues }: { issues: ValidationIssue[] }) {
-  const focus = useProjectStore((s) => s.focusObject);
+/** One affected object of a finding: what to open, and how to name it on its chip. */
+interface FindingTarget {
+  id: string;
+  label: string;
+  addressKey?: string;
+}
+
+/**
+ * Every object a finding touches, named. A duplicate IP lists each field holding the
+ * address (two ports of one device included); other multi-object findings list
+ * each object once. Single-object findings get no chips — the message opens it.
+ */
+function findingTargets(issue: ValidationIssue): FindingTarget[] {
+  const st = useProjectStore.getState();
+  if (issue.code === 'duplicate-ip' && issue.address) {
+    return issue.objectIds.flatMap((id) => {
+      const d = st.getDevice(id);
+      if (!d) return [];
+      return addressFields(d, issue.address!).map((f) => ({
+        id,
+        label: `${d.name || 'Unnamed'} · ${f.label}`,
+        addressKey: f.key,
+      }));
+    });
+  }
+  if (issue.objectIds.length < 2) return [];
+  const subnets = new Map(st.subnetsAll().map((x) => [x.id, x]));
+  const vlans = new Map(st.vlansAll().map((x) => [x.id, x]));
+  return issue.objectIds.map((id) => {
+    const sn = subnets.get(id);
+    const v = vlans.get(id);
+    const label = sn
+      ? sn.name || sn.cidr
+      : v
+        ? `${v.name} (${v.vlanId})`
+        : (st.getDevice(id)?.name ?? st.getLink(id)?.name ?? 'Link');
+    return { id, label };
+  });
+}
+
+function ValidationList({
+  issues,
+  onOpen,
+}: {
+  issues: ValidationIssue[];
+  onOpen: (issue: ValidationIssue, id: string, addressKey?: string) => void;
+}) {
   if (issues.length === 0) {
     return (
       <div className={styles.cleanState}>
@@ -574,39 +754,64 @@ function ValidationList({ issues }: { issues: ValidationIssue[] }) {
           </button>
         </div>
       )}
-      {sorted.map((i) => (
-        <div
-          key={i.id}
-          className={styles.issue}
-          onClick={() => i.objectIds[0] && focus(i.objectIds[0])}
-        >
-          <span
-            className={`${styles.sev} ${
-              i.severity === 'error' || i.severity === 'critical'
-                ? styles.sevError
-                : i.severity === 'warn'
-                  ? styles.sevWarn
-                  : styles.sevInfo
-            }`}
-          >
-            {i.severity.toUpperCase()}
-          </span>
-          <span className={styles.issueMsg}>{i.message}</span>
-          {CONDUCTOR_FIX[i.code] && (
-            <button
-              type="button"
-              className={styles.fixBtn}
-              title={CONDUCTOR_FIX[i.code]!.title}
-              onClick={(e) => {
-                e.stopPropagation(); // don't also fire the row's jump-to-object
-                CONDUCTOR_FIX[i.code]!.run();
-              }}
+      {sorted.map((i) => {
+        const targets = findingTargets(i);
+        const first: FindingTarget | null =
+          targets[0] ?? (i.objectIds[0] ? { id: i.objectIds[0], label: '' } : null);
+        return (
+          <div key={i.id} className={styles.issue}>
+            <span
+              className={`${styles.sev} ${
+                i.severity === 'error' || i.severity === 'critical'
+                  ? styles.sevError
+                  : i.severity === 'warn'
+                    ? styles.sevWarn
+                    : styles.sevInfo
+              }`}
             >
-              {CONDUCTOR_FIX[i.code]!.label}
-            </button>
-          )}
-        </div>
-      ))}
+              {i.severity.toUpperCase()}
+            </span>
+            <span className={styles.issueBody}>
+              {first ? (
+                <button
+                  type="button"
+                  className={styles.issueMsg}
+                  title={FINDING_FIELD[i.code] ? 'Open the field to fix' : 'Show on the canvas'}
+                  onClick={() => onOpen(i, first.id, first.addressKey)}
+                >
+                  {i.message}
+                </button>
+              ) : (
+                <span className={styles.issueMsg}>{i.message}</span>
+              )}
+              {targets.length > 1 && (
+                <span className={styles.issueTargets}>
+                  {targets.map((t) => (
+                    <button
+                      key={`${t.id}:${t.addressKey ?? ''}`}
+                      type="button"
+                      className={styles.issueChip}
+                      onClick={() => onOpen(i, t.id, t.addressKey)}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </span>
+              )}
+            </span>
+            {CONDUCTOR_FIX[i.code] && (
+              <button
+                type="button"
+                className={styles.fixBtn}
+                title={CONDUCTOR_FIX[i.code]!.title}
+                onClick={() => CONDUCTOR_FIX[i.code]!.run()}
+              >
+                {CONDUCTOR_FIX[i.code]!.label}
+              </button>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1293,7 +1498,7 @@ function HealthPanel({ devices, links }: { devices: Device[]; links: Link[] }) {
         <button className={styles.addRow} onClick={run} disabled={!a || !b || a === b}>
           Check
         </button>
-        <span className={styles.redundancyResult} role="status" title="Updates as you edit the diagram">
+        <span className={styles.redundancyResult} role="status">
           {checked ? redundancyText(devices, links, checked) : ''}
         </span>
       </div>
