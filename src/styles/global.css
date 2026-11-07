@@ -254,6 +254,11 @@ button {
   outline-offset: 2px;
   border-radius: var(--r-xs);
 }
+/* A modal takes focus itself on open (useModalDialog) so a screen reader announces
+   it; the ring belongs on its controls, not around the whole card. */
+[role='dialog'][aria-modal='true']:focus-visible {
+  outline: none;
+}
 
 /* ── Motion primitives (reusable keyframes) ──────────────────────────── */
 @keyframes nx-rise {

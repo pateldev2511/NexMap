@@ -14,6 +14,7 @@ import {
 import type { WheelAction } from '@/input/wheel';
 import { canWriteBack, canOpenPicker } from '@/persistence/fsaccess';
 import { NexIcon } from '@/ui/icons/NexIcon';
+import { useModalDialog } from './useModalDialog';
 import styles from './ImportDialog.module.css';
 
 /**
@@ -35,6 +36,7 @@ export function SettingsDialog({
   const [reduceMotion, setRM] = useState(() => getReduceMotion());
   const [motion, setMotion] = useState<MotionLevel>(() => getMotionLevel());
   const [usage, setUsage] = useState<string>('…');
+  const { titleId, dialogProps } = useModalDialog(onClose);
   const fsAvailable = canWriteBack || canOpenPicker;
   const idbAvailable = typeof indexedDB !== 'undefined';
 
@@ -87,11 +89,12 @@ export function SettingsDialog({
     <div className={styles.overlay} onClick={onClose}>
       <div
         className={styles.dialog}
+        {...dialogProps}
         onClick={(e) => e.stopPropagation()}
         style={{ width: 'min(560px, 94vw)' }}
       >
         <div className={styles.head}>
-          <h2>Settings</h2>
+          <h2 id={titleId}>Settings</h2>
           <button className={styles.close} onClick={onClose} aria-label="Close">
             <NexIcon name="close" />
           </button>

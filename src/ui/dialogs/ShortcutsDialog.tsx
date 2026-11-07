@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { getConnectMode, setConnectMode, type ConnectMode } from '@/lib/prefs';
 import { NexIcon } from '@/ui/icons/NexIcon';
+import { useModalDialog } from './useModalDialog';
 import styles from './ImportDialog.module.css';
 
 const GROUPS: { title: string; items: [string, string][] }[] = [
@@ -49,11 +50,12 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
 
 export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
   const [connect, setConnect] = useState<ConnectMode>(() => getConnectMode());
+  const { titleId, dialogProps } = useModalDialog(onClose);
   return (
     <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.dialog} onClick={(e) => e.stopPropagation()}>
+      <div className={styles.dialog} {...dialogProps} onClick={(e) => e.stopPropagation()}>
         <div className={styles.head}>
-          <h2>Keyboard shortcuts &amp; settings</h2>
+          <h2 id={titleId}>Keyboard shortcuts &amp; settings</h2>
           <button className={styles.close} onClick={onClose} aria-label="Close">
             <NexIcon name="close" />
           </button>

@@ -1,5 +1,6 @@
 import type { DraftRecord } from '@/persistence/draft';
 import styles from '@/ui/firstrun/FirstRun.module.css';
+import { useModalDialog } from './useModalDialog';
 
 /**
  * Crash-recovery prompt (design review DA-DES-2.4). Shows WHAT is being recovered
@@ -16,10 +17,12 @@ export function RecoveryDialog({
   onDiscard: () => void;
 }) {
   const when = new Date(draft.updatedAt).toLocaleString();
+  // No onClose: this one must be answered, so Escape doesn't dismiss it.
+  const { titleId, dialogProps } = useModalDialog();
   return (
     <div className={styles.overlay}>
-      <div className={styles.card}>
-        <h1 className={styles.title}>Recover your work?</h1>
+      <div className={styles.card} {...dialogProps}>
+        <h1 id={titleId} className={styles.title}>Recover your work?</h1>
         <p className={styles.tagline}>
           We found an autosaved draft from a previous session.
         </p>

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import { defaultDeviceName } from '@/model/schema';
 import { NexIcon } from '@/ui/icons/NexIcon';
+import { useModalDialog } from './useModalDialog';
 import styles from './ImportDialog.module.css';
 
 /**
@@ -15,6 +16,7 @@ export function OutlineDialog({ onClose }: { onClose: () => void }) {
   const rev = useProjectStore((s) => s.rev);
   const store = useProjectStore.getState;
   const [q, setQ] = useState('');
+  const { titleId, dialogProps } = useModalDialog(onClose);
 
   const groups = useMemo(() => {
     void rev;
@@ -77,14 +79,9 @@ export function OutlineDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <div className={styles.overlay} onClick={onClose}>
-      <div
-        className={styles.dialog}
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label="Topology outline"
-      >
+      <div className={styles.dialog} {...dialogProps} onClick={(e) => e.stopPropagation()}>
         <div className={styles.head}>
-          <h2>Topology outline</h2>
+          <h2 id={titleId}>Topology outline</h2>
           <button className={styles.close} onClick={onClose} aria-label="Close">
             <NexIcon name="close" />
           </button>

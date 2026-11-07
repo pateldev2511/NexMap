@@ -2,14 +2,16 @@
  * Export orchestrator: format → build-from-model → download. One entry point so
  * the dialog stays declarative and the build/download wiring lives in one place.
  */
-import type { CanvasObject, Device, Link, Rack, Subnet, Vlan } from '@/model/types';
-import { buildSvg } from './buildSvg';
+import type { CanvasObject, Device, Link, NexMapDocument, Rack, Subnet, Vlan } from '@/model/types';
+import { buildDiagramSvg, type DiagramRenderOptions } from './diagram';
 import { buildStandaloneHtml } from './html';
-import { rasterize, downloadBlob } from './raster';
-import { buildPdfBlob, type PageSize } from './pdf';
+import { rasterize, downloadBlob, scaleWarning } from './raster';
+import { buildPdf, type PageSize } from './pdf';
 import { exportInventoryCsv, exportLinksCsv, exportRulesCsv } from './csvExport';
 import { buildRulesReport, hasDeclaredRules, type RulesReportInput } from './rulesReport';
-import { buildPackageZip } from './zip';
+import { buildPackageZip, packageSvg } from './zip';
+
+export { localDate } from './diagram';
 
 export type ExportFormat =
   | 'png'
@@ -22,6 +24,14 @@ export type ExportFormat =
   | 'csv-rules'
   | 'zip';
 
+/**
+ * Whether a format honors the export scope. The ZIP package is always the whole
+ * project (see zip.ts), and the rules report always the whole design.
+ */
+export function formatHasScope(format: ExportFormat): boolean {
+  return format !== 'zip' && format !== 'csv-rules';
+}
+
 export interface ExportScene {
   devices: Device[];
   links: Link[];
@@ -30,33 +40,40 @@ export interface ExportScene {
   subnets: Subnet[];
   racks: Rack[];
   projectName: string;
-  /** Serialized .nexmap JSON (for the ZIP package's editable file). */
-  docJson: string;
+  /** The whole document. The ZIP package is built from it alone, never from the scope above. */
+  doc: NexMapDocument;
   /** The whole design + its declared rules, for the rules report (never scoped). */
   rules?: RulesReportInput;
 }
 
-export interface ExportOptions {
+export interface ExportOptions extends DiagramRenderOptions {
   format: ExportFormat;
   scale: number;
-  background: string | null; // null = transparent (png/svg)
-  includeLabels: boolean;
   quality: number; // jpg
   pageSize: PageSize;
   orientation: 'portrait' | 'landscape';
   fileName: string;
-  /** Render the isometric projection, or the blueprint sheet, in image/vector exports. */
-  projection?: 'flat' | 'iso' | 'blueprint';
-  /** Topology-health context to tint risky links in exports (null = no tint). */
-  health?: import('@/canvas/connector').StrokeHealth | null;
-  /** Modern styling (dot-grid, rounded zone cards, node chips, callout cards). */
-  modern?: boolean;
 }
 
-/** Today as YYYY-MM-DD in the user's own time zone — the blueprint title block's date. */
-export function localDate(now: Date = new Date()): string {
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`;
+function renderOptions(opts: ExportOptions): DiagramRenderOptions {
+  return {
+    // JPEG has no alpha, so it always gets paper.
+    background: opts.format === 'jpg' ? (opts.background ?? '#ffffff') : opts.background,
+    includeLabels: opts.includeLabels,
+    projection: opts.projection,
+    health: opts.health,
+    modern: opts.modern,
+  };
+}
+
+/**
+ * The diagram a format renders. The Export dialog previews exactly this, and the
+ * export writes exactly this, so the preview can't drift from the file.
+ */
+export function exportDiagramSvg(scene: ExportScene, opts: ExportOptions): string {
+  return opts.format === 'zip'
+    ? packageSvg({ doc: scene.doc, projectName: scene.projectName }, renderOptions(opts))
+    : buildDiagramSvg(scene, renderOptions(opts));
 }
 
 function safeName(name: string, ext: string): string {
@@ -102,35 +119,16 @@ export async function runExport(
   }
 
   if (opts.format === 'zip') {
-    const blob = await buildPackageZip(
-      {
-        devices,
-        links,
-        objects: scene.objects,
-        vlans: scene.vlans,
-        subnets: scene.subnets,
-        racks: scene.racks,
-        projectName: scene.projectName,
-        docJson: scene.docJson,
-        rules: scene.rules,
-      },
-      opts.scale,
+    const { blob, warning } = await buildPackageZip(
+      { doc: scene.doc, projectName: scene.projectName },
+      { scale: opts.scale, render: renderOptions(opts) },
     );
     const fn = safeName(opts.fileName || `${scene.projectName}-package`, 'zip');
     downloadBlob(blob, fn);
-    return { fileName: fn };
+    return { fileName: fn, warning };
   }
 
-  const svg = buildSvg(devices, links, {
-    background: opts.format === 'jpg' ? (opts.background ?? '#ffffff') : opts.background,
-    includeLabels: opts.includeLabels,
-    objects: scene.objects,
-    projection: opts.projection,
-    health: opts.health,
-    modern: opts.modern,
-    title: scene.projectName,
-    date: localDate(),
-  });
+  const svg = exportDiagramSvg(scene, opts);
 
   if (opts.format === 'svg') {
     const fn = safeName(opts.fileName || scene.projectName, 'svg');
@@ -154,7 +152,7 @@ export async function runExport(
   }
 
   if (opts.format === 'pdf') {
-    const blob = await buildPdfBlob(
+    const { blob, raster } = await buildPdf(
       svg,
       { pageSize: opts.pageSize, orientation: opts.orientation, scale: opts.scale },
       rulesReport,
@@ -162,7 +160,7 @@ export async function runExport(
     );
     const fn = safeName(opts.fileName || scene.projectName, 'pdf');
     downloadBlob(blob, fn);
-    return { fileName: fn };
+    return { fileName: fn, warning: scaleWarning(opts.scale, raster) };
   }
 
   // png / jpg
@@ -170,15 +168,10 @@ export async function runExport(
   const result = await rasterize(svg, {
     scale: opts.scale,
     mimeType: mime,
-    background: opts.format === 'jpg' ? (opts.background ?? '#ffffff') : opts.background,
+    background: renderOptions(opts).background,
     quality: opts.quality,
   });
   const fn = safeName(opts.fileName || scene.projectName, opts.format);
   downloadBlob(result.blob, fn);
-  return {
-    fileName: fn,
-    warning: result.clamped
-      ? `Diagram too large at ${opts.scale}× — exported at ${result.effectiveScale.toFixed(2)}× to fit the browser canvas limit.`
-      : undefined,
-  };
+  return { fileName: fn, warning: scaleWarning(opts.scale, result) };
 }

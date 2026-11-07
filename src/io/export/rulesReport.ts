@@ -16,7 +16,7 @@ import {
   explainOffenders,
   type Offender,
 } from '@/model/invariants';
-import type { CustomRuleSpec, Device, Link, RackCable, Subnet } from '@/model/types';
+import type { CustomRuleSpec, Device, Link, NexMapDocument, RackCable, Subnet } from '@/model/types';
 
 export interface RulesReportInput {
   devices: Device[];
@@ -44,6 +44,20 @@ export interface RuleReportEntry {
 }
 
 const KNOWN_CUSTOM_KINDS: ReadonlySet<string> = new Set(['connectivity', 'isolation', 'placement', 'count', 'naming']);
+
+/** A document's design + declared rules, as the report reads them. */
+export function documentRules(
+  doc: Pick<NexMapDocument, 'devices' | 'links' | 'subnets' | 'rackCables' | 'invariants' | 'customRules'>,
+): RulesReportInput {
+  return {
+    devices: doc.devices,
+    links: doc.links,
+    subnets: doc.subnets,
+    rackCables: doc.rackCables,
+    invariants: doc.invariants,
+    customRules: doc.customRules,
+  };
+}
 
 export function hasDeclaredRules(input: RulesReportInput | undefined): input is RulesReportInput {
   return !!input && (input.invariants.length > 0 || input.customRules.length > 0);
