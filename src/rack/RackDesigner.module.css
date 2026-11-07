@@ -390,6 +390,36 @@
   line-height: 1.35;
 }
 
+/* What an artifact covers and the file it saves as. */
+.exportScope {
+  font-size: 11px;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* An export that didn't render: says why, with Retry. */
+.exportError,
+.exportBusy {
+  display: grid;
+  gap: 7px;
+  margin: 10px 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.exportError {
+  border: 1px solid #dc2626;
+  background: rgba(220, 38, 38, 0.08);
+}
+
+.exportBusy {
+  border: 1px solid var(--chrome-border);
+  color: var(--chrome-fg-muted);
+}
+
 /* SVG rack interaction */
 .svg {
   display: block;
