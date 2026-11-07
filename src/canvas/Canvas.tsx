@@ -1515,6 +1515,10 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     const o = store().getObject(id);
     return o ? { x: o.x, y: o.y, width: o.width, height: o.height } : null;
   };
+  // Links cull by their drawn route against the same flat box (straight run,
+  // orthogonal elbow or waypoint legs), so a cable crossing the view with both
+  // ends off-screen still draws (#34). In iso the box is the flat bounds of the
+  // un-projected screen rect; iso is linear, so testing in flat space is safe.
   const links = (size.w > 0 ? store().visibleLinks(box) : []).filter((l) =>
     vis(l.layerId),
   );

@@ -65,7 +65,8 @@ import { SpatialIndex, type Box } from '@/lib/spatial-index';
 import { computeAlignSnap, computeSpacingSnap, type AlignGuide } from '@/canvas/align';
 import { autoLayoutPositions } from '@/lib/layout';
 import { avoidRoute } from '@/lib/routing';
-import { pointInPolygon, type Point } from '@/lib/geometry';
+import { pointInPolygon, polylineIntersectsBox, segmentHitsRect, type Point } from '@/lib/geometry';
+import { PARALLEL_LINK_SPACING, routePoints } from '@/canvas/connector';
 import { parseNexText, buildModel, type Diagnostic as NexDiagnostic } from '@/lib/nextext';
 import { analyzeHealth, edgeDisjointPaths, type HealthReport } from '@/lib/health';
 import { fabricEdges } from '@/sim/fabric';
@@ -296,6 +297,65 @@ function remapCloneGroups<T extends Device | CanvasObject>(clones: T[]): T[] {
     if (!replacements.has(c.groupId)) replacements.set(c.groupId, nanoid());
     return { ...c, groupId: replacements.get(c.groupId) };
   });
+}
+
+/**
+ * Per-link route bounds for viewport culling (#34), rebuilt only when the model
+ * changes (keyed on `rev`). A pan or zoom frame — same model, new viewport — is
+ * then one numeric pass over the links, not two map lookups apiece.
+ *
+ * Bounds cover both endpoint device boxes plus every waypoint, so they contain the
+ * whole drawn route (the orthogonal elbow stays inside its endpoints' bounds).
+ * `pads[i]` ≥ 0 marks a straight run, grown by how far a parallel-group member can
+ * bow off its chord: up to half the group's fan, and the group can't outnumber
+ * either end's links — exact for a lone link, no grouping pass. -1 marks a route
+ * tested leg by leg (waypoints or orthogonal).
+ */
+let linkCull: {
+  model: ModelState;
+  rev: number;
+  links: Link[];
+  bounds: Float64Array;
+  pads: Float64Array;
+} | null = null;
+
+function linkCullBounds(rev: number): NonNullable<typeof linkCull> {
+  if (linkCull && linkCull.model === model && linkCull.rev === rev) return linkCull;
+  const links: Link[] = [];
+  const bounds = new Float64Array(model.links.size * 4);
+  const pads = new Float64Array(model.links.size);
+  for (const l of model.links.values()) {
+    const a = model.devices.get(l.sourceId);
+    const b = model.devices.get(l.targetId);
+    if (!a || !b) continue; // dangling: draws nothing, so never culls in
+    let minX = Math.min(a.x, b.x);
+    let minY = Math.min(a.y, b.y);
+    let maxX = Math.max(a.x + a.width, b.x + b.width);
+    let maxY = Math.max(a.y + a.height, b.y + b.height);
+    const wps = l.waypoints;
+    if (wps) {
+      for (const p of wps) {
+        minX = Math.min(minX, p.x);
+        minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
+      }
+    }
+    let pad = -1;
+    if ((wps?.length ?? 0) === 0 && l.routing !== 'orthogonal') {
+      const n = Math.min(model.adjacency.get(a.id)?.size ?? 1, model.adjacency.get(b.id)?.size ?? 1);
+      pad = ((n - 1) / 2) * PARALLEL_LINK_SPACING;
+    }
+    const grow = Math.max(pad, 0);
+    const i = links.push(l) - 1;
+    pads[i] = pad;
+    bounds[i * 4] = minX - grow;
+    bounds[i * 4 + 1] = minY - grow;
+    bounds[i * 4 + 2] = maxX + grow;
+    bounds[i * 4 + 3] = maxY + grow;
+  }
+  linkCull = { model, rev, links, bounds, pads };
+  return linkCull;
 }
 
 function rebuildIndex(): void {
@@ -3809,11 +3869,46 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     },
 
     visibleLinks(viewport) {
-      // A link is visible if either endpoint is in (or near) the viewport.
+      // A link is visible if its drawn route crosses the viewport — not just if an
+      // endpoint does: a long cable with both ends off-screen still draws where it
+      // passes through (#34). Each link's cached route bounds reject almost every
+      // off-screen link in one numeric compare; survivors keep the old fast path
+      // (an endpoint device in view), else their route is tested leg by leg — the
+      // straight run, the orthogonal elbow, or each waypoint segment.
+      const cull = linkCullBounds(get().rev);
       const visible = new Set(index.query(viewport));
+      const minX = viewport.x;
+      const minY = viewport.y;
+      const maxX = viewport.x + viewport.width;
+      const maxY = viewport.y + viewport.height;
+      const { links, bounds, pads } = cull;
       const out: Link[] = [];
-      for (const l of model.links.values()) {
-        if (visible.has(l.sourceId) || visible.has(l.targetId)) out.push(l);
+      for (let i = 0; i < links.length; i++) {
+        const k = i * 4;
+        if (bounds[k]! > maxX || bounds[k + 1]! > maxY || bounds[k + 2]! < minX || bounds[k + 3]! < minY)
+          continue;
+        const l = links[i]!;
+        if (visible.has(l.sourceId) || visible.has(l.targetId)) {
+          out.push(l);
+          continue;
+        }
+        const a = model.devices.get(l.sourceId)!;
+        const b = model.devices.get(l.targetId)!;
+        const pad = pads[i]!;
+        const hit =
+          pad >= 0
+            ? segmentHitsRect(
+                a.x + a.width / 2,
+                a.y + a.height / 2,
+                b.x + b.width / 2,
+                b.y + b.height / 2,
+                minX - pad,
+                minY - pad,
+                maxX + pad,
+                maxY + pad,
+              )
+            : polylineIntersectsBox(routePoints(l, a, b), viewport);
+        if (hit) out.push(l);
       }
       return out;
     },
