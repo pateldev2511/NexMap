@@ -53,7 +53,7 @@
     "prettier": "^3.3.3",
     "typescript": "^5.6.2",
     "vite": "^5.4.8",
-    "vite-node": "^2.1.9",
+    "vite-node": "^6.0.0",
     "vitest": "^2.1.2",
     "wrangler": "^4.98.0"
   }
