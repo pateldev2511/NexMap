@@ -14,20 +14,8 @@ const REJECT_FLASH_MS = 2400;
 /** One-time wheel-migration toast auto-dismiss. */
 const WHEEL_HINT_MS = 8000;
 import { ConnectPortsDialog, CABLE_COLORS, type CableSeedEnd } from './ConnectPortsDialog';
-import {
-  buildRackSvg,
-  buildRackRowFacesSvg,
-  buildLabelSheetSvg,
-  buildConnectionsTableSvg,
-  buildPowerCordsTableSvg,
-  buildPowerStripsTableSvg,
-  powerCordRows,
-  vstackSvg,
-  composeExport,
-  cableScheduleCsv,
-  cableScheduleRows,
-  type ExportMode,
-} from './buildRackSvg';
+import { buildLabelSheetSvg, cableScheduleCsv, type ExportMode } from './buildRackSvg';
+import { buildHandoffSvg, cableCountLabel, exportFailureMessage, handoffFileName, handoffScope, type ExportScopeKind } from './rackExport';
 import { analyzeCabling } from './rackHealth';
 import { rackBudget, fleetBudget } from './rackBudget';
 import { cordsIntoPdu, isPdu, isRackUps, nextPduFeed, powerFeedAnalysis } from './rackPower';
@@ -183,6 +171,8 @@ export function RackDesigner() {
   const [bulkPatch, setBulkPatch] = useState<Partial<Device>>({});
   const [assetPrefix, setAssetPrefix] = useState('');
   const [exportOpen, setExportOpen] = useState(false);
+  const [exportScope, setExportScope] = useState<ExportScopeKind>('fleet');
+  const [exportNote, setExportNote] = useState<{ kind: 'busy' | 'error'; text: string; retry?: () => void } | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [inspectorTab, setInspectorTab] = useState<'placement' | 'hardware' | 'power' | 'cabling' | 'asset'>('placement');
   const [rowReject, setRowReject] = useState<string | null>(null);
@@ -249,6 +239,11 @@ export function RackDesigner() {
   const health = useMemo(
     () => (rack ? rackHealthScore(rack, devices, cables, cabling.issues) : null),
     [rack, devices, cables, cabling.issues],
+  );
+  // What the Export handoff drawer's artifacts cover: the focused rack, or every rack.
+  const handoff = useMemo(
+    () => (rack ? handoffScope(exportScope, rack, racks, devices, cables) : null),
+    [exportScope, rack, racks, devices, cables],
   );
   // Device counts per face — surfaced on the Front/Rear toggle so flipping to an empty
   // face never looks like your gear vanished.
@@ -736,62 +731,87 @@ export function RackDesigner() {
     if (id) setRackId(id);
   }
 
-  /** Build the export SVG honoring the row/focus view and the chosen export mode. */
-  function exportSvg(background: string, mode: ExportMode = exportMode): string {
+  /** Open the drawer scoped to what's on screen: the focused rack, or the whole row. */
+  function openExport() {
+    setExportScope(view === 'row' ? 'fleet' : 'rack');
+    setExportNote(null);
+    setExportOpen(true);
+  }
+
+  /**
+   * Render + download one artifact. A failure says what didn't export and why, keeps the
+   * drawer open, and offers Retry — never a click that silently does nothing.
+   */
+  async function runExport(what: string, file: string, make: () => Blob | Promise<Blob>) {
+    const retry = () => void runExport(what, file, make);
+    setExportNote({ kind: 'busy', text: `Exporting ${what}…` });
+    try {
+      downloadBlob(await make(), file);
+      setExportNote(null);
+    } catch (err) {
+      const text = exportFailureMessage(what, err, handoff!);
+      setExportNote({ kind: 'error', text, retry });
+      announce(text);
+    }
+  }
+
+  /** The export SVG for the drawer's scope, honoring the focus view's face and the export mode. */
+  function exportSvg(background: string, mode: ExportMode): string {
     // Every rack-scoped callout across the project; each renderer keeps only its own.
     const allCallouts = s()
       .objectsAll()
       .filter((o): o is TextObject => o.kind === 'text' && !!o.rackScope);
-    const rackSvg =
-      view === 'row'
-        ? buildRackRowFacesSvg(racks, devices, cables, { showRear, background, callouts: allCallouts })
-        : buildRackSvg(rack!, devices, cables, { background, side, callouts: allCallouts });
-    if (mode === 'diagram') return rackSvg;
-    const connections = buildConnectionsTableSvg(cableScheduleRows(devices, cables), { background, title: 'Connections' });
-    // Racks with PDUs add where each power cord plugs in, under the connections.
-    const scope = view === 'row' ? racks : [rack!];
-    const cords = powerCordRows(scope, devices);
-    let tableSvg = cords.length > 0
-      ? vstackSvg(connections, buildPowerCordsTableSvg(cords, { background, title: 'Power cords' }), background)
-      : connections;
-    // …then each strip's rating and load, and what a feed failure takes down.
-    const strips = buildPowerStripsTableSvg(scope, devices, { background, title: 'Power strips' });
-    if (strips) tableSvg = vstackSvg(tableSvg, strips, background);
-    return composeExport(rackSvg, tableSvg, mode, background);
+    return buildHandoffSvg(handoff!, devices, cables, {
+      mode,
+      background,
+      ...(view === 'focus' && handoff!.kind === 'rack' ? { singleFace: { side } } : {}),
+      showRear,
+      callouts: allCallouts,
+    });
   }
-  const exportName = () => (view === 'row' ? 'all-racks' : rack?.name ?? 'rack');
 
+  const csvBlob = (csv: string) => new Blob([csv], { type: 'text/csv' });
+  const artifactName = (mode: ExportMode) => (mode === 'diagram' ? 'elevation' : 'install packet');
   function exportPng(mode: ExportMode = exportMode) {
-    if (!rack) return;
-    rasterize(exportSvg('#0c1015', mode), { scale: 2, mimeType: 'image/png', background: null })
-      .then(({ blob }) => downloadBlob(blob, `${exportName()}.png`))
-      .catch(() => undefined);
+    if (!handoff) return;
+    void runExport(`the ${handoff.label} ${artifactName(mode)} PNG`, handoffFileName(handoff, mode === 'diagram' ? 'elevation' : 'install-packet', 'png'), () =>
+      rasterize(exportSvg('#0c1015', mode), { scale: 2, mimeType: 'image/png', background: null }).then((r) => r.blob),
+    );
   }
   function exportPdf(mode: ExportMode = exportMode) {
-    if (!rack) return;
-    buildPdfBlob(exportSvg('#ffffff', mode), { pageSize: 'a4', orientation: 'portrait', scale: 2 })
-      .then((blob) => downloadBlob(blob, `${exportName()}.pdf`))
-      .catch(() => undefined);
+    if (!handoff) return;
+    void runExport(`the ${handoff.label} ${artifactName(mode)} PDF`, handoffFileName(handoff, mode === 'diagram' ? 'elevation' : 'install-packet', 'pdf'), () =>
+      buildPdfBlob(exportSvg('#ffffff', mode), { pageSize: 'a4', orientation: 'portrait', scale: 2 }),
+    );
   }
   function exportCsv() {
-    if (!rack) return;
-    const csv = cableScheduleCsv(devices, cables);
-    downloadBlob(new Blob([csv], { type: 'text/csv' }), `${exportName()}-cables.csv`);
+    if (!handoff) return;
+    void runExport(`the ${handoff.label} cable schedule`, handoffFileName(handoff, 'cables', 'csv'), () =>
+      csvBlob(cableScheduleCsv(devices, handoff.cables, handoff.schedule)),
+    );
   }
   function exportPowerCords() {
-    downloadBlob(new Blob([powerCordCsv(racks, devices)], { type: 'text/csv' }), `${exportName()}-power-cords.csv`);
+    if (!handoff) return;
+    void runExport(`the ${handoff.label} power-cord list`, handoffFileName(handoff, 'power-cords', 'csv'), () =>
+      csvBlob(powerCordCsv(handoff.racks, devices)),
+    );
   }
   function exportPowerStrips() {
-    downloadBlob(new Blob([powerStripCsv(racks, devices)], { type: 'text/csv' }), `${exportName()}-power-strips.csv`);
+    if (!handoff) return;
+    void runExport(`the ${handoff.label} power-strip list`, handoffFileName(handoff, 'power-strips', 'csv'), () =>
+      csvBlob(powerStripCsv(handoff.racks, devices)),
+    );
   }
   function exportLabels() {
-    rasterize(buildLabelSheetSvg(racks, devices, { background: '#ffffff' }), { scale: 2, mimeType: 'image/png', background: null })
-      .then(({ blob }) => downloadBlob(blob, `${exportName()}-labels.png`))
-      .catch(() => undefined);
+    if (!handoff) return;
+    void runExport(`the ${handoff.label} label sheet`, handoffFileName(handoff, 'labels', 'png'), () =>
+      rasterize(buildLabelSheetSvg(handoff.racks, devices, { background: '#ffffff', scope: handoff.label }), { scale: 2, mimeType: 'image/png', background: null })
+        .then((r) => r.blob),
+    );
   }
   function exportBom() {
-    // Fleet-wide bill of materials; works regardless of focus.
-    downloadBlob(new Blob([bomCsv(devices)], { type: 'text/csv' }), `${exportName()}-bom.csv`);
+    if (!handoff) return;
+    void runExport(`the ${handoff.bom.label} BOM`, handoffFileName(handoff, 'bom', 'csv'), () => csvBlob(bomCsv(handoff.bom.devices)));
   }
 
   return (
@@ -943,7 +963,7 @@ export function RackDesigner() {
         </span>
         <div className={styles.spacer} />
         <div className={styles.commandGroup} aria-label="Export controls">
-          <button className={`${styles.btn} ${styles.primary}`} title="Open export presets" onClick={() => setExportOpen(true)}>Export handoff</button>
+          <button className={`${styles.btn} ${styles.primary}`} title="Open export presets" onClick={openExport}>Export handoff</button>
         </div>
       </div>
 
@@ -1063,7 +1083,7 @@ export function RackDesigner() {
             <b>Add asset tags</b>
             <span>{inventory.pct}% complete · {inventory.missing} missing fields</span>
           </button>
-          <button className={styles.workflowAction} onClick={() => setExportOpen(true)}>
+          <button className={styles.workflowAction} onClick={openExport}>
             <b>Export handoff</b>
             <span>{view === 'row' ? 'Install packet for row' : `${rack.name} elevation`}</span>
           </button>
@@ -1741,16 +1761,38 @@ export function RackDesigner() {
         </div>
       </div>
 
-      {exportOpen && (
+      {exportOpen && handoff && (
         <div className={styles.exportBackdrop} onClick={() => setExportOpen(false)}>
           <div className={styles.exportDrawer} onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Export handoff">
             <div className={styles.exportHead}>
               <div>
                 <h3>Export handoff</h3>
-                <p>{view === 'row' ? `${racks.length} racks` : rack.name} · {devices.filter((d) => d.rackId != null).length} devices · {cables.length} cables</p>
+                <p data-testid="export-scope-summary">{handoff.label} · {handoff.mounted.length} devices · {cableCountLabel(handoff)}</p>
               </div>
               <button className={styles.x} aria-label="Close export drawer" onClick={() => setExportOpen(false)}>×</button>
             </div>
+            <div className={styles.field}>
+              <label>Covers</label>
+              <div className={styles.seg} role="group" aria-label="Export scope">
+                <button className={exportScope === 'rack' ? styles.on : ''} aria-pressed={exportScope === 'rack'} onClick={() => setExportScope('rack')}>
+                  This rack · {rack.name}
+                </button>
+                <button className={exportScope === 'fleet' ? styles.on : ''} aria-pressed={exportScope === 'fleet'} onClick={() => setExportScope('fleet')}>
+                  All racks · {racks.length}
+                </button>
+              </div>
+            </div>
+            {exportNote && (
+              <div className={exportNote.kind === 'error' ? styles.exportError : styles.exportBusy} role={exportNote.kind === 'error' ? 'alert' : 'status'}>
+                <span>{exportNote.text}</span>
+                {exportNote.retry && (
+                  <div className={styles.rowBtns}>
+                    <button className={styles.btn} onClick={exportNote.retry}>Retry</button>
+                    <button className={styles.btn} onClick={() => setExportNote(null)}>Dismiss</button>
+                  </div>
+                )}
+              </div>
+            )}
             <div className={styles.field}>
               <label>Diagram content</label>
               <select value={exportMode} onChange={(e) => setExportMode(e.target.value as ExportMode)}>
@@ -1763,6 +1805,9 @@ export function RackDesigner() {
               <div className={styles.exportPreset}>
                 <b>Install packet</b>
                 <span>Rack elevation plus cable, power-cord and power-strip tables for field work.</span>
+                <small className={styles.exportScope}>
+                  {handoff.label}: {cableCountLabel(handoff)}{handoff.kind === 'rack' && handoff.crossRack ? ', far rack named' : ''} → {handoffFileName(handoff, 'install-packet', 'pdf')}
+                </small>
                 <div className={styles.rowBtns}>
                   <button className={styles.btn} onClick={() => { setExportMode('diagram+table'); exportPdf('diagram+table'); }}>PDF</button>
                   <button className={styles.btn} onClick={() => { setExportMode('diagram+table'); exportPng('diagram+table'); }}>PNG</button>
@@ -1771,6 +1816,9 @@ export function RackDesigner() {
               <div className={styles.exportPreset}>
                 <b>Cable schedule</b>
                 <span>Endpoint list with color, label, and length, plus each power cord's PDU outlet and each strip's load.</span>
+                <small className={styles.exportScope}>
+                  {handoff.label}: {cableCountLabel(handoff)} → {handoffFileName(handoff, 'cables', 'csv')}
+                </small>
                 <div className={styles.rowBtns}>
                   <button className={styles.btn} onClick={exportCsv}>CSV</button>
                   <button className={styles.btn} title="Which PDU outlet each unit's power cords plug into" onClick={exportPowerCords}>Power cords</button>
@@ -1781,6 +1829,9 @@ export function RackDesigner() {
               <div className={styles.exportPreset}>
                 <b>Inventory audit</b>
                 <span>BOM plus printable device labels.</span>
+                <small className={styles.exportScope}>
+                  BOM: {handoff.bom.label}, {handoff.bom.devices.length} device{handoff.bom.devices.length === 1 ? '' : 's'} → {handoffFileName(handoff, 'bom', 'csv')} · Labels: {handoff.label}, {handoff.mounted.filter((d) => d.ru != null).length} → {handoffFileName(handoff, 'labels', 'png')}
+                </small>
                 <div className={styles.rowBtns}>
                   <button className={styles.btn} onClick={exportBom}>BOM</button>
                   <button className={styles.btn} onClick={exportLabels}>Labels</button>
@@ -1789,6 +1840,9 @@ export function RackDesigner() {
               <div className={styles.exportPreset}>
                 <b>Rack elevation</b>
                 <span>Visible rack artwork for diagrams and reviews.</span>
+                <small className={styles.exportScope}>
+                  {handoff.label}{view === 'focus' && handoff.kind === 'rack' ? `, ${side} face` : ''} → {handoffFileName(handoff, exportMode === 'diagram' ? 'elevation' : 'install-packet', 'png')}
+                </small>
                 <div className={styles.rowBtns}>
                   <button className={styles.btn} onClick={() => exportPdf()}>PDF</button>
                   <button className={`${styles.btn} ${styles.primary}`} onClick={() => exportPng()}>PNG</button>
