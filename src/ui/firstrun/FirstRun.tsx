@@ -8,6 +8,7 @@ import {
   type TemplateCategory,
 } from '@/model/templates';
 import { loadDocument } from '@/model/migrate';
+import { showValidation } from '@/ui/showValidation';
 import styles from './FirstRun.module.css';
 
 const SECTION_ORDER: TemplateCategory[] = ['general', 'home', 'enterprise'];
@@ -32,6 +33,8 @@ export function FirstRun({
   function pickTemplate(key: string) {
     loadDoc(buildTemplate(key, new Date().toISOString()));
     onDone();
+    // The guided example's next step: its finding, open and focused.
+    if (TEMPLATES.find((t) => t.key === key)?.guided) showValidation();
   }
 
   async function openFile(file: File) {

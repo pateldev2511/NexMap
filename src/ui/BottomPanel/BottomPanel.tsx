@@ -1,6 +1,7 @@
 import { Fragment, memo, useEffect, useRef, useState } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import { getPanelOpen, setPanelOpen } from '@/lib/prefs';
+import { SHOW_VALIDATION_EVENT, takeShowValidation } from '@/ui/showValidation';
 import { NexIcon } from '@/ui/icons/NexIcon';
 import { DEVICE_TYPES, defaultDeviceName } from '@/model/schema';
 import { suggestRules } from '@/model/ruleSuggest';
@@ -113,6 +114,23 @@ export function BottomPanel() {
     (i) => i.severity === 'error' || i.severity === 'critical',
   ).length;
   const [reveal, setReveal] = useState<Reveal | null>(null);
+  // Set when something asks for Validation (the guided example): open on it and
+  // focus the first finding, so the next step is one keypress away. Spent once
+  // the finding has focus, or when you move to another tab.
+  const [focusFinding, setFocusFinding] = useState(false);
+  useEffect(() => {
+    const show = () => {
+      if (!takeShowValidation()) return;
+      setReveal(null);
+      setTab('validation');
+      setOpen(true);
+      setFocusFinding(true);
+    };
+    show();
+    window.addEventListener(SHOW_VALIDATION_EVENT, show);
+    return () => window.removeEventListener(SHOW_VALIDATION_EVENT, show);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setOpen only wraps the stable state setter
+  }, []);
 
   /**
    * Open the object a finding is about, where it can be repaired: a subnet or VLAN
@@ -158,6 +176,7 @@ export function BottomPanel() {
             className={`${styles.tab} ${open && tab === t.key ? styles.active : ''}`}
             onClick={() => {
               setReveal(null); // a finding's focus request is spent once you move on
+              setFocusFinding(false);
               if (open && tab === t.key) setOpen(false);
               else {
                 setTab(t.key);
@@ -190,7 +209,14 @@ export function BottomPanel() {
           )}
           {tab === 'vlans' && <VlanTable vlans={vlans} issues={issues} reveal={reveal} />}
           {tab === 'racks' && <RackTable racks={racks} devices={devices} />}
-          {tab === 'validation' && <ValidationList issues={issues} onOpen={openFinding} />}
+          {tab === 'validation' && (
+            <ValidationList
+              issues={issues}
+              onOpen={openFinding}
+              focusFirst={focusFinding}
+              onFocused={() => setFocusFinding(false)}
+            />
+          )}
           {tab === 'health' && <HealthPanel devices={devices} links={links} />}
           {tab === 'rules' && <RulesPanel />}
         </div>
@@ -721,10 +747,23 @@ function findingTargets(issue: ValidationIssue): FindingTarget[] {
 function ValidationList({
   issues,
   onOpen,
+  focusFirst = false,
+  onFocused,
 }: {
   issues: ValidationIssue[];
   onOpen: (issue: ValidationIssue, id: string, addressKey?: string) => void;
+  /** Focus the first finding once it has rendered, then report it via onFocused. */
+  focusFirst?: boolean;
+  onFocused?: () => void;
 }) {
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!focusFirst) return;
+    const first = listRef.current?.querySelector<HTMLButtonElement>('button[data-finding]');
+    if (!first) return; // findings not in yet — retried when they arrive
+    first.focus();
+    onFocused?.();
+  }, [focusFirst, issues.length, onFocused]);
   if (issues.length === 0) {
     return (
       <div className={styles.cleanState}>
@@ -738,7 +777,7 @@ function ValidationList({
   );
   const fixableCount = issues.filter((i) => CONDUCTOR_FIX[i.code]).length;
   return (
-    <div>
+    <div ref={listRef}>
       {fixableCount > 1 && (
         <div className={styles.fixAllRow}>
           <span className={styles.fixAllLabel}>
@@ -775,6 +814,7 @@ function ValidationList({
               {first ? (
                 <button
                   type="button"
+                  data-finding
                   className={styles.issueMsg}
                   title={FINDING_FIELD[i.code] ? 'Open the field to fix' : 'Show on the canvas'}
                   onClick={() => onOpen(i, first.id, first.addressKey)}

@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { BottomPanel } from './BottomPanel';
 import { Inspector } from '@/ui/Inspector/Inspector';
 import { useProjectStore } from '@/store/projectStore';
+import { showValidation } from '@/ui/showValidation';
 
 const s = () => useProjectStore.getState();
 beforeEach(() => {
@@ -97,5 +98,53 @@ describe('Validation · open the field to fix', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Device has no name.' }));
     expect(s().focusTarget).toBe(a);
     expect(s().focusTick).toBe(before + 1);
+  });
+});
+
+describe('Validation · the guided example asks for it (#47)', () => {
+  it('opens on Validation with the first finding focused, even if asked before mounting', async () => {
+    const id = s().addSubnet('10.0.0.0/24');
+    s().updateSubnet(id, { gateway: undefined }, { gateway: '10.0.1.1' });
+    s().runValidation();
+    showValidation(); // before the (lazy) panel mounts
+    render(<BottomPanel />);
+    const finding = await screen.findByRole('button', { name: /^Gateway 10\.0\.1\.1 is outside/ });
+    await waitFor(() => expect(document.activeElement).toBe(finding));
+
+    // Enter on it lands on the gateway field; the fix clears the finding.
+    fireEvent.click(finding);
+    const gateway = screen.getByLabelText('Gateway') as HTMLInputElement;
+    expect(document.activeElement).toBe(gateway);
+    fireEvent.change(gateway, { target: { value: '10.0.0.1' } });
+    act(() => s().runValidation());
+    expect(s().issues).toEqual([]);
+  });
+
+  it('also answers a request made while the panel is already up', async () => {
+    const id = s().addSubnet('10.0.0.0/24');
+    s().updateSubnet(id, { gateway: undefined }, { gateway: '10.0.1.1' });
+    s().runValidation();
+    render(<BottomPanel />);
+    expect(screen.queryByRole('button', { name: /^Gateway 10\.0\.1\.1/ })).toBeNull(); // collapsed
+    act(() => showValidation());
+    const finding = await screen.findByRole('button', { name: /^Gateway 10\.0\.1\.1 is outside/ });
+    await waitFor(() => expect(document.activeElement).toBe(finding));
+  });
+
+  it('focuses the finding once — coming back to Validation later leaves focus alone', async () => {
+    const id = s().addSubnet('10.0.0.0/24');
+    s().updateSubnet(id, { gateway: undefined }, { gateway: '10.0.1.1' });
+    s().runValidation();
+    showValidation();
+    render(<BottomPanel />);
+    const finding = await screen.findByRole('button', { name: /^Gateway 10\.0\.1\.1 is outside/ });
+    await waitFor(() => expect(document.activeElement).toBe(finding));
+
+    fireEvent.click(screen.getByRole('button', { name: /^Inventory/ }));
+    const tab = screen.getByRole('button', { name: /^Validation/ });
+    tab.focus();
+    fireEvent.click(tab);
+    await screen.findByRole('button', { name: /^Gateway 10\.0\.1\.1 is outside/ });
+    expect(document.activeElement).toBe(tab);
   });
 });

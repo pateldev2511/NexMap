@@ -817,9 +817,10 @@ export function App() {
                 run: () => st().summonDevice(t),
               }));
               // Conductor: scaffold a whole topology into the current diagram, at the
-              // viewport, reusing the curated starter registry (blank is just "new").
+              // viewport, reusing the curated starter registry (blank is just "new";
+              // a guided example needs its own document).
               const templateInserts: PaletteCommand[] = TEMPLATES.filter(
-                (tpl) => tpl.key !== 'blank',
+                (tpl) => tpl.key !== 'blank' && !tpl.guided,
               ).map((tpl) => ({
                 id: `template-${tpl.key}`,
                 label: `Insert: ${tpl.name}`,
