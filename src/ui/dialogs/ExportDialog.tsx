@@ -10,6 +10,7 @@ import {
 } from '@/io/export';
 import { documentRules } from '@/io/export/rulesReport';
 import { NexIcon } from '@/ui/icons/NexIcon';
+import { useModalDialog } from './useModalDialog';
 import styles from './ImportDialog.module.css';
 
 /**
@@ -38,6 +39,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const projectName = useProjectStore((s) => s.projectName);
   const selection = useProjectStore((s) => s.selection);
   const rev = useProjectStore((s) => s.rev); // refresh preview on model change
+  const { titleId, dialogProps } = useModalDialog(onClose);
   const [format, setFormat] = useState<ExportFormat>('png');
   const [scope, setScope] = useState<Scope>('all');
   const [scale, setScale] = useState(2);
@@ -154,9 +156,9 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.dialog} onClick={(e) => e.stopPropagation()}>
+      <div className={styles.dialog} {...dialogProps} onClick={(e) => e.stopPropagation()}>
         <div className={styles.head}>
-          <h2>Export</h2>
+          <h2 id={titleId}>Export</h2>
           <button className={styles.close} onClick={onClose} aria-label="Close">
             <NexIcon name="close" />
           </button>

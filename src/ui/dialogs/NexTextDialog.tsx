@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import { parseNexText, serializeNexText, type Diagnostic } from '@/lib/nextext';
+import { useModalDialog } from './useModalDialog';
 import styles from './NexTextDialog.module.css';
 
 const STARTER = `# NexText — describe your network, then Apply.
@@ -41,6 +42,7 @@ export function NexTextDialog({ onClose }: { onClose: () => void }) {
 
   const [src, setSrc] = useState(initial);
   const [applied, setApplied] = useState<string | null>(null);
+  const { titleId, dialogProps } = useModalDialog(onClose);
 
   const diagnostics: Diagnostic[] = useMemo(() => parseNexText(src).diagnostics, [src]);
   const errors = diagnostics.filter((d) => d.severity === 'error');
@@ -60,9 +62,9 @@ export function NexTextDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.dialog} onClick={(e) => e.stopPropagation()}>
+      <div className={styles.dialog} {...dialogProps} onClick={(e) => e.stopPropagation()}>
         <div className={styles.head}>
-          <h2>NexText — text to diagram</h2>
+          <h2 id={titleId}>NexText — text to diagram</h2>
           <button className={styles.close} onClick={onClose} aria-label="Close">
             ✕
           </button>
