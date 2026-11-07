@@ -23,6 +23,15 @@ const shot = async (page, name) => {
   return page.screenshot({ path: `${OUT}${name}.jpg`, type: 'jpeg', quality: 86 }).then(() => console.log(`  ${name}.jpg`));
 };
 
+/** A close-up of one region (CSS px of the 1440x900 window), for the README, where
+ *  GitHub's narrow column would shrink a whole-window shot past reading. */
+const crop = async (page, name, clip) => {
+  await page.mouse.move(2, (page.viewportSize()?.height ?? 900) - 2);
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: `${OUT}${name}.jpg`, type: 'jpeg', quality: 86, clip });
+  console.log(`  ${name}.jpg`);
+};
+
 /** A fresh profile: no draft, no remembered designer, the chosen theme. */
 async function fresh({ theme = 'light', width = 1440, height = 900, scale = 2, mobile = false } = {}) {
   const context = await browser.newContext({
@@ -117,6 +126,7 @@ for (const theme of ['light', 'dark']) {
   await page.getByRole('button', { name: /Gateway 192\.0\.2\.1 is outside/ }).click();
   await page.waitForTimeout(400);
   await shot(page, 'validation-fix');
+  await crop(page, 'validation-fix-crop', { x: 0, y: 612, width: 1000, height: 190 });
   await page.context().close();
 }
 
@@ -131,6 +141,7 @@ for (const theme of ['light', 'dark']) {
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await page.waitForTimeout(600);
   await shot(page, 'stress-test');
+  await crop(page, 'stress-test-crop', { x: 240, y: 44, width: 901, height: 800 });
   await page.context().close();
 }
 
@@ -155,6 +166,7 @@ for (const theme of ['light', 'dark']) {
   await page.getByRole('button', { name: /^Single rack$/ }).click();
   await page.waitForTimeout(800);
   await shot(page, 'rack');
+  await crop(page, 'rack-crop', { x: 292, y: 186, width: 788, height: 662 });
   await page.context().close();
 }
 

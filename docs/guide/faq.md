@@ -48,7 +48,12 @@ download a fresh copy each time you save.
 <summary><b>Can I use it on a phone or tablet?</b></summary>
 
 Yes: pinch to zoom, drag with two fingers to move around, and tap to select.
-A bigger screen is more comfortable for large designs.
+On a phone the toolbar buttons move to their own row, and the canvas tools
+scroll sideways. A bigger screen is more comfortable for large designs.
+
+<p align="center">
+  <img src="../assets/screens/phone.jpg" alt="NexMap on a phone, showing a home Wi-Fi network with the toolbar on its own row" width="280">
+</p>
 </details>
 
 <details>

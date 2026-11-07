@@ -29,7 +29,10 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/screens/network.jpg" alt="The NexMap Network Designer: a device library on the left, a branch-office network diagram in the middle, and the selected PC's details on the right" width="100%">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screens/network-dark.jpg">
+    <img src="docs/assets/screens/network.jpg" alt="The NexMap Network Designer: a device library on the left, a branch-office network diagram in the middle, and the selected PC's details on the right" width="100%">
+  </picture>
 </p>
 
 ## What is NexMap?
@@ -84,7 +87,7 @@ NexMap takes you straight to the field that needs fixing, explains what's
 wrong, and suggests the right value. Many problems can be fixed in one click.
 
 <p align="center">
-  <img src="docs/assets/screens/validation-fix.jpg" alt="A validation finding opened in the IP Plan: the gateway field is outlined in red with a note saying the address is outside the subnet and which addresses would work" width="90%">
+  <img src="docs/assets/screens/validation-fix-crop.jpg" alt="A validation finding opened in the IP Plan: the gateway field is outlined in red with a note saying the address is outside the subnet and which addresses would work" width="90%">
 </p>
 
 ### Stress-test it: what if something breaks?
@@ -94,7 +97,7 @@ instantly what loses its connection, and what keeps working through a
 backup path. Click it again to plug it back in.
 
 <p align="center">
-  <img src="docs/assets/screens/stress-test.jpg" alt="Stress-test mode: the core switch is failed and seven devices below it turn red, with a message saying seven devices are isolated" width="90%">
+  <img src="docs/assets/screens/stress-test-crop.jpg" alt="Stress-test mode: the core switch is failed and seven devices below it turn red, with a message saying seven devices are isolated" width="80%">
 </p>
 
 ### See it flat or in 3D
@@ -113,7 +116,7 @@ at any height, plug cables port to port, check that power and space add up,
 and export an installation packet for whoever does the work.
 
 <p align="center">
-  <img src="docs/assets/screens/rack.jpg" alt="The Rack Designer showing a 42U rack filled with switches, firewalls, servers, storage and UPS units drawn like the real hardware" width="90%">
+  <img src="docs/assets/screens/rack-crop.jpg" alt="A 42U rack in the Rack Designer filled with switches, firewalls, servers, storage and UPS units drawn like the real hardware, with its health score, space and power totals" width="70%">
 </p>
 
 ### Bring your data in, take results out
