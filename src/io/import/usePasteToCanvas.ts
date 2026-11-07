@@ -1,46 +1,82 @@
 import { useEffect } from 'react';
 import { useProjectStore } from '@/store/projectStore';
+import { isTextTarget } from '@/input/router';
 import { importPastedCsv, looksLikeCsv } from './clipboardImport';
+import { pasteSource, writeMarkerOnEvent } from './canvasClipboard';
 
 const IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 
 /**
- * Paste-to-canvas (Stage 2). A global paste listener:
- *  - clipboard image  → raster background underlay (size-clamped by store.addImage)
- *  - clipboard CSV    → devices/links/subnets/vlans via the shared CSV model
+ * The network canvases that are mounted, newest last, each saying whether it is
+ * read-only (presentation). Canvas registers itself (registerPasteCanvas); paste
+ * reads the newest at event time and again when an async image import lands.
+ */
+const canvases: { readOnly: boolean }[] = [];
+
+/** Register a mounted network canvas as the paste target. Returns the unregister. */
+export function registerPasteCanvas(target: { readOnly: boolean }): () => void {
+  canvases.push(target);
+  return () => {
+    const i = canvases.lastIndexOf(target);
+    if (i >= 0) canvases.splice(i, 1);
+  };
+}
+
+const activeCanvas = () => canvases[canvases.length - 1] ?? null;
+/** A read-only canvas (presentation) takes no paste of any kind (#35). */
+const pasteLocked = () => activeCanvas()?.readOnly ?? false;
+
+/**
+ * Paste-to-canvas (Stage 2). The ONE place keyboard paste is decided (#52) — the
+ * canvas's ⌘V keydown no longer preventDefaults, so the browser's paste event
+ * always arrives here carrying the system clipboard:
+ *  - the canvas's own copy marker → internal device paste (store.paste)
+ *  - clipboard image              → raster background underlay (size-clamped by store.addImage)
+ *  - clipboard CSV                → devices/links/subnets/vlans via the shared CSV model
+ *  - nothing importable           → the internal clipboard, if there is one
+ * (see canvasClipboard for why the marker tells "copied here" from "copied elsewhere since").
  *
- * It defers to the internal device clipboard (Cmd+V of copied devices) and to normal
- * paste inside form fields, so it never hijacks expected behavior. All applies are
- * single, undoable transactions.
+ * Normal paste inside form fields is left alone, and a read-only canvas ignores
+ * paste entirely — including an image import still decoding when presenting began.
+ * All applies are single, undoable transactions.
  */
 export function usePasteToCanvas(): void {
   useEffect(() => {
-    function onPaste(e: ClipboardEvent) {
-      const t = e.target as HTMLElement | null;
-      if (
-        t &&
-        (t.isContentEditable || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')
-      ) {
-        return; // let the field handle its own paste
-      }
+    function pasteInternal(e: ClipboardEvent) {
+      e.preventDefault();
       const store = useProjectStore.getState();
-      if (store.hasClipboard()) return; // internal copied-devices paste wins (Cmd+V)
+      store.paste();
+      store.runValidation();
+    }
 
-      const dt = e.clipboardData;
-      if (!dt) return;
+    function onPaste(e: ClipboardEvent) {
+      if (isTextTarget(e.target)) return; // let the field handle its own paste
+      if (pasteLocked()) return; // presenting: the diagram is read-only
+      const store = useProjectStore.getState();
+      // The internal clipboard pastes onto a mounted network canvas only.
+      const internal = !!activeCanvas() && store.hasClipboard();
+      const src = pasteSource(e.clipboardData, internal);
+      if (src.kind === 'none') return;
+      if (src.kind === 'internal') {
+        pasteInternal(e);
+        return;
+      }
 
       // 1) Image → underlay.
-      const imageItem = Array.from(dt.items).find((it) => it.kind === 'file' && it.type.startsWith('image/'));
-      if (imageItem) {
-        const file = imageItem.getAsFile();
+      if (src.kind === 'image') {
+        const file = src.file;
         if (file && file.size > 0 && file.size <= IMAGE_MAX_BYTES) {
           e.preventDefault();
           const reader = new FileReader();
           reader.onload = () => {
             const href = reader.result as string;
             const img = new Image();
-            img.onload = () => store.addImage(href, img.naturalWidth || 400, img.naturalHeight || 300);
-            img.onerror = () => store.addImage(href, 400, 300);
+            // Decoding is async: re-check, presentation may have begun meanwhile.
+            const add = (w: number, h: number) => {
+              if (!pasteLocked()) useProjectStore.getState().addImage(href, w, h);
+            };
+            img.onload = () => add(img.naturalWidth || 400, img.naturalHeight || 300);
+            img.onerror = () => add(400, 300);
             img.src = href;
           };
           reader.readAsDataURL(file);
@@ -49,10 +85,13 @@ export function usePasteToCanvas(): void {
       }
 
       // 2) CSV text → model objects via the shared CSV path.
-      const text = dt.getData('text/plain');
-      if (!text || !looksLikeCsv(text)) return;
-      const res = importPastedCsv(text, store.defaultLayerId(), store.devicesAll());
-      if (!res) return;
+      const res = looksLikeCsv(src.text)
+        ? importPastedCsv(src.text, store.defaultLayerId(), store.devicesAll())
+        : null;
+      if (!res) {
+        if (internal) pasteInternal(e); // plain text isn't an import: paste the canvas copy
+        return;
+      }
       e.preventDefault();
       if (res.devices.length || res.links.length) store.importObjects(res.devices, res.links);
       if (res.subnets.length || res.vlans.length) store.importSemantics(res.subnets, res.vlans);
@@ -60,7 +99,20 @@ export function usePasteToCanvas(): void {
       store.runValidation();
     }
 
+    // The native copy/cut that follows a canvas ⌘C/⌘X writes the marker.
+    function onCopyOrCut(e: ClipboardEvent) {
+      if (isTextTarget(e.target)) return; // field copy is native
+      if (!activeCanvas() || !useProjectStore.getState().hasClipboard()) return;
+      writeMarkerOnEvent(e);
+    }
+
     window.addEventListener('paste', onPaste);
-    return () => window.removeEventListener('paste', onPaste);
+    window.addEventListener('copy', onCopyOrCut);
+    window.addEventListener('cut', onCopyOrCut);
+    return () => {
+      window.removeEventListener('paste', onPaste);
+      window.removeEventListener('copy', onCopyOrCut);
+      window.removeEventListener('cut', onCopyOrCut);
+    };
   }, []);
 }

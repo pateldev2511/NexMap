@@ -355,9 +355,22 @@ export function App() {
   // text undo, not model undo — and Cmd+Z mid-drag is consumed by the
   // router's gesture-cancel stage before it can pop history.
   useQuietChrome(); // M3c: earned-quiet chrome demotion driver
+  const presentingRef = useRef(presentation);
+  presentingRef.current = presentation;
   useEffect(() => {
     keyboardRouter.install();
     const unregister = keyboardRouter.registerApp((e) => {
+      // Presenting is read-only (#35): no undo/redo or open, and no editor-only
+      // overlays (export, palette, help) opening unseen behind it. Swallowed so the
+      // browser's own ⌘O / ⌘K don't fire either. Save still works.
+      if (presentingRef.current) {
+        const k = e.key.toLowerCase();
+        if ((e.metaKey || e.ctrlKey) && ['z', 'o', 'e', 'k'].includes(k)) {
+          e.preventDefault();
+          return true;
+        }
+        if (e.key === '?') return true;
+      }
       if (e.metaKey || e.ctrlKey) {
         const k = e.key.toLowerCase();
         if (k === 'z') {
