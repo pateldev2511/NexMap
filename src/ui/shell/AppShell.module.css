@@ -164,21 +164,18 @@
   mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 28px), transparent);
 }
 
-/* When the topbar gets tight, collapse action buttons to icons (tooltips remain)
-   so they never overlap. The More trigger (a plain .topbarBtn) collapses too;
-   its aria-label keeps the accessible name stable regardless of the span. */
-/* Labels are hidden visually, not with display:none, so each button keeps its
-   short accessible name ("New", "Save") at every width instead of falling back to
-   its tooltip ("New project (Ctrl+N)"). Out of flow, so the flex gap ignores them. */
-@media (max-width: 1240px) {
-  .topbarActions > .topbarBtn span {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
+/* When the labelled buttons don't fit, ActionStrip sets data-compact and they show
+   icons only (tooltips remain). Labels are hidden visually, not with display:none,
+   so each button keeps its short accessible name ("New", "Save") instead of
+   falling back to its tooltip ("New project (Alt+N)"). Out of flow, so the flex
+   gap ignores them. */
+.topbarActions[data-compact='true'] > .topbarBtn span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .topbarBtn {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { NexIcon } from '@/ui/icons/NexIcon';
 import { NexMapLogo } from '@/ui/deck/NexMapLogo';
 import { getPanelOpen, setPanelOpen } from '@/lib/prefs';
@@ -145,20 +145,29 @@ export function AppShell({
 }
 
 /**
- * The topbar's action buttons. When they don't fit, the strip scrolls (touch,
- * trackpad, a plain mouse wheel, or Tab moving focus), and the edge with more
- * buttons beyond it fades so the overflow is visible.
+ * The topbar's action buttons. Labels show while they fit; when they don't, the
+ * strip drops to icons (measured, not a fixed breakpoint, so it holds for any
+ * button count and font metrics). Only when even the icons don't fit does the
+ * strip scroll (touch, trackpad, a plain mouse wheel, or Tab moving focus), with
+ * the edge that has more buttons beyond it faded.
  */
 function ActionStrip({ children }: { children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const update = () => {
+    const edges = () => {
       const max = el.scrollWidth - el.clientWidth;
       el.dataset.moreStart = String(el.scrollLeft > 1);
       el.dataset.moreEnd = String(el.scrollLeft < max - 1);
+    };
+    // Measure with labels, then keep them only if they fit. Both reads happen in one
+    // task, so the user never sees the labelled layout flash.
+    const fit = () => {
+      el.dataset.compact = 'false';
+      el.dataset.compact = String(el.scrollWidth > el.clientWidth + 1);
+      edges();
     };
     // A vertical wheel scrolls the strip sideways, but only when it can move.
     const onWheel = (e: WheelEvent) => {
@@ -166,22 +175,18 @@ function ActionStrip({ children }: { children: ReactNode }) {
       e.preventDefault();
       el.scrollLeft += e.deltaY;
     };
-    const ro = new ResizeObserver(update);
-    const observeAll = () => {
-      ro.observe(el);
-      for (const child of el.children) ro.observe(child);
-      update();
-    };
-    // Buttons come and go with the designer and selection.
-    const mo = new MutationObserver(observeAll);
-    mo.observe(el, { childList: true });
-    el.addEventListener('scroll', update, { passive: true });
+    const ro = new ResizeObserver(fit);
+    ro.observe(el.parentElement ?? el);
+    // Buttons come and go (designer, selection) and labels change (the views menu).
+    const mo = new MutationObserver(fit);
+    mo.observe(el, { childList: true, subtree: true, characterData: true });
+    el.addEventListener('scroll', edges, { passive: true });
     el.addEventListener('wheel', onWheel, { passive: false });
-    observeAll();
+    fit();
     return () => {
       ro.disconnect();
       mo.disconnect();
-      el.removeEventListener('scroll', update);
+      el.removeEventListener('scroll', edges);
       el.removeEventListener('wheel', onWheel);
     };
   }, []);

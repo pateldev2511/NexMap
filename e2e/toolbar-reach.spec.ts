@@ -51,6 +51,20 @@ for (const [width, height] of [
       await page.getByRole('button', { name, exact: true }).click({ trial: true });
     }
 
+    // On a desktop the whole strip fits (icons only if need be): nothing to scroll to.
+    if (width >= 1280) {
+      const { scroll, client } = await strip(page).evaluate((el) => ({
+        scroll: el.scrollWidth,
+        client: el.clientWidth,
+      }));
+      expect(scroll).toBeLessThanOrEqual(client + 1);
+    }
+
+    // The More menu opens (it closes on scroll, so a strip that scrolls on focus broke it).
+    await strip(page).getByRole('button', { name: 'More actions' }).click();
+    await expect(page.getByRole('button', { name: 'Presentation' })).toBeVisible();
+    await page.keyboard.press('Escape');
+
     // The canvas keeps most of the screen.
     const canvas = await page.locator('main, [class*="canvas"]').first().boundingBox();
     expect(canvas!.height).toBeGreaterThan(height * 0.5);
