@@ -367,6 +367,8 @@ export interface ProjectStore {
   flowMode: boolean;
   /** Device ids currently "pulled" (failed) in Flow mode. Cleared on exit. */
   flowFailed: string[];
+  /** The destination Flow measures reachability to; null = any exit. Cleared on exit. */
+  flowTarget: string | null;
   projectName: string;
   activeLayerId: string;
   activeViewId: string | null;
@@ -646,6 +648,8 @@ export interface ProjectStore {
   toggleFlowFailed(id: string): void;
   /** Restore every pulled device (stay in Flow). */
   clearFlowFailed(): void;
+  /** Pick the device Flow measures reachability to (null = any exit). */
+  setFlowTarget(id: string | null): void;
   endEdit(): void;
   /** Mark the model as saved to a file (clears the unsaved-changes dot). */
   markSaved(): void;
@@ -1371,6 +1375,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     projection: 'flat',
     flowMode: false,
     flowFailed: [],
+    flowTarget: null,
     projectName: model.project.name,
     activeLayerId: firstLayerId(),
     activeViewId: null,
@@ -3214,7 +3219,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     },
 
     setFlowMode(on) {
-      set(on ? { flowMode: true } : { flowMode: false, flowFailed: [] });
+      set(on ? { flowMode: true } : { flowMode: false, flowFailed: [], flowTarget: null });
     },
     toggleFlowFailed(id) {
       const cur = get().flowFailed;
@@ -3222,6 +3227,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     },
     clearFlowFailed() {
       set({ flowFailed: [] });
+    },
+    setFlowTarget(id) {
+      set({ flowTarget: id });
     },
 
     endEdit() {

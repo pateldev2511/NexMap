@@ -1035,6 +1035,36 @@
   padding: 0;
   text-decoration: underline;
 }
+/* Failed · newly unreachable · already disconnected, under the verdict. */
+.flowHudCounts {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--chrome-fg-muted);
+}
+/* "reach to [any exit ▾]": the destination the verdict is about. */
+.flowHudTarget {
+  white-space: nowrap;
+}
+.flowHudSelect {
+  font: inherit;
+  max-width: 220px;
+  color: var(--chrome-fg);
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 6px;
+  padding: 1px 4px;
+  cursor: pointer;
+}
+
+/* A destination reachability is measured against (dashed, the signal channel). */
+.flowTargetRing {
+  fill: none;
+  stroke: var(--accent);
+  stroke-dasharray: 2 4;
+  opacity: 0.85;
+  pointer-events: none;
+}
 
 /* Reroute: backups that light up as survivors find a detour. Cyan (the signal
    channel), marching toward the network, so "held via a backup" reads as relief
