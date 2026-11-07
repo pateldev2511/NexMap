@@ -1000,6 +1000,8 @@
   pointer-events: all;
 }
 .flowHudBadge {
+  flex: none;
+  white-space: nowrap;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.07em;
@@ -1025,8 +1027,16 @@
   font-size: 11px;
   color: var(--chrome-fg-muted);
   pointer-events: all;
+  /* Sits over the diagram: a soft backing keeps it legible, and on a narrow canvas
+     it wraps between phrases (each control stays whole). */
+  text-align: center;
+  line-height: 1.7;
+  background: color-mix(in srgb, var(--chrome-bg) 88%, transparent);
+  border-radius: 10px;
+  padding: 1px 10px;
 }
 .flowHudLink {
+  white-space: nowrap;
   background: none;
   border: none;
   color: var(--accent);
