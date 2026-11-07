@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NexIcon } from '@/ui/icons/NexIcon';
 import { NexMapLogo } from '@/ui/deck/NexMapLogo';
 import { getPanelOpen, setPanelOpen } from '@/lib/prefs';
@@ -114,7 +114,7 @@ export function AppShell({
           </div>
         )}
         <div className={styles.topbarSpacer} />
-        <div className={styles.topbarActions}>{actions}</div>
+        <ActionStrip>{actions}</ActionStrip>
       </header>
 
       {!fullBleed && (
@@ -140,6 +140,55 @@ export function AppShell({
       {!fullBleed && bottom && <div className={styles.bottom}>{bottom}</div>}
 
       <footer className={styles.status}>{status}</footer>
+    </div>
+  );
+}
+
+/**
+ * The topbar's action buttons. When they don't fit, the strip scrolls (touch,
+ * trackpad, a plain mouse wheel, or Tab moving focus), and the edge with more
+ * buttons beyond it fades so the overflow is visible.
+ */
+function ActionStrip({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => {
+      const max = el.scrollWidth - el.clientWidth;
+      el.dataset.moreStart = String(el.scrollLeft > 1);
+      el.dataset.moreEnd = String(el.scrollLeft < max - 1);
+    };
+    // A vertical wheel scrolls the strip sideways, but only when it can move.
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      e.preventDefault();
+      el.scrollLeft += e.deltaY;
+    };
+    const ro = new ResizeObserver(update);
+    const observeAll = () => {
+      ro.observe(el);
+      for (const child of el.children) ro.observe(child);
+      update();
+    };
+    // Buttons come and go with the designer and selection.
+    const mo = new MutationObserver(observeAll);
+    mo.observe(el, { childList: true });
+    el.addEventListener('scroll', update, { passive: true });
+    el.addEventListener('wheel', onWheel, { passive: false });
+    observeAll();
+    return () => {
+      ro.disconnect();
+      mo.disconnect();
+      el.removeEventListener('scroll', update);
+      el.removeEventListener('wheel', onWheel);
+    };
+  }, []);
+
+  return (
+    <div ref={ref} className={styles.topbarActions}>
+      {children}
     </div>
   );
 }
