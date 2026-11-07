@@ -4,11 +4,11 @@ import { NexMapLogo } from './deck/NexMapLogo';
 import { DeckBackground } from './deck/DeckBackground';
 import { NetworkArt, RackArt } from './deck/deckArt';
 import { VideoReel } from './deck/VideoReel';
+import { APP_VERSION } from '../model/schema';
 import styles from './DesignerChooser.module.css';
 
 export type DesignerMode = 'network' | 'rack';
 
-const APP_VERSION = '0.6.2'; // keep in step with package.json
 
 type LaunchAction = {
   id: string;

@@ -25,7 +25,8 @@ import type {
 
 /** Bump when the on-disk shape changes; add a migration in migrate.ts. */
 export const SCHEMA_VERSION = 7;
-export const APP_VERSION = '0.1.0';
+/** The running release, from package.json (injected by vite.config.ts `define`). */
+export const APP_VERSION = __APP_VERSION__;
 
 export const DEFAULT_DEVICE_SIZE = { width: 56, height: 40 } as const;
 
