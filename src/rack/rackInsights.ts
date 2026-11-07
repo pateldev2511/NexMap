@@ -11,6 +11,7 @@ import { airflowViolations } from './rackAirflow';
 import { isFullDepth, nearestFreeU, slotOf } from './rackModel';
 import { planCatalogDepths } from './rackCatalog';
 import { cableLanes, MANAGER_REACH_U } from './cableLanes';
+import { analyzeRackPower, devicesByRack, kw, loadStatus, pduRatingLabel } from './powerCords';
 
 export type RackInsightSeverity = 'ok' | 'info' | 'warn' | 'error';
 export type RackInsightAction =
@@ -21,6 +22,7 @@ export type RackInsightAction =
   | 'fill-depths'
   | 'go-to-u'
   | 'review-health'
+  | 'review-pdu'
   | 'review-rack';
 
 export interface RackInsight {
@@ -181,8 +183,10 @@ export function rackInsights({
 
   // PDUs: gear that needs a feed no PDU in its rack is on, or more cords than outlets.
   // Racks without any PDU drawn are left alone (their power isn't modelled).
+  // Each rack's own units, grouped once: the per-rack power checks below never scan the fleet.
+  const byRack = devicesByRack(devices);
   for (const rack of racks) {
-    const coverage = pduFeedCoverage(rack, devices);
+    const coverage = pduFeedCoverage(rack, byRack.get(rack.id) ?? []);
     if (!coverage.some((f) => f.pdus > 0)) continue;
     for (const f of coverage) {
       if (f.cords === 0) continue;
@@ -208,6 +212,56 @@ export function rackInsights({
           actionLabel: `Add PDU ${f.feed}`,
           rackId: rack.id,
           objectIds: f.deviceIds,
+        });
+      }
+    }
+  }
+
+  // PDU and UPS load against its rating: over it now, over it if the other feed fails
+  // (every dual-corded unit shifts its full draw onto the survivor), or past 80% then.
+  // Strips and UPSes without a rating aren't checked.
+  for (const rack of racks) {
+    const power = analyzeRackPower(rack, byRack.get(rack.id) ?? []);
+    const checks = [
+      ...power.pduLoads.map((l) => ({ l, ids: [l.pduId], verb: 'trips' as const })),
+      ...power.upsLoads.map((l) => ({ l, ids: l.upsIds, verb: 'overloads' as const })),
+    ];
+    for (const { l, ids, verb } of checks) {
+      if (l.ratedW == null) continue;
+      const status = loadStatus(l, verb);
+      if (status === 'ok') continue;
+      const first = power.byId.get(ids[0]!)!;
+      const name = ids.map((id) => power.byId.get(id)?.name ?? id).join(' + ');
+      const other = l.feed === 'A' ? 'B' : 'A';
+      const rated = verb === 'trips' ? `${kw(l.ratedW)} (${pduRatingLabel(first)})` : `${kw(l.ratedW)} of UPS output`;
+      const base = { action: 'review-pdu' as const, actionLabel: verb === 'trips' ? 'Review PDU' : 'Review UPS', rackId: rack.id, deviceId: first.id };
+      if (status === 'over its rating') {
+        insights.push({
+          ...base,
+          id: `${verb === 'trips' ? 'pdu' : 'ups'}-over-${first.id}`,
+          title: `${name} ${ids.length > 1 ? 'are' : 'is'} over ${ids.length > 1 ? 'their' : 'its'} rating`,
+          detail: verb === 'trips'
+            ? `${rack.name}: ${kw(l.normalW)} on a ${rated} strip.`
+            : `${rack.name}: ${kw(l.normalW)} on feed ${l.feed}, against ${rated}.`,
+          severity: 'warn',
+        });
+      } else if (status.startsWith(verb)) {
+        insights.push({
+          ...base,
+          id: `${verb === 'trips' ? 'pdu-failover' : 'ups-failover'}-${first.id}`,
+          title: `${name} ${verb === 'trips' ? (ids.length > 1 ? 'trip' : 'trips') : ids.length > 1 ? 'overload' : 'overloads'} if feed ${other} fails`,
+          detail: verb === 'trips'
+            ? `${rack.name}: ${kw(l.failoverW)} lands on it when feed ${other} goes; it's rated ${rated}.`
+            : `${rack.name}: ${kw(l.failoverW)} lands on feed ${l.feed} when feed ${other} goes, against ${rated}.`,
+          severity: 'warn',
+        });
+      } else {
+        insights.push({
+          ...base,
+          id: `${verb === 'trips' ? 'pdu' : 'ups'}-80-${first.id}`,
+          title: `${name} ${ids.length > 1 ? 'run' : 'runs'} past 80% if feed ${other} fails`,
+          detail: `${rack.name}: ${Math.round((l.failoverW / l.ratedW) * 100)}% of ${rated}. Many electrical codes cap continuous load at 80%.`,
+          severity: 'info',
         });
       }
     }

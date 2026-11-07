@@ -84,3 +84,10 @@ describe('rack catalog — depths', () => {
     expect('depthMm' in after).toBe(true); // an explicit clear, so undo restores 758
   });
 });
+
+describe('catalog UPS output', () => {
+  it('a model without a published output never wipes a typed-in rating', () => {
+    expect(catalogFields(catalogById('apc-srt2200')!)).not.toHaveProperty('ratedWatts');
+    expect(catalogFields(catalogById('eaton-5px3000')!).ratedWatts).toBe(2700);
+  });
+});

@@ -55,6 +55,7 @@ import { isFullDepth, isFullHeightRail, slotOf, canFit, nearestFreeU, nearestFre
 import { rackBudget, occupiedUnits } from './rackBudget';
 import { deviceFaceParts, deviceOppositeFaceParts, devicePortLayout, rackShellParts, RACK_ART_DEFS } from './rackDeviceArt';
 import { deviceColorBy, type ColorByMode } from './rackColorBy';
+import type { FeedFailure } from './powerCords';
 import { cablePath } from './cablePath';
 import styles from './RackDesigner.module.css';
 
@@ -68,6 +69,8 @@ export interface RackRowProps {
   searchHits: Set<string>;
   showRear: boolean;
   colorBy: ColorByMode;
+  /** The simulated feed failure a 'fail-a'/'fail-b' color mode tints by. */
+  failure?: FeedFailure | null;
   onFocusRack: (rackId: string) => void;
   onSelect: (deviceId: string | null, additive?: boolean) => void;
   onReorder: (rackId: string, dir: -1 | 1) => void;
@@ -93,7 +96,7 @@ type Col = { rack: Rack; frontX: number; rearX: number; size: ReturnType<typeof 
  * only the transform wrapper — not N racks × M devices of innerHTML art.
  */
 const RowScene = memo(function RowScene({
-  cols, devices, cables, activeRackId, selectedId, selectedIds, searchHits, showRear, colorBy,
+  cols, devices, cables, activeRackId, selectedId, selectedIds, searchHits, showRear, colorBy, failure,
   dragRackId, dimmedId, onDevDown, onReorder,
 }: {
   cols: Col[];
@@ -105,6 +108,7 @@ const RowScene = memo(function RowScene({
   searchHits: Set<string>;
   showRear: boolean;
   colorBy: ColorByMode;
+  failure?: FeedFailure | null;
   /** Highlighted drop-target rack during a cross-rack device drag. */
   dragRackId: string | null;
   /** Device being dragged over another rack (rendered faded at its old slot). */
@@ -229,7 +233,7 @@ const RowScene = memo(function RowScene({
             >
               <g dangerouslySetInnerHTML={{ __html: deviceFaceParts(d, panel, face).join('') }} />
               {colorBy !== 'gear' && (() => {
-                const tint = deviceColorBy(d, colorBy);
+                const tint = deviceColorBy(d, colorBy, failure);
                 return tint ? <rect x={panel.x} y={panel.y} width={panel.w} height={panel.h} rx={3} fill={tint} fillOpacity={0.6} pointerEvents="none" /> : null;
               })()}
               <rect x={panel.x} y={panel.y} width={panel.w} height={panel.h} fill="transparent" />
@@ -319,7 +323,7 @@ const RowScene = memo(function RowScene({
 });
 
 export function RackRow({
-  racks, devices, cables, activeRackId, selectedId, selectedIds, searchHits, showRear, colorBy,
+  racks, devices, cables, activeRackId, selectedId, selectedIds, searchHits, showRear, colorBy, failure,
   onFocusRack, onSelect, onReorder, onMoveDeviceToRack, gestureApi,
 }: RackRowProps) {
   const [dragRackId, setDragRackId] = useState<string | null>(null);
@@ -752,6 +756,7 @@ export function RackRow({
           searchHits={searchHits}
           showRear={showRear}
           colorBy={colorBy}
+          failure={failure}
           dragRackId={dragRackId}
           dimmedId={drag && drag.target ? drag.deviceId : null}
           onDevDown={onDevDown}

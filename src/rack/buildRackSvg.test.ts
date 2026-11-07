@@ -5,6 +5,10 @@ import {
   buildRackRowFacesSvg,
   buildLabelSheetSvg,
   buildConnectionsTableSvg,
+  buildPowerCordsTableSvg,
+  buildPowerStripsTableSvg,
+  powerCordRows,
+  vstackSvg,
   composeExport,
   cableScheduleRows,
   cableScheduleCsv,
@@ -262,5 +266,58 @@ describe('buildLabelSheetSvg — printable labels', () => {
     const svg = buildLabelSheetSvg([rack], [], {});
     expect(svg).toContain('Rack labels · 0');
     expect(svg).toContain('No mounted devices');
+  });
+});
+
+describe('power cords in the install packet', () => {
+  const base = { kind: 'device', x: 0, y: 0, width: 56, height: 40, layerId: 'L', mount: 'rack', side: 'front', bay: 'full' } as const;
+  const r1: Rack = { id: 'r1', name: 'MDF', ruHeight: 12 };
+  const r2: Rack = { id: 'r2', name: 'IDF', ruHeight: 12 };
+  const pdu: Device = {
+    ...base, id: 'pa', type: 'ups', name: 'pdu-a', rackId: 'r1', ru: 1, ruSpan: 12, mount: 'rail', side: 'rear', bay: 'right', powerFeed: 'A',
+    interfaces: Array.from({ length: 12 }, (_, i) => ({ id: `o${i}`, name: `C13-${i + 1}` })),
+  };
+  const esx: Device = { ...base, id: 's1', type: 'server', name: 'esxi-01', rackId: 'r1', ru: 12, ruSpan: 1, powerFeed: 'AB' };
+  const idfSw: Device = { ...base, id: 's2', type: 'switch', name: 'idf-sw', rackId: 'r2', ru: 5, ruSpan: 1 };
+
+  it('lists every cord in racks with PDUs, and skips racks with none', () => {
+    expect(powerCordRows([r1, r2], [pdu, esx, idfSw])).toEqual([
+      { rack: 'MDF', device: 'esxi-01', u: 'U12', feed: 'A', pdu: 'pdu-a', outlet: 'C13-1' },
+      { rack: 'MDF', device: 'esxi-01', u: 'U12', feed: 'B', pdu: 'no free outlet', outlet: '' },
+    ]);
+  });
+
+  it('renders an export-safe table that stacks under the connections', () => {
+    const table = buildPowerCordsTableSvg(powerCordRows([r1], [pdu, esx]), { background: '#ffffff', title: 'Power cords' });
+    expect(table.startsWith('<svg')).toBe(true);
+    expect(table).not.toContain('var(');
+    expect(table).toContain('>Power cords<');
+    expect(table).toContain('>Outlet<');
+    expect(table).toContain('>C13-1<');
+    expect(table).toContain('>no free outlet<');
+    const both = vstackSvg(buildConnectionsTableSvg([], {}), table, '#ffffff');
+    const h = (svg: string) => Number(svg.match(/height="(\d+)"/)![1]);
+    expect(h(both)).toBeGreaterThan(h(table));
+  });
+
+  it('a power-strip table with each strip’s load and both failure verdicts, only for racks with PDUs', () => {
+    const pdb: Device = { ...pdu, id: 'pb', name: 'pdu-b', bay: 'left', powerFeed: 'B', ratedAmps: 10, ratedVolts: 200 };
+    const big: Device = { ...esx, watts: 2400 };
+    const table = buildPowerStripsTableSvg([r1, r2], [pdu, pdb, big, idfSw], { background: '#ffffff', title: 'Power strips' })!;
+    expect(table).toContain('>Power strips<');
+    expect(table).toContain('>If other feed fails<');
+    expect(table).toContain('>10 A × 200 V · 2.00 kW<');
+    expect(table).toContain('>trips if A fails<');
+    expect(table).toContain('>no rating<');
+    // The verdicts cover every exported rack, like the row view's: the IDF's single-corded switch counts.
+    expect(table).toContain('>If feed A fails: 2 units lose power (1 single-corded, 1 on a tripped strip) · pdu-b trips<');
+    expect(table).not.toContain('>IDF<'); // …but the IDF has no PDU, so no row
+    expect(buildPowerStripsTableSvg([r2], [idfSw])).toBeNull();
+  });
+
+  it('a table on a dark export sits on a white card, so its text stays legible', () => {
+    const table = buildPowerCordsTableSvg(powerCordRows([r1], [pdu, esx]), { background: '#0c1015', title: 'Power cords' });
+    expect(table).toMatch(/<rect x="0" y="0" width="\d+" height="\d+" rx="6" fill="#ffffff"\/>/);
+    expect(table).not.toContain('#0c1015');
   });
 });

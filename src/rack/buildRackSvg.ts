@@ -25,6 +25,8 @@ import { isFullDepth, slotOf, orderRacks } from './rackModel';
 import { deviceFaceParts, deviceOppositeFaceParts, devicePortLayout, rackShellParts, RACK_ART_DEFS } from './rackDeviceArt';
 import { cablePath } from './cablePath';
 import { cableLanes, routeLabel } from './cableLanes';
+import { feedFailure, feedFailureSummary, planPowerCords, powerStripRows, type PowerStripRow } from './powerCords';
+import { isPdu, isRackUps } from './rackPower';
 
 /** Literal-hex export palette for labels, tables, and U numbers. */
 const C = {
@@ -404,8 +406,15 @@ const TBL = {
   border: '#cdd6e0',
   text: '#15212e',
 } as const;
+/** A table column; the `color` column draws a swatch instead of text. */
+interface TableCol<K extends string> {
+  key: K;
+  label: string;
+  w: number;
+}
+
 // [swatch, From, To, Label, VLAN, Length, Route] — fixed widths keep the literal-hex SVG simple.
-const TBL_COLS: { key: 'color' | 'from' | 'to' | 'label' | 'vlan' | 'lengthFt' | 'route'; label: string; w: number }[] = [
+const TBL_COLS: TableCol<'color' | 'from' | 'to' | 'label' | 'vlan' | 'lengthFt' | 'route'>[] = [
   { key: 'color', label: '', w: 30 },
   { key: 'from', label: 'From', w: 180 },
   { key: 'to', label: 'To', w: 180 },
@@ -421,12 +430,101 @@ const TBL_COLS: { key: 'color' | 'from' | 'to' | 'label' | 'vlan' | 'lengthFt' |
  * so it rasterizes out of document context. Empty list still yields a valid header table.
  */
 export function buildConnectionsTableSvg(rows: CableScheduleRow[], opts: { background?: string | null; title?: string } = {}): string {
-  const innerW = TBL_COLS.reduce((s, c) => s + c.w, 0);
+  return buildTableSvg(TBL_COLS, rows, opts);
+}
+
+/** One row of the install packet's power-cord table. */
+export interface PowerCordRow {
+  rack: string;
+  device: string;
+  u: string;
+  feed: string;
+  pdu: string;
+  outlet: string;
+}
+
+const POWER_COLS: TableCol<keyof PowerCordRow>[] = [
+  { key: 'rack', label: 'Rack', w: 130 },
+  { key: 'device', label: 'Device', w: 180 },
+  { key: 'u', label: 'U', w: 60 },
+  { key: 'feed', label: 'Feed', w: 60 },
+  { key: 'pdu', label: 'PDU', w: 150 },
+  { key: 'outlet', label: 'Outlet', w: 100 },
+];
+
+/**
+ * Where every power cord plugs in, for the racks that have PDUs (a rack without any has
+ * no power drawn, so listing its cords as unplugged would only be noise).
+ */
+export function powerCordRows(racks: readonly Rack[], devices: readonly Device[]): PowerCordRow[] {
+  const byId = new Map(devices.map((d) => [d.id, d]));
+  const rows: PowerCordRow[] = [];
+  for (const rack of orderRacks([...racks])) {
+    if (!devices.some((d) => d.rackId === rack.id && d.ru != null && isPdu(d))) continue;
+    for (const c of planPowerCords(rack, devices)) {
+      const d = byId.get(c.deviceId)!;
+      rows.push({
+        rack: rack.name,
+        device: d.name,
+        u: `U${d.ru}`,
+        feed: c.feed,
+        pdu: c.pduId ? byId.get(c.pduId)?.name ?? c.pduId : 'no free outlet',
+        outlet: c.outlet ?? '',
+      });
+    }
+  }
+  return rows;
+}
+
+/** The power-cord table, in the same export-safe style as the connection table. */
+export function buildPowerCordsTableSvg(rows: PowerCordRow[], opts: { background?: string | null; title?: string } = {}): string {
+  return buildTableSvg(POWER_COLS, rows, opts);
+}
+
+const STRIP_COLS: TableCol<keyof PowerStripRow>[] = [
+  { key: 'rack', label: 'Rack', w: 120 },
+  { key: 'pdu', label: 'PDU / UPS', w: 130 },
+  { key: 'feed', label: 'Feed', w: 50 },
+  { key: 'rating', label: 'Rating', w: 260 },
+  { key: 'normal', label: 'Load', w: 110 },
+  { key: 'failover', label: 'If other feed fails', w: 150 },
+  { key: 'status', label: 'Status', w: 160 },
+];
+
+/**
+ * Every PDU's and rated UPS's rating and load, now and if the other feed fails (for the
+ * racks that have either), with the two feed-failure verdicts for all `racks` under it.
+ */
+export function buildPowerStripsTableSvg(
+  racks: readonly Rack[],
+  devices: readonly Device[],
+  opts: { background?: string | null; title?: string } = {},
+): string | null {
+  const modelled = orderRacks([...racks]).filter((r) =>
+    devices.some((d) => d.rackId === r.id && d.ru != null && (isPdu(d) || (isRackUps(d) && !!d.ratedWatts))),
+  );
+  if (modelled.length === 0) return null;
+  // The verdicts cover every rack exported, as the row view's do.
+  const notes = (['A', 'B'] as const).map((f) => feedFailureSummary(feedFailure(orderRacks([...racks]), devices, f), devices));
+  return buildTableSvg(STRIP_COLS, powerStripRows(modelled, devices), { ...opts, notes });
+}
+
+/** The export-safe table the connection, power-cord and power-strip tables draw with. */
+function buildTableSvg<K extends string>(
+  cols: TableCol<K>[],
+  rows: Partial<Record<K, string>>[],
+  opts: { background?: string | null; title?: string; notes?: string[] },
+): string {
+  const innerW = cols.reduce((s, c) => s + c.w, 0);
   const width = innerW + TBL.pad * 2;
   const titleH = opts.title ? 26 : 0;
-  const height = TBL.pad * 2 + titleH + TBL.headH + rows.length * TBL.rowH;
+  const notes = opts.notes ?? [];
+  const notesH = notes.length ? 8 + notes.length * 20 : 0;
+  const height = TBL.pad * 2 + titleH + TBL.headH + rows.length * TBL.rowH + notesH;
   const parts: string[] = [];
-  if (opts.background) parts.push(`<rect x="0" y="0" width="${width}" height="${height}" fill="${escapeXml(opts.background)}"/>`);
+  // A table is a paper document: on a dark export (the PNG) it sits on its own white card,
+  // or its title, plain rows and notes would be dark ink on a dark page.
+  if (opts.background) parts.push(`<rect x="0" y="0" width="${width}" height="${height}" rx="${opts.background === TBL.bg ? 0 : 6}" fill="${TBL.bg}"/>`);
   if (opts.title) {
     parts.push(`<text x="${TBL.pad}" y="${TBL.pad + 16}" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14" font-weight="700" fill="${TBL.text}">${escapeXml(opts.title)}</text>`);
   }
@@ -436,7 +534,7 @@ export function buildConnectionsTableSvg(rows: CableScheduleRow[], opts: { backg
   // header
   parts.push(`<rect x="${x0}" y="${y}" width="${innerW}" height="${TBL.headH}" fill="${TBL.headerBg}"/>`);
   let cx = x0;
-  for (const col of TBL_COLS) {
+  for (const col of cols) {
     if (col.label) {
       parts.push(`<text x="${cx + 6}" y="${y + TBL.headH / 2 + 4}" font-family="ui-sans-serif,system-ui,sans-serif" font-size="${TBL.font}" font-weight="700" fill="${TBL.headerFg}">${escapeXml(col.label)}</text>`);
     }
@@ -448,9 +546,9 @@ export function buildConnectionsTableSvg(rows: CableScheduleRow[], opts: { backg
   rows.forEach((r, i) => {
     if (i % 2 === 1) parts.push(`<rect x="${x0}" y="${y}" width="${innerW}" height="${TBL.rowH}" fill="${TBL.zebra}"/>`);
     let colX = x0;
-    for (const col of TBL_COLS) {
+    for (const col of cols) {
       if (col.key === 'color') {
-        parts.push(`<rect x="${colX + 7}" y="${y + TBL.rowH / 2 - 6}" width="14" height="12" rx="2" fill="${escapeXml(r.color)}" stroke="${TBL.border}" stroke-width="1"/>`);
+        parts.push(`<rect x="${colX + 7}" y="${y + TBL.rowH / 2 - 6}" width="14" height="12" rx="2" fill="${escapeXml(String(r[col.key] ?? ''))}" stroke="${TBL.border}" stroke-width="1"/>`);
       } else {
         const val = String(r[col.key] ?? '');
         if (val) parts.push(`<text x="${colX + 6}" y="${y + TBL.rowH / 2 + 4}" font-family="ui-monospace,Menlo,monospace" font-size="${TBL.font}" fill="${TBL.text}">${escapeXml(val)}</text>`);
@@ -462,6 +560,10 @@ export function buildConnectionsTableSvg(rows: CableScheduleRow[], opts: { backg
   });
   // outer border
   parts.push(`<rect x="${x0}" y="${TBL.pad + titleH}" width="${innerW}" height="${TBL.headH + rows.length * TBL.rowH}" fill="none" stroke="${TBL.border}" stroke-width="1"/>`);
+  // notes under the table (the power table's failure verdicts)
+  notes.forEach((n, i) => {
+    parts.push(`<text x="${x0}" y="${y + 22 + i * 20}" font-family="ui-sans-serif,system-ui,sans-serif" font-size="${TBL.font}" font-weight="600" fill="${TBL.text}">${escapeXml(n)}</text>`);
+  });
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${parts.join('')}</svg>`;
 }
@@ -473,9 +575,9 @@ function svgDims(svg: string): { w: number; h: number } {
   return { w: m ? Number(m[1]) : 0, h: m ? Number(m[2]) : 0 };
 }
 
-/** Stack two rack-row SVGs vertically into one. De-dupes the shared art `<defs>` so the
- *  composed document has exactly one (ids must be unique per SVG document). */
-function vstackSvg(top: string, bottom: string, background?: string | null, gap = 28): string {
+/** Stack two SVGs (rack rows, or tables) vertically into one. De-dupes the shared art
+ *  `<defs>` so the composed document has exactly one (ids must be unique per SVG document). */
+export function vstackSvg(top: string, bottom: string, background?: string | null, gap = 28): string {
   const a = svgDims(top);
   const b = svgDims(bottom);
   const width = Math.max(a.w, b.w);

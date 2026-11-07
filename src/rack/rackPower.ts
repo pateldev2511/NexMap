@@ -145,6 +145,15 @@ export function isPdu(d: Pick<Device, 'type' | 'mount'>): boolean {
 }
 
 /**
+ * A rack-mount UPS: type 'ups' off the rail. It backs the feed in its `powerFeed` rather
+ * than plugging into a strip. A PSU shelf is type 'ups' too but only powers its own
+ * chassis; it's known by its stock name ("PSU shelf", "power shelf").
+ */
+export function isRackUps(d: Pick<Device, 'type' | 'mount' | 'name'>): boolean {
+  return d.type === 'ups' && d.mount !== 'rail' && !/\bpsu\b|power\s*shelf/i.test(d.name);
+}
+
+/**
  * The feed a new PDU in `rackId` should take: the one the rack's PDUs don't have yet (A
  * first), else whichever has fewer. So the first PDU is A and the second B. Pure.
  */

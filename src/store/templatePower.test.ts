@@ -31,4 +31,18 @@ describe('rack templates — power', () => {
     expect(a!.cords).toBe(b!.cords); // dual-corded: one cord per feed
     expect(a!.cords).toBeLessThanOrEqual(a!.outlets);
   });
+
+  it.each(RACK_TEMPLATES.map((t) => [t.id, t] as const))('%s: no strip or UPS gives out, now or if a feed fails', (_id, t) => {
+    const ids = s().applyRackTemplate(t);
+    const racks = s().racksAll().filter((r) => ids.includes(r.id));
+    const devices = s().devicesAll().filter((d) => d.rackId && ids.includes(d.rackId));
+    expect(rackInsights({ racks, devices, cables: [] }).filter((i) => i.action === 'review-pdu' && i.severity !== 'info').map((i) => i.title)).toEqual([]);
+  });
+
+  it('the enterprise racks back feed A and feed B with a UPS each', () => {
+    const t = RACK_TEMPLATES.find((x) => x.id === 'ent-core-42u')!;
+    const [rackId] = s().applyRackTemplate(t);
+    const ups = s().devicesAll().filter((d) => d.rackId === rackId && d.type === 'ups' && d.mount !== 'rail');
+    expect(ups.map((d) => [d.name, d.powerFeed ?? 'A']).sort()).toEqual([['ups-a', 'A'], ['ups-b', 'B']]);
+  });
 });

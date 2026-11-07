@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { deviceColorBy, colorByLegend, colorForString, STATUS_COLORS } from './rackColorBy';
+import { deviceColorBy, colorByLegend, colorForString, failedFeed, FAILURE_COLORS, STATUS_COLORS } from './rackColorBy';
+import type { FeedFailure } from './powerCords';
 import type { Device } from '@/model/types';
 
 const dev = (over: Partial<Device>): Device => ({
@@ -38,5 +39,31 @@ describe('colorByLegend', () => {
     const legend = colorByLegend(devices, 'status');
     expect(legend.map((e) => e.value)).toEqual(['active', 'planned']);
     expect(colorByLegend(devices, 'gear')).toEqual([]);
+  });
+});
+
+describe('color by feed failure', () => {
+  const f: FeedFailure = {
+    failed: 'A',
+    dark: new Map([['gone', 'single-corded']]),
+    up: new Set(['ok']),
+    deadSources: new Set(['pa']),
+    trippedPdus: new Set(['pb']),
+    overloadedUps: new Set(['ups']),
+  };
+  const d = (id: string) => ({ id, kind: 'device', type: 'server', name: id, x: 0, y: 0, width: 1, height: 1, layerId: 'L' }) as Device;
+
+  it('tints what goes dark, what trips, the failed strip and what stays up', () => {
+    expect(failedFeed('fail-a')).toBe('A');
+    expect(failedFeed('owner')).toBeNull();
+    expect(['gone', 'pb', 'ups', 'pa', 'ok', 'patch'].map((id) => deviceColorBy(d(id), 'fail-a', f))).toEqual([
+      FAILURE_COLORS.dark, FAILURE_COLORS.trips, FAILURE_COLORS.trips, FAILURE_COLORS.deadStrip, FAILURE_COLORS.up, null,
+    ]);
+    expect(deviceColorBy(d('gone'), 'fail-a')).toBeNull(); // no simulation, no tint
+  });
+
+  it('a legend of only what is present', () => {
+    expect(colorByLegend([], 'fail-a', f).map((e) => e.value)).toEqual(['Loses power', 'UPS overloads', 'Strip trips', 'Power down', 'Stays up']);
+    expect(colorByLegend([], 'fail-b', { ...f, failed: 'B', dark: new Map(), trippedPdus: new Set(), overloadedUps: new Set() }).map((e) => e.value)).toEqual(['Power down', 'Stays up']);
   });
 });

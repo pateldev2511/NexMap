@@ -60,6 +60,15 @@ describe('rackHealthScore', () => {
     expect(h.score).toBeLessThan(100);
   });
 
+  it('a rated PDU that trips when the other feed fails is the redundancy risk', () => {
+    const strip = (feed: 'A' | 'B') =>
+      dev({ type: 'ups', mount: 'rail', side: 'rear', bay: feed === 'A' ? 'right' : 'left', ruSpan: 42, powerFeed: feed, ratedAmps: 10, ratedVolts: 100, name: `PDU ${feed}`, assetTag: 'P', vendor: 'X', interfaces: [{ id: `o${feed}`, name: 'C13-1' }] });
+    const h = rackHealthScore(rack(), [strip('A'), strip('B'), healthy({ watts: 1500 })], [], []);
+    const red = h.dimensions.find((d) => d.key === 'redundancy')!;
+    expect(red.score).toBe(0.3);
+    expect(h.biggestRisk).toBe('PDU A trips if feed B fails.');
+  });
+
   it('missing asset tags / models hurt inventory', () => {
     const h = rackHealthScore(rack(), [healthy(), dev({ watts: 200, powerFeed: 'AB' })], [], []);
     const inv = h.dimensions.find((d) => d.key === 'inventory')!;

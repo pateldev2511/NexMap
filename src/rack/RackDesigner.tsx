@@ -19,6 +19,10 @@ import {
   buildRackRowFacesSvg,
   buildLabelSheetSvg,
   buildConnectionsTableSvg,
+  buildPowerCordsTableSvg,
+  buildPowerStripsTableSvg,
+  powerCordRows,
+  vstackSvg,
   composeExport,
   cableScheduleCsv,
   cableScheduleRows,
@@ -26,8 +30,8 @@ import {
 } from './buildRackSvg';
 import { analyzeCabling } from './rackHealth';
 import { rackBudget, fleetBudget } from './rackBudget';
-import { cordsIntoPdu, isPdu, nextPduFeed, powerFeedAnalysis } from './rackPower';
-import { planPowerCords, powerCordCsv } from './powerCords';
+import { cordsIntoPdu, isPdu, isRackUps, nextPduFeed, powerFeedAnalysis } from './rackPower';
+import { analyzeRackPower, feedFailure, feedFailureSummary, kw, powerCordCsv, powerStripCsv, unitFate } from './powerCords';
 import { slotOf, canFit, nearestFreeU, nearestFreeRail, railChannel, isFullDepth, isFullHeightRail, orderRacks, type FitResult } from './rackModel';
 import { RACK_DEVICE_PRESETS, RACK_PRESET_GROUPS, presetSpan, type RackDevicePreset } from './rackDevicePresets';
 import { cableLanes, managerSpanLabel, routeLabel } from './cableLanes';
@@ -38,7 +42,7 @@ import { RackTemplatePicker } from './RackTemplatePicker';
 import { catalogById, catalogForType, catalogPatch, catalogSpecLabel } from './rackCatalog';
 import type { RackTemplate } from './rackTemplates';
 import { PartsListPanel } from './PartsListPanel';
-import { COLOR_BY_MODES, colorByLegend, type ColorByMode } from './rackColorBy';
+import { COLOR_BY_MODES, colorByLegend, failedFeed, type ColorByMode } from './rackColorBy';
 import { rackInsights, type RackInsight } from './rackInsights';
 import { rackHealthScore } from './rackHealthScore';
 import { bomCsv } from './rackBom';
@@ -206,6 +210,11 @@ export function RackDesigner() {
   );
   const budget = useMemo(() => (rack ? rackBudget(rack, devices) : null), [rack, devices]);
   const usedU = budget?.usedU ?? 0;
+  // "If feed A fails" color mode: what the failure takes down across every rack.
+  const failure = useMemo(() => {
+    const feed = failedFeed(colorBy);
+    return feed ? feedFailure(racks, devices, feed) : null;
+  }, [colorBy, racks, devices]);
   // Cross-rack device search → ids to highlight in the row view. Deep match: name, type,
   // vendor, model, role, owner, asset tag, serial, status, mgmt IP, VLAN (rackSearch.ts).
   const searchHits = useMemo(() => {
@@ -219,7 +228,14 @@ export function RackDesigner() {
   const lanes = useMemo(() => cableLanes(devices, cables), [devices, cables]);
   const rackFill = useMemo(() => lanes.fill.filter((f) => f.manager.rackId === rack?.id), [lanes, rack?.id]);
   // Which PDU outlet each cord in this rack plugs into (derived, never stored).
-  const powerCords = useMemo(() => (rack ? planPowerCords(rack, devices) : []), [rack, devices]);
+  // The focused rack's power, worked out once per change: cords, strip and UPS loads, and
+  // what each feed's failure does. The Power tab reads these instead of recomputing per render.
+  const rackPower = useMemo(() => (rack ? analyzeRackPower(rack, inRack) : null), [rack, inRack]);
+  const powerCords = useMemo(() => rackPower?.cords ?? [], [rackPower]);
+  const rackFailures = useMemo(
+    () => (rack ? { A: feedFailure([rack], inRack, 'A'), B: feedFailure([rack], inRack, 'B') } : null),
+    [rack, inRack],
+  );
   // Logical links between racked gear that don't have a patch cable yet.
   const patchable = useMemo(
     () => planPatches(devices, s().linksAll(), cables, racks).items.length,
@@ -635,6 +651,14 @@ export function RackDesigner() {
       }
       return;
     }
+    if (insight.action === 'review-pdu' && insight.rackId && insight.deviceId) {
+      const d = devices.find((x) => x.id === insight.deviceId);
+      setRackId(insight.rackId);
+      if (d) setSideState(slotOf(d).side);
+      focusDevice(insight.deviceId);
+      setInspectorTab('power');
+      return;
+    }
     if (insight.action === 'go-to-u' && insight.deviceId && insight.rackId && insight.targetU != null) {
       const d = devices.find((x) => x.id === insight.deviceId);
       const target = racks.find((r) => r.id === insight.rackId);
@@ -724,7 +748,16 @@ export function RackDesigner() {
         ? buildRackRowFacesSvg(racks, devices, cables, { showRear, background, callouts: allCallouts })
         : buildRackSvg(rack!, devices, cables, { background, side, callouts: allCallouts });
     if (mode === 'diagram') return rackSvg;
-    const tableSvg = buildConnectionsTableSvg(cableScheduleRows(devices, cables), { background, title: 'Connections' });
+    const connections = buildConnectionsTableSvg(cableScheduleRows(devices, cables), { background, title: 'Connections' });
+    // Racks with PDUs add where each power cord plugs in, under the connections.
+    const scope = view === 'row' ? racks : [rack!];
+    const cords = powerCordRows(scope, devices);
+    let tableSvg = cords.length > 0
+      ? vstackSvg(connections, buildPowerCordsTableSvg(cords, { background, title: 'Power cords' }), background)
+      : connections;
+    // …then each strip's rating and load, and what a feed failure takes down.
+    const strips = buildPowerStripsTableSvg(scope, devices, { background, title: 'Power strips' });
+    if (strips) tableSvg = vstackSvg(tableSvg, strips, background);
     return composeExport(rackSvg, tableSvg, mode, background);
   }
   const exportName = () => (view === 'row' ? 'all-racks' : rack?.name ?? 'rack');
@@ -748,6 +781,9 @@ export function RackDesigner() {
   }
   function exportPowerCords() {
     downloadBlob(new Blob([powerCordCsv(racks, devices)], { type: 'text/csv' }), `${exportName()}-power-cords.csv`);
+  }
+  function exportPowerStrips() {
+    downloadBlob(new Blob([powerStripCsv(racks, devices)], { type: 'text/csv' }), `${exportName()}-power-strips.csv`);
   }
   function exportLabels() {
     rasterize(buildLabelSheetSvg(racks, devices, { background: '#ffffff' }), { scale: 2, mimeType: 'image/png', background: null })
@@ -1068,17 +1104,20 @@ export function RackDesigner() {
             })()}
             {rowReject && <div className={styles.rowReject} role="status">{rowReject}</div>}
             {colorBy !== 'gear' && (() => {
-              const legend = colorByLegend(devices, colorBy);
-              if (legend.length === 0) return null;
+              const legend = colorByLegend(devices, colorBy, failure);
+              if (legend.length === 0 && !failure) return null;
               return (
-                <div className={styles.capacityStrip} style={{ marginTop: -6 }} role="group" aria-label="Color legend" data-demote="chrome">
+                <>
+                {failure && <div className={styles.failureVerdict} role="status">{feedFailureSummary(failure, devices)}</div>}
+                {legend.length > 0 && <div className={styles.capacityStrip} style={{ marginTop: -6 }} role="group" aria-label="Color legend" data-demote="chrome">
                   {legend.map((e) => (
                     <span key={e.value} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ width: 11, height: 11, borderRadius: 3, background: e.color, display: 'inline-block' }} />
                       {e.value}
                     </span>
                   ))}
-                </div>
+                </div>}
+                </>
               );
             })()}
             <RackRow
@@ -1091,6 +1130,7 @@ export function RackDesigner() {
               searchHits={searchHits}
               showRear={showRear}
               colorBy={colorBy}
+              failure={failure}
               onFocusRack={(id) => { setRackId(id); setView('focus'); }}
               onSelect={(id, additive) => {
                 if (additive && id) { selectDevice(id, true); return; }
@@ -1435,16 +1475,64 @@ export function RackDesigner() {
                   <div className={styles.field}><label>Weight (kg)</label><input type="number" value={selected.weightKg ?? ''} onChange={(e) => updateSelected('weightKg', (e.target.value === '' ? undefined : Number(e.target.value)) as Device['weightKg'])} onBlur={commitSelectedEdit} /></div>
                   <div className={styles.field}><label>Depth (mm)</label><input type="number" min={0} value={selected.depthMm ?? ''} onChange={(e) => updateSelected('depthMm', (e.target.value === '' || Number(e.target.value) <= 0 ? undefined : Number(e.target.value)) as Device['depthMm'])} onBlur={commitSelectedEdit} aria-label="Depth (mm)" /></div>
                   <div className={styles.field}>
-                    <label>{isPdu(selected) ? 'On feed' : 'Power feed'}</label>
+                    <label>{isPdu(selected) ? 'On feed' : isRackUps(selected) ? 'Backs feed' : 'Power feed'}</label>
                     <select value={selected.powerFeed ?? 'A'} onChange={(e) => { updateSelected('powerFeed', e.target.value as Device['powerFeed']); commitSelectedEdit(); }}>
-                      <option value="A">{isPdu(selected) ? 'Feed A' : 'Feed A (single)'}</option>
-                      <option value="B">{isPdu(selected) ? 'Feed B' : 'Feed B (single)'}</option>
-                      {!isPdu(selected) && <option value="AB">A + B (redundant)</option>}
+                      <option value="A">{isPdu(selected) || isRackUps(selected) ? 'Feed A' : 'Feed A (single)'}</option>
+                      <option value="B">{isPdu(selected) || isRackUps(selected) ? 'Feed B' : 'Feed B (single)'}</option>
+                      {!isPdu(selected) && <option value="AB">{isRackUps(selected) ? 'Both (dual input, not checked)' : 'A + B (redundant)'}</option>}
                     </select>
                   </div>
-                  {(() => {
-                    const pf = powerFeedAnalysis(devices);
-                    return <div className={styles.powerBalance}>A {(pf.normalA / 1000).toFixed(2)} kW · B {(pf.normalB / 1000).toFixed(2)} kW · {pf.singleCorded} single-corded</div>;
+                  {isRackUps(selected) && (
+                    <div className={styles.field}><label>Output (W)</label><input type="number" min={0} value={selected.ratedWatts ?? ''} onChange={(e) => updateSelected('ratedWatts', (e.target.value === '' || Number(e.target.value) <= 0 ? undefined : Number(e.target.value)) as Device['ratedWatts'])} onBlur={commitSelectedEdit} aria-label="UPS output watts" placeholder="Nameplate W, not VA" /></div>
+                  )}
+                  {isRackUps(selected) && rackPower && selected.rackId === rackPower.rackId && (() => {
+                    const l = rackPower.upsLoads.find((x) => x.upsIds.includes(selected.id));
+                    if (!l) return <div className={styles.powerBalance}>{selected.powerFeed === 'AB' ? 'A dual-input UPS backs no single feed, so its load isn’t checked.' : 'Add its output rating to check the feed it backs.'}</div>;
+                    const other = l.feed === 'A' ? 'B' : 'A';
+                    const pct = (w: number) => ` (${Math.round((w / l.ratedW) * 100)}%)`;
+                    return (
+                      <div className={`${styles.powerBalance} ${l.failoverW > l.ratedW ? styles.powerOver : ''}`} aria-label="UPS load">
+                        Feed {l.feed} load {kw(l.normalW)}{pct(l.normalW)} · {kw(l.failoverW)}{pct(l.failoverW)} if feed {other} fails · {kw(l.ratedW)} output{l.upsIds.length > 1 ? ` across ${l.upsIds.length} UPSes` : ''}
+                      </div>
+                    );
+                  })()}
+                  {isPdu(selected) && (
+                    <div className={styles.field}>
+                      <label>Rating</label>
+                      <span className={styles.ratingPair}>
+                        <input type="number" min={0} value={selected.ratedAmps ?? ''} onChange={(e) => updateSelected('ratedAmps', (e.target.value === '' || Number(e.target.value) <= 0 ? undefined : Number(e.target.value)) as Device['ratedAmps'])} onBlur={commitSelectedEdit} aria-label="Rated amps" placeholder="A" />
+                        <span>A ×</span>
+                        <input type="number" min={0} value={selected.ratedVolts ?? ''} onChange={(e) => updateSelected('ratedVolts', (e.target.value === '' || Number(e.target.value) <= 0 ? undefined : Number(e.target.value)) as Device['ratedVolts'])} onBlur={commitSelectedEdit} aria-label="Rated volts" placeholder="V" />
+                        <span>V</span>
+                      </span>
+                    </div>
+                  )}
+                  {isPdu(selected) && (
+                    <div className={styles.field}>
+                      <label>Circuit</label>
+                      <select value={selected.ratedPhases === 3 ? '3' : '1'} onChange={(e) => { updateSelected('ratedPhases', (e.target.value === '3' ? 3 : undefined) as Device['ratedPhases']); commitSelectedEdit(); }} aria-label="Circuit phases">
+                        <option value="1">Single-phase</option>
+                        <option value="3">Three-phase (volts line-to-line)</option>
+                      </select>
+                    </div>
+                  )}
+                  {isPdu(selected) && (() => {
+                    const l = rackPower?.pduLoads.find((x) => x.pduId === selected.id);
+                    if (!l) return null;
+                    const other = l.feed === 'A' ? 'B' : 'A';
+                    const pct = (w: number) => (l.ratedW ? ` (${Math.round((w / l.ratedW) * 100)}%)` : '');
+                    const over = l.ratedW != null && l.failoverW > l.ratedW;
+                    return (
+                      <div className={`${styles.powerBalance} ${over ? styles.powerOver : ''}`} aria-label="PDU load">
+                        Load {kw(l.normalW)}{pct(l.normalW)} · {kw(l.failoverW)}{pct(l.failoverW)} if feed {other} fails
+                        {l.ratedW != null ? ` · rated ${kw(l.ratedW)}` : ' · add a rating to check it'}
+                      </div>
+                    );
+                  })()}
+                  {rackPower && selected.rackId === rackPower.rackId && (() => {
+                    // This rack's feeds, not the whole fleet's.
+                    const pf = powerFeedAnalysis(rackPower.devices);
+                    return <div className={styles.powerBalance}>This rack: A {kw(pf.normalA)} · B {kw(pf.normalB)} · {pf.singleCorded} single-corded</div>;
                   })()}
                   {(() => {
                     // Where this unit's cords plug in, or what plugs into this PDU.
@@ -1469,6 +1557,22 @@ export function RackDesigner() {
                         <small>Plugs into</small>
                         {mine.map((c) => (
                           <span key={c.feed}><b>Feed {c.feed}</b> {c.pduId ? `${nameOf(c.pduId)} · ${c.outlet}` : <i>no free outlet</i>}</span>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                  {rackPower && rackFailures && selected.rackId === rackPower.rackId && (() => {
+                    // What this unit does when each feed fails (the row view's failure lens, for one unit).
+                    const fates = (['A', 'B'] as const).flatMap((f) => {
+                      const t = unitFate(rackPower, selected.id, f, rackFailures[f]);
+                      return t ? [{ f, t }] : [];
+                    });
+                    if (fates.length === 0) return null;
+                    return (
+                      <div className={styles.cordList} aria-label="If a feed fails">
+                        <small>If a feed fails</small>
+                        {fates.map(({ f, t }) => (
+                          <span key={f} className={t.bad ? styles.fateBad : undefined}><b>Feed {f}</b> {t.text}</span>
                         ))}
                       </div>
                     );
@@ -1659,7 +1763,7 @@ export function RackDesigner() {
             <div className={styles.exportPresetGrid}>
               <div className={styles.exportPreset}>
                 <b>Install packet</b>
-                <span>Rack elevation plus cable table for field work.</span>
+                <span>Rack elevation plus cable, power-cord and power-strip tables for field work.</span>
                 <div className={styles.rowBtns}>
                   <button className={styles.btn} onClick={() => { setExportMode('diagram+table'); exportPdf('diagram+table'); }}>PDF</button>
                   <button className={styles.btn} onClick={() => { setExportMode('diagram+table'); exportPng('diagram+table'); }}>PNG</button>
@@ -1667,10 +1771,11 @@ export function RackDesigner() {
               </div>
               <div className={styles.exportPreset}>
                 <b>Cable schedule</b>
-                <span>Endpoint list with color, label, and length, plus each power cord's PDU outlet.</span>
+                <span>Endpoint list with color, label, and length, plus each power cord's PDU outlet and each strip's load.</span>
                 <div className={styles.rowBtns}>
                   <button className={styles.btn} onClick={exportCsv}>CSV</button>
                   <button className={styles.btn} title="Which PDU outlet each unit's power cords plug into" onClick={exportPowerCords}>Power cords</button>
+                  <button className={styles.btn} title="Each PDU's rating and load, now and if the other feed fails" onClick={exportPowerStrips}>Power strips</button>
                   <button className={styles.btn} onClick={() => s().autoLengthRackCables()}>Auto-length</button>
                 </div>
               </div>

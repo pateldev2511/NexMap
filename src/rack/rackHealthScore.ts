@@ -5,7 +5,8 @@
  *
  * Four equally-weighted dimensions (0..1 each), so each can swing the score by up to 25:
  *   capacity     — not over watts/weight; U not jammed past 90%
- *   redundancy   — powered gear is dual-corded and A/B load is even
+ *   redundancy   — powered gear is dual-corded, A/B load is even, and no rated PDU
+ *                  or UPS gives out when the other feed fails
  *   cabling      — no health issues touching this rack; no missing cable lengths
  *   inventory    — devices carry an asset tag + vendor/model for handoff
  *
@@ -15,6 +16,7 @@
 import type { Device, Rack, RackCable, ValidationIssue } from '@/model/types';
 import { rackBudget } from './rackBudget';
 import { powerFeedAnalysis } from './rackPower';
+import { analyzeRackPower } from './powerCords';
 
 export type HealthBand = 'ok' | 'warn' | 'error';
 
@@ -89,6 +91,17 @@ export function rackHealthScore(
     } else if (imbalance >= 0.25) {
       redundancyRisk = `A/B power is ${Math.round(imbalance * 100)}% out of balance.`;
     }
+  }
+  // Dual cords buy nothing if the surviving strip or UPS can't carry the load.
+  const rackPower = analyzeRackPower(rack, inRack);
+  const nameOf = (id: string) => rackPower.byId.get(id)?.name ?? id;
+  const ups = rackPower.upsLoads.find((l) => l.failoverW > l.ratedW);
+  const tripping = rackPower.pduLoads.find((l) => l.ratedW != null && l.failoverW > l.ratedW);
+  if (ups || tripping) {
+    redundancy = Math.min(redundancy, 0.3);
+    redundancyRisk = ups
+      ? `${ups.upsIds.map(nameOf).join(' + ')} overload${ups.upsIds.length === 1 ? 's' : ''} if feed ${ups.feed === 'A' ? 'B' : 'A'} fails.`
+      : `${nameOf(tripping!.pduId)} trips if feed ${tripping!.feed === 'A' ? 'B' : 'A'} fails.`;
   }
 
   // cabling: issues touching this rack's devices + cables missing an estimated length.

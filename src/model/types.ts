@@ -155,6 +155,21 @@ export interface Device {
    */
   powerFeed?: 'A' | 'B' | 'AB';
   /**
+   * A PDU's input rating: the circuit's amps and volts, as printed on the strip or its
+   * breaker. Single-phase capacity is amps × volts; three-phase is √3 × amps × volts,
+   * with volts line-to-line (208, 400). Additive and optional: absent → the strip's load
+   * isn't checked; absent phases → single-phase.
+   */
+  ratedAmps?: number;
+  ratedVolts?: number;
+  ratedPhases?: 1 | 3;
+  /**
+   * A rack UPS's output rating in watts (its nameplate W, not VA). The UPS backs the feed
+   * in `powerFeed`; the load on that feed is checked against it. Additive and optional:
+   * absent → not checked.
+   */
+  ratedWatts?: number;
+  /**
    * Lifecycle state (schema v3 additive). Absent → 'active'. Drives a status tint on the
    * rack art so planned/decommissioned gear reads differently from live gear.
    */

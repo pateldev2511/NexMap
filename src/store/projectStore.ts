@@ -3996,10 +3996,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
             bay: td.bay ?? 'full',
             ...(isPdu({ type: p.type, mount: p.mount }) ? { powerFeed: nextPduFeed(rack.id, newDevices) } : {}),
             ...(tr.dualCorded && cordsIntoPdu({ type: p.type, mount: p.mount, name: td.name ?? '', rackAccessory: p.accessory }) ? { powerFeed: 'AB' as const } : {}),
+            ...(td.feed && !isPdu({ type: p.type, mount: p.mount }) ? { powerFeed: td.feed } : {}),
             ...(p.accessory ? { rackAccessory: p.accessory } : {}),
             ...((catalog?.watts ?? p.watts) ? { watts: catalog?.watts ?? p.watts } : {}),
             ...((catalog?.weightKg ?? p.weightKg) ? { weightKg: catalog?.weightKg ?? p.weightKg } : {}),
             ...(catalog?.depthMm ? { depthMm: catalog.depthMm } : {}),
+            ...(catalog?.outputW ? { ratedWatts: catalog.outputW } : {}),
           });
           newDevices.push(dev);
           cmds.push(new AddDeviceCommand(dev));
@@ -4046,6 +4048,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           ...(watts ? { watts } : {}),
           ...(weightKg ? { weightKg } : {}),
           ...(catalog?.depthMm ? { depthMm: catalog.depthMm } : {}),
+          ...(item.line.rating
+            ? { ratedAmps: item.line.rating.amps, ratedVolts: item.line.rating.volts, ...(item.line.rating.phases === 3 ? { ratedPhases: 3 as const } : {}) }
+            : {}),
+          ...((item.line.outputW ?? catalog?.outputW) ? { ratedWatts: item.line.outputW ?? catalog?.outputW } : {}),
         });
         made.push(dev);
         cmds.push(new AddDeviceCommand(dev));

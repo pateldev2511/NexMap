@@ -65,6 +65,26 @@ describe('mountPartsList', () => {
     expect(pdus.map((d) => d.powerFeed)).toEqual(['A', 'B']); // one PDU per feed
   });
 
+  it('a pasted PDU rating lands on the strips', () => {
+    const rackId = s().addRack('MDF');
+    s().mountPartsList(rackId, '2x metered PDU 30A 208V');
+    const pdus = s().devicesAll().filter((d) => d.rackId === rackId && d.type === 'ups');
+    expect(pdus.map((d) => [d.ratedAmps, d.ratedVolts, d.ratedPhases])).toEqual([[30, 208, undefined], [30, 208, undefined]]);
+  });
+
+  it('a pasted UPS takes its stated output, else the catalog model’s', () => {
+    const rackId = s().addRack('MDF');
+    s().mountPartsList(rackId, 'UPS 3000VA/2700W\nCyberPower OR1500LCDRM1U\nAPC Smart-UPS SRT 2200');
+    const ups = s().devicesAll().filter((d) => d.rackId === rackId && d.type === 'ups');
+    expect(ups.map((d) => d.ratedWatts).sort()).toEqual([2700, 900, undefined]);
+  });
+
+  it('a pasted three-phase PDU keeps its phases', () => {
+    const rackId = s().addRack('MDF');
+    s().mountPartsList(rackId, 'vertical PDU 30A 208V 3-phase');
+    expect(s().devicesAll().find((d) => d.rackId === rackId && d.type === 'ups')).toMatchObject({ ratedAmps: 30, ratedVolts: 208, ratedPhases: 3 });
+  });
+
   it('addPdu puts a PDU on the asked feed in a free rear channel, as one undo', () => {
     const rackId = s().addRack('MDF');
     s().mountPartsList(rackId, 'metered PDU');
