@@ -5,7 +5,7 @@
  * couldn't allocate the bitmap.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { MAX_CANVAS_AREA, MAX_CANVAS_DIM, planRaster, rasterize } from './raster';
+import { MAX_CANVAS_AREA, MAX_CANVAS_DIM, RasterSizeError, planRaster, rasterize } from './raster';
 import { buildPdf } from './pdf';
 
 vi.mock('jspdf', () => ({
@@ -117,11 +117,11 @@ describe('rasterize — canvas-size guard', () => {
     expect(r.clamped).toBe(true);
   });
 
-  it('fails with an SVG fallback hint when every attempt fails', async () => {
+  it('fails with a typed size error naming the last attempt when every attempt fails', async () => {
     failures = 99;
-    await expect(
-      rasterize(svgOf(800, 600), { scale: 2, mimeType: 'image/png', background: null }),
-    ).rejects.toThrow(/SVG/);
+    const run = rasterize(svgOf(800, 600), { scale: 2, mimeType: 'image/png', background: null });
+    await expect(run).rejects.toBeInstanceOf(RasterSizeError);
+    await expect(run).rejects.toThrow(/couldn't create a \d+×\d+ image, even at 0\.\d\d×$/);
   });
 });
 

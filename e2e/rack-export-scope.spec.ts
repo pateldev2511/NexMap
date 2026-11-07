@@ -107,7 +107,10 @@ test('a render that fails says why and retries to a download', async ({ page }) 
   const packet = drawer.locator('div').filter({ has: page.locator('b', { hasText: /^Install packet$/ }) }).last();
   await packet.getByRole('button', { name: 'PNG', exact: true }).click();
   const alert = drawer.getByRole('alert');
-  await expect(alert).toContainText(`Couldn’t export the ${a} install packet PNG (Canvas export failed). Nothing was downloaded`);
+  // The reason comes from the rasterizer (it stepped the scale down first); the
+  // remedy is the drawer's own.
+  await expect(alert).toContainText(`Couldn’t export the ${a} install packet PNG (the browser couldn't create`);
+  await expect(alert).toContainText(/×\)\. Nothing was downloaded — retry, or export the CSV schedule instead\./);
   await expect(drawer).toBeVisible(); // still open, so the retry is one click away
 
   await page.evaluate(() => {

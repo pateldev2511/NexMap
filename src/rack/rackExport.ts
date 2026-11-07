@@ -148,7 +148,8 @@ export function buildHandoffSvg(h: HandoffScope, devices: Device[], cables: Rack
 
 /** What to tell someone whose export didn't render: what failed, why, and what to try. */
 export function exportFailureMessage(what: string, err: unknown, h: HandoffScope): string {
-  const why = err instanceof Error && err.message ? err.message : 'the browser gave no reason';
+  // Trimmed: the reason sits inside parentheses mid-sentence.
+  const why = err instanceof Error && err.message ? err.message.replace(/[.\s]+$/, '') : 'the browser gave no reason';
   const instead = h.kind === 'fleet' && h.racks.length > 1
     ? 'export one rack at a time — a very large sheet can pass the browser’s canvas limit'
     : 'export the CSV schedule instead';

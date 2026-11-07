@@ -8,6 +8,7 @@ import {
   type ExportOptions,
   type ExportScene,
 } from '@/io/export';
+import { RasterSizeError } from '@/io/export/raster';
 import { documentRules } from '@/io/export/rulesReport';
 import { NexIcon } from '@/ui/icons/NexIcon';
 import { useModalDialog } from './useModalDialog';
@@ -135,7 +136,10 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
           : { tone: 'success', text: `Exported ${outcome.fileName}` },
       );
     } catch (e) {
-      setMsg({ tone: 'error', text: `Export failed: ${(e as Error).message}` });
+      const reason = (e as Error).message.replace(/[.\s]+$/, '');
+      const remedy =
+        e instanceof RasterSizeError ? ' Export SVG instead: it is vector and has no size limit.' : '';
+      setMsg({ tone: 'error', text: `Export failed: ${reason}.${remedy}` });
     } finally {
       setBusy(false);
     }

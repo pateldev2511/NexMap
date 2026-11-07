@@ -1,6 +1,5 @@
-import { useEffect } from 'react';
-import { keyboardRouter } from '@/input/router';
 import styles from '@/ui/firstrun/FirstRun.module.css';
+import { useModalDialog } from './useModalDialog';
 
 export type UnsavedChoice = 'save' | 'discard' | 'cancel';
 
@@ -19,15 +18,8 @@ export function UnsavedChangesDialog({
   action: string;
   onChoose: (choice: UnsavedChoice) => void;
 }) {
-  useEffect(
-    () =>
-      keyboardRouter.registerOverlay((e) => {
-        if (e.key !== 'Escape') return false;
-        onChoose('cancel');
-        return true;
-      }),
-    [onChoose],
-  );
+  // The shared modal contract (focus, Tab trap, topmost-only Escape = Cancel).
+  const { dialogProps } = useModalDialog(() => onChoose('cancel'));
   return (
     <div
       className={styles.overlay}
@@ -37,8 +29,10 @@ export function UnsavedChangesDialog({
       <div
         className={styles.card}
         style={{ width: 'min(460px, 92%)' }}
+        {...dialogProps}
+        // An alert dialog: it interrupts an action and must be answered.
         role="alertdialog"
-        aria-modal="true"
+        aria-labelledby={undefined}
         aria-label="Unsaved changes"
         onClick={(e) => e.stopPropagation()}
       >

@@ -171,13 +171,10 @@ test('Alt/Option+N starts a new project after the unsaved-work confirm (#56)', a
   await selectOneDevice(page);
   await page.keyboard.press('ArrowRight');
 
-  const asked = new Promise<string>((resolve) => {
-    page.once('dialog', (d) => {
-      resolve(d.message());
-      void d.accept();
-    });
-  });
+  // Unsaved work: the Save / Discard / Cancel prompt (#19) asks first.
   await page.keyboard.press('Alt+n');
-  expect(await asked).toMatch(/Discard unsaved changes/);
+  const prompt = page.getByRole('alertdialog', { name: 'Unsaved changes' });
+  await expect(prompt).toBeVisible();
+  await prompt.getByRole('button', { name: /Discard/ }).click();
   await expect.poll(() => counts(page)).toEqual({ devices: 0, links: 0 });
 });

@@ -112,10 +112,18 @@ export async function rasterize(svg: string, opts: RasterOptions): Promise<Raste
     const blob = await drawToBlob(img, plan.width, plan.height, opts);
     if (blob) return { blob, ...plan };
   }
-  throw new Error(
-    `the browser couldn't create a ${plan.width}×${plan.height} image even at ${plan.effectiveScale.toFixed(2)}×. ` +
-      'Export SVG instead: it is vector and has no size limit.',
+  throw new RasterSizeError(
+    `the browser couldn't create a ${plan.width}×${plan.height} image, even at ${plan.effectiveScale.toFixed(2)}×`,
   );
+}
+
+/**
+ * The browser couldn't allocate the bitmap even after stepping the scale down. The
+ * message states only the cause; each caller adds the remedy it can offer (the
+ * network export suggests SVG, the rack drawer its CSV schedule).
+ */
+export class RasterSizeError extends Error {
+  override name = 'RasterSizeError';
 }
 
 /** The dialog's note when a raster came out smaller than asked; undefined when it didn't. */
