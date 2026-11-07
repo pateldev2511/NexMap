@@ -13,6 +13,12 @@ the cables down to the hardware, with a user control to dial the motion.
 
 ### Added
 
+- **A guided example to learn the repair loop.** The new-project gallery offers
+  "Guided example: fix one mistake" beside Blank: a small office whose subnet
+  gateway sits outside its subnet, with a note on the canvas that explains why.
+  It opens with Validation showing the one finding, already focused. Press Enter
+  to land on the Gateway field, type the router's address, and the issue count
+  drops to zero. Works with the keyboard alone and at phone width. (#47)
 - **Findings open the field to fix.** Click a validation finding, or Tab to it and
   press Enter. A bad subnet CIDR or gateway opens the IP Plan with that field
   focused and marked until it's fixed. A duplicate IP lists every device and port

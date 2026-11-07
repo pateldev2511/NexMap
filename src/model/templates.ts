@@ -7,8 +7,16 @@
  * (placed devices + edges), so the start-screen list and `buildTemplate` can never
  * drift apart. Grouped into Home & small office vs Enterprise & data center.
  */
-import { createDevice, createEmptyDocument, createLink, DEFAULT_DEVICE_SIZE } from './schema';
-import type { Device, DeviceType, Link, NexMapDocument } from './types';
+import {
+  createDevice,
+  createEmptyDocument,
+  createLink,
+  createSubnet,
+  createTextObject,
+  DEFAULT_DEVICE_SIZE,
+} from './schema';
+import { calloutRows } from './callout';
+import type { CalloutBlock, Device, DeviceType, Link, NexMapDocument, Subnet } from './types';
 
 export type TemplateCategory = 'general' | 'home' | 'enterprise';
 
@@ -17,6 +25,12 @@ export interface TemplateDef {
   name: string;
   description: string;
   category: TemplateCategory;
+  /**
+   * A guided example (#47): a whole document with one deliberate, explained
+   * mistake, opened with Validation showing its finding. It only makes sense as
+   * a first-run document, so the Conductor never inserts it into a diagram.
+   */
+  guided?: boolean;
 }
 
 export const CATEGORY_LABEL: Record<TemplateCategory, string> = {
@@ -33,10 +47,33 @@ interface Placed {
   ip?: string;
 }
 
+/** A callout placed with the template, pointing at one of its devices. */
+interface PlacedNote {
+  x: number;
+  y: number;
+  width: number;
+  /** Index into `placed` of the device the leader points at. */
+  anchor: number;
+  blocks: CalloutBlock[];
+}
+
 interface FullTemplate extends TemplateDef {
   placed: Placed[];
   edges: [number, number][];
+  subnets?: Omit<Subnet, 'id'>[];
+  notes?: PlacedNote[];
 }
+
+/** One plain line of callout text (callout rows never wrap). */
+const line = (text: string): CalloutBlock => ({ kind: 'paragraph', spans: [{ text }] });
+
+/** The guided example's one mistake: the subnet's gateway, one octet off. */
+export const GUIDED_EXAMPLE = {
+  key: 'guided-repair',
+  cidr: '10.0.0.0/24',
+  wrongGateway: '10.0.1.1',
+  fixedGateway: '10.0.0.1',
+} as const;
 
 /** Every template, metadata + geometry in one place. */
 const DEFS: FullTemplate[] = [
@@ -47,6 +84,54 @@ const DEFS: FullTemplate[] = [
     category: 'general',
     placed: [],
     edges: [],
+  },
+  {
+    key: GUIDED_EXAMPLE.key,
+    name: 'Guided example: fix one mistake',
+    description: 'A small office with one deliberate error. Find it, fix it, watch validation pass.',
+    category: 'general',
+    guided: true,
+    // The note sits above a compact tree so both fit a phone-width canvas.
+    placed: [
+      { type: 'router', name: 'Router', x: 150, y: 260, ip: GUIDED_EXAMPLE.fixedGateway },
+      { type: 'switch', name: 'Switch', x: 150, y: 350, ip: '10.0.0.2' },
+      { type: 'end-user', name: 'PC-1', x: 40, y: 440, ip: '10.0.0.10' },
+      { type: 'end-user', name: 'PC-2', x: 150, y: 440, ip: '10.0.0.11' },
+      { type: 'printer', name: 'Printer', x: 260, y: 440, ip: '10.0.0.12' },
+    ],
+    edges: [
+      [0, 1],
+      [1, 2],
+      [1, 3],
+      [1, 4],
+    ],
+    // Every address is inside the subnet and every device is wired, so the
+    // gateway is the only finding — and fixing it leaves the design clean.
+    subnets: [
+      { cidr: GUIDED_EXAMPLE.cidr, name: 'Office LAN', gateway: GUIDED_EXAMPLE.wrongGateway },
+    ],
+    notes: [
+      {
+        x: 24,
+        y: 56,
+        width: 330,
+        anchor: 0,
+        blocks: [
+          { kind: 'heading', spans: [{ text: 'One mistake to fix' }] },
+          line(`Office LAN is ${GUIDED_EXAMPLE.cidr}, but its gateway`),
+          line(`says ${GUIDED_EXAMPLE.wrongGateway}, outside the subnet. The`),
+          line(`router, ${GUIDED_EXAMPLE.fixedGateway}, is the real gateway.`),
+          {
+            kind: 'numbers',
+            items: [
+              [{ text: 'Validation (below) shows the finding.' }],
+              [{ text: 'Press it to open the Gateway field.' }],
+              [{ text: `Type ${GUIDED_EXAMPLE.fixedGateway}: the finding clears.` }],
+            ],
+          },
+        ],
+      },
+    ],
   },
 
   // ----------------------------------------------------------------- HOME / SMB
@@ -496,7 +581,13 @@ const DEFS: FullTemplate[] = [
 
 /** Start-screen metadata, in registry order. */
 export const TEMPLATES: TemplateDef[] = DEFS.map(
-  ({ key, name, description, category }) => ({ key, name, description, category }),
+  ({ key, name, description, category, guided }) => ({
+    key,
+    name,
+    description,
+    category,
+    ...(guided ? { guided } : {}),
+  }),
 );
 
 /**
@@ -505,7 +596,8 @@ export const TEMPLATES: TemplateDef[] = DEFS.map(
  * topology where I'm looking" path, as opposed to {@link buildTemplate} which
  * replaces the document on first run. Management IPs are intentionally dropped so
  * dropping a template beside existing devices never collides with their addresses
- * (the user assigns IPs for the merged network). Returns null for blank/unknown.
+ * (the user assigns IPs for the merged network). Returns null for blank/unknown
+ * and for a guided example, whose lesson needs its own document.
  */
 export function buildTemplateObjects(
   key: string,
@@ -513,7 +605,7 @@ export function buildTemplateObjects(
   layerId: string,
 ): { devices: Device[]; links: Link[] } | null {
   const def = DEFS.find((d) => d.key === key);
-  if (!def || def.placed.length === 0) return null;
+  if (!def || def.placed.length === 0 || def.guided) return null;
 
   const { width: W, height: H } = DEFAULT_DEVICE_SIZE;
   let minX = Infinity;
@@ -553,6 +645,16 @@ export function buildTemplate(key: string, now: string): NexMapDocument {
   doc.devices = devices;
   doc.links = def.edges.map(([a, b]) =>
     createLink(devices[a]!.id, devices[b]!.id, layerId),
+  );
+  doc.subnets = (def.subnets ?? []).map(({ cidr, ...rest }) => createSubnet(cidr, rest));
+  doc.objects = (def.notes ?? []).map((n) =>
+    createTextObject(n.x, n.y, layerId, {
+      width: n.width,
+      // Same sizing as the generated document blocks: rows never wrap.
+      height: calloutRows(n.blocks, 14).reduce((h, r) => h + r.size * 1.25, 0) + 12,
+      blocks: n.blocks,
+      anchor: { type: 'device', id: devices[n.anchor]!.id },
+    }),
   );
   return doc;
 }
