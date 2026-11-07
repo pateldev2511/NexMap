@@ -14,6 +14,8 @@ import { ShortcutsDialog } from './ui/dialogs/ShortcutsDialog';
 import { ViewSwitcher } from './ui/ViewSwitcher';
 import { RackDesigner } from './rack/RackDesigner';
 import { DesignerChooser, type DesignerMode } from './ui/DesignerChooser';
+import { designerFor } from './persistence/draft';
+import { UnsavedChangesDialog, type UnsavedChoice } from './ui/dialogs/UnsavedChangesDialog';
 import { SettingsDialog } from './ui/dialogs/SettingsDialog';
 import { AboutDialog } from './ui/dialogs/AboutDialog';
 import { OutlineDialog } from './ui/dialogs/OutlineDialog';
@@ -44,15 +46,23 @@ import {
   getMotionLevel,
   readPref,
   writePref,
-  removePref,
 } from './lib/prefs';
 import { installTooltips } from './ui/tooltip';
-import { ReadOnlyBanner, ErrorToast, NoticeToast } from './ui/dialogs/ReadOnlyBanner';
+import {
+  ReadOnlyBanner,
+  ReadOnlyGate,
+  ErrorToast,
+  NoticeToast,
+} from './ui/dialogs/ReadOnlyBanner';
 import { NexIcon } from './ui/icons/NexIcon';
 import { Canvas } from './canvas/Canvas';
 import { PerfHarness } from './perf/PerfHarness';
 import { useProjectStore } from './store/projectStore';
-import { usePersistence } from './persistence/usePersistence';
+import {
+  usePersistence,
+  type ConfirmReplace,
+  type PickedFile,
+} from './persistence/usePersistence';
 import { canOpenPicker } from './persistence/fsaccess';
 import { severityRank } from './model/validate';
 import { defaultDeviceName } from './model/schema';
@@ -94,13 +104,17 @@ function EditableTitle() {
   const dirty = useProjectStore((s) => s.dirty);
   const rename = useProjectStore((s) => s.renameProject);
   const endEdit = useProjectStore((s) => s.endEdit);
+  const readOnly = useProjectStore((s) => s.readOnly);
   return (
     <div className={shell.titleEdit}>
       <input
         className={shell.titleInput}
         value={name}
         aria-label="Project name"
-        onChange={(e) => rename(name, e.target.value)}
+        readOnly={readOnly}
+        onChange={(e) => {
+          if (!readOnly) rename(name, e.target.value);
+        }}
         onBlur={endEdit}
       />
       {dirty && <span className={shell.dirtyDot} title="Unsaved changes" />}
@@ -122,6 +136,11 @@ export function App() {
     const m = readPref('nexmap.mode');
     return m === 'rack' || m === 'network' ? m : null;
   });
+  /** The open save/discard/cancel question, if any (#19). */
+  const [unsavedAsk, setUnsavedAsk] = useState<{
+    action: string;
+    resolve: (choice: UnsavedChoice) => void;
+  } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
@@ -132,7 +151,6 @@ export function App() {
   const redo = useProjectStore((s) => s.redo);
   const runValidation = useProjectStore((s) => s.runValidation);
   const newProject = useProjectStore((s) => s.newProject);
-  const dirty = useProjectStore((s) => s.dirty);
   const flash = useProjectStore((s) => s.flash);
 
   const persistence = usePersistence();
@@ -181,8 +199,29 @@ export function App() {
     runValidation();
   }
 
-  function handleNew() {
-    if (dirty && !confirm('Discard unsaved changes and start a new project?')) return;
+  /**
+   * Asked before a different document replaces the open one (#19): nothing to
+   * ask when it's saved; otherwise Save (and go ahead only if that worked),
+   * Discard (the pending autosave goes too), or Cancel (keep everything).
+   */
+  function confirmReplace(action: string): ConfirmReplace {
+    return async () => {
+      if (!useProjectStore.getState().dirty) return true;
+      const choice = await new Promise<UnsavedChoice>((resolve) =>
+        setUnsavedAsk({ action, resolve }),
+      );
+      if (choice === 'cancel') return false;
+      if (choice === 'discard') {
+        persistence.dropPendingAutosave();
+        return true;
+      }
+      return persistence.save();
+    };
+  }
+
+  async function handleNew() {
+    if (persistence.readOnly) return;
+    if (!(await confirmReplace('starting a new project')())) return;
     newProject(new Date().toISOString());
     setFirstRunDone(true);
   }
@@ -194,28 +233,97 @@ export function App() {
     setFirstRunDone(m === 'rack');
   }
 
+  /**
+   * Same project, other designer (#54): the document, undo history, file and
+   * draft all carry over — both designers edit one .nexmap. Starting a different
+   * project is New. The launch chooser still offers either designer standalone.
+   */
   function switchDesigner() {
-    if (dirty && !confirm('Discard unsaved changes and switch designer?')) return;
-    newProject(new Date().toISOString());
-    // Drop the stale draft too — the confirm already said "discard", and a
-    // lingering recoverable would otherwise pop a recovery prompt over the
-    // chooser after switching.
-    persistence.discardDraft();
-    removePref('nexmap.mode');
-    setMode(null);
-    setFirstRunDone(false);
+    const next: DesignerMode = mode === 'rack' ? 'network' : 'rack';
+    setMode(next);
+    writePref('nexmap.mode', next);
+    // Never cover the open project with the template gallery — but a pending
+    // recovery decision stays up.
+    if (!persistence.recoverable) setFirstRunDone(true);
   }
 
-  async function handleOpen() {
-    if (canOpenPicker) await persistence.open();
-    else fileInputRef.current?.click();
+  /** A document was just opened: show it, in a designer that suits it from the launch screen. */
+  function enterOpened() {
+    setFirstRunDone(true);
+    if (mode === null) {
+      const m = designerFor(useProjectStore.getState().getDocument());
+      setMode(m);
+      writePref('nexmap.mode', m);
+    }
   }
+
+  async function openPicked(file: PickedFile) {
+    if (await persistence.openFile(file, confirmReplace('opening another file'))) enterOpened();
+  }
+
+  /**
+   * Open (toolbar, ⌘O, palette, launch screen): the native picker where there is
+   * one, else the hidden file input — mounted on the launch screen too (#23).
+   * The file is chosen and validated first; only a sound file prompts or replaces.
+   */
+  async function handleOpen() {
+    if (persistence.readOnly) return;
+    if (canOpenPicker) {
+      const picked = await persistence.pickFile();
+      if (picked) await openPicked(picked);
+    } else fileInputRef.current?.click();
+  }
+
+  const fileInput = (
+    <input
+      ref={fileInputRef}
+      type="file"
+      accept=".nexmap,.json,application/json"
+      style={{ display: 'none' }}
+      data-testid="open-file-input"
+      onChange={async (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = '';
+        if (file) await openPicked({ text: await file.text(), handle: null, fileName: file.name });
+      }}
+    />
+  );
+
+  const unsavedDialog = unsavedAsk && (
+    <UnsavedChangesDialog
+      projectName={useProjectStore.getState().projectName}
+      action={unsavedAsk.action}
+      onChoose={(choice) => {
+        setUnsavedAsk(null);
+        unsavedAsk.resolve(choice);
+      }}
+    />
+  );
+
+  const readOnly = persistence.readOnly;
+
+  // View-only second tab (#24): editing shortcuts stop here, before the canvas
+  // or app stages see them. Save a copy (⌘S), export, the command menu, help and
+  // Esc still work; Tab and other plain keys keep their native behavior.
+  useEffect(() => {
+    if (!readOnly) return;
+    return keyboardRouter.registerOverlay((e) => {
+      if (e.key === 'Escape' || e.key === '?') return false;
+      if (e.metaKey || e.ctrlKey) {
+        const k = e.key.toLowerCase();
+        if (k === 's' || k === 'e' || k === 'k') return false;
+        e.preventDefault();
+      }
+      return true;
+    });
+  }, [readOnly]);
 
   const actions = (
     <>
       <button
         className={shell.topbarBtn}
-        onClick={handleNew}
+        onClick={() => void handleNew()}
+        disabled={readOnly}
         title="New project (Ctrl+N)"
       >
         <NexIcon name="new-file" />
@@ -223,7 +331,8 @@ export function App() {
       </button>
       <button
         className={shell.topbarBtn}
-        onClick={handleOpen}
+        onClick={() => void handleOpen()}
+        disabled={readOnly}
         title="Open .nexmap (Ctrl+O)"
       >
         <NexIcon name="open-file" />
@@ -242,6 +351,7 @@ export function App() {
           <button
             className={shell.topbarBtn}
             onClick={() => setNexText(true)}
+            disabled={readOnly}
             title="NexText — text to diagram"
           >
             <NexIcon name="text" />
@@ -250,6 +360,7 @@ export function App() {
           <button
             className={shell.topbarBtn}
             onClick={() => setImporting(true)}
+            disabled={readOnly}
             title="Import CSV"
           >
             <NexIcon name="import" />
@@ -269,7 +380,7 @@ export function App() {
       <button
         className={shell.topbarBtn}
         onClick={doUndo}
-        disabled={!canUndo}
+        disabled={!canUndo || readOnly}
         title="Undo (Ctrl+Z)"
         aria-label="Undo"
       >
@@ -278,7 +389,7 @@ export function App() {
       <button
         className={shell.topbarBtn}
         onClick={doRedo}
-        disabled={!canRedo}
+        disabled={!canRedo || readOnly}
         title="Redo"
         aria-label="Redo"
       >
@@ -287,7 +398,7 @@ export function App() {
       <button
         className={shell.topbarBtn}
         onClick={switchDesigner}
-        title="Switch between the Network and Rack designers"
+        title={`Open this project in the ${mode === 'rack' ? 'Network' : 'Rack'} designer`}
         aria-label="Switch designer"
       >
         <NexIcon name={mode === 'rack' ? 'rack' : 'connect'} />
@@ -334,7 +445,7 @@ export function App() {
             )}
             <button className={shell.menuItem} onClick={() => { switchDesigner(); close(); }}>
               <NexIcon name="rack" />
-              <span>Switch designer…</span>
+              <span>{mode === 'rack' ? 'Open in Network designer' : 'Open in Rack designer'}</span>
             </button>
             <button className={shell.menuItem} onClick={() => { toggleTheme(); close(); }}>
               <NexIcon name="theme" />
@@ -470,12 +581,22 @@ export function App() {
   // is then chosen.
   if (mode === null) {
     return (
-      <DesignerChooser
-        onPick={pickMode}
-        onOpen={() => void handleOpen()}
-        theme={theme}
-        onToggleTheme={toggleTheme}
-      />
+      <>
+        <DesignerChooser
+          onPick={pickMode}
+          onOpen={() => void handleOpen()}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+        />
+        {/* The fallback input and an Open failure live on the launch screen too (#23). */}
+        {fileInput}
+        {persistence.error && (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 100, pointerEvents: 'none' }}>
+            <ErrorToast message={persistence.error} />
+          </div>
+        )}
+        {unsavedDialog}
+      </>
     );
   }
   const isRack = mode === 'rack';
@@ -485,28 +606,50 @@ export function App() {
       actions={actions}
       titleNode={<EditableTitle />}
       fullBleed={isRack}
-      left={isRack ? undefined : <LeftPanel />}
-      right={isRack ? undefined : <Inspector />}
+      left={
+        isRack ? undefined : (
+          <ReadOnlyGate on={readOnly}>
+            <LeftPanel />
+          </ReadOnlyGate>
+        )
+      }
+      right={
+        isRack ? undefined : (
+          <ReadOnlyGate on={readOnly}>
+            <Inspector />
+          </ReadOnlyGate>
+        )
+      }
       canvas={
         <>
-          {persistence.readOnly && <ReadOnlyBanner />}
-          {isRack ? <RackDesigner /> : <Canvas showPages={showPages} />}
+          {readOnly && <ReadOnlyBanner />}
+          {isRack ? (
+            <ReadOnlyGate on={readOnly}>
+              <RackDesigner />
+            </ReadOnlyGate>
+          ) : (
+            <Canvas showPages={showPages} readOnly={readOnly} />
+          )}
           {showFirstRun && (
             <FirstRun
               onDone={() => setFirstRunDone(true)}
-              onOpenText={persistence.openText}
+              onOpenText={(text) =>
+                persistence.openText(text, confirmReplace('opening another file'))
+              }
             />
           )}
           {showRecovery && persistence.recoverable && (
             <RecoveryDialog
               draft={persistence.recoverable}
               onRecover={() => {
-                persistence.recover();
-                setFirstRunDone(true);
+                if (persistence.recover()) setFirstRunDone(true);
               }}
               onDiscard={() => {
                 persistence.discardDraft();
               }}
+              discardBlocked={
+                readOnly ? 'Open in another tab — close it to discard here.' : undefined
+              }
             />
           )}
           {persistence.error && <ErrorToast message={persistence.error} />}
@@ -536,12 +679,18 @@ export function App() {
               const st = useProjectStore.getState;
               // Commands relevant in both designers.
               const generic: PaletteCommand[] = [
-                { id: 'new', label: 'New project', hint: '⌘N', group: 'File', run: handleNew },
+                { id: 'new', label: 'New project', hint: '⌘N', group: 'File', run: () => void handleNew() },
                 { id: 'open', label: 'Open .nexmap…', hint: '⌘O', group: 'File', run: () => void handleOpen() },
                 { id: 'save', label: 'Save', hint: '⌘S', group: 'File', run: () => void persistence.save() },
                 { id: 'undo', label: 'Undo', hint: '⌘Z', group: 'Edit', run: doUndo },
                 { id: 'redo', label: 'Redo', hint: '⌘⇧Z', group: 'Edit', run: doRedo },
-                { id: 'switch', label: 'Switch designer…', group: 'View', run: switchDesigner },
+                {
+                  id: 'switch',
+                  label: mode === 'rack' ? 'Open in Network designer' : 'Open in Rack designer',
+                  hint: 'same project',
+                  group: 'View',
+                  run: switchDesigner,
+                },
                 { id: 'theme', label: 'Toggle theme', group: 'View', run: toggleTheme },
                 { id: 'shortcuts', label: 'Keyboard shortcuts', hint: '?', group: 'View', run: () => setShowHelp(true) },
                 { id: 'about', label: 'About & privacy', group: 'View', run: () => setShowAbout(true) },
@@ -865,8 +1014,13 @@ export function App() {
                 { id: 'present', label: 'Presentation mode', group: 'View', run: () => setPresentation(true) },
                 { id: 'outline', label: 'Topology outline (accessible list)', group: 'View', run: () => setShowOutline(true) },
               ];
-              const cmds: PaletteCommand[] =
-                mode === 'rack' ? generic : [...generic.slice(0, 5), ...networkOnly, ...generic.slice(5)];
+              // A view-only tab (#24) offers only what doesn't edit the project.
+              const VIEW_SAFE = new Set(['save', 'switch', 'theme', 'shortcuts', 'about']);
+              const cmds: PaletteCommand[] = readOnly
+                ? generic.filter((c) => VIEW_SAFE.has(c.id))
+                : mode === 'rack'
+                  ? generic
+                  : [...generic.slice(0, 5), ...networkOnly, ...generic.slice(5)];
               // Declare a rule by saying it: when the query reads as a custom rule
               // ("every camera lives in CCTV"), offer it first, with a live preview of
               // what it would flag. An identical rule already declared is shown, disabled.
@@ -931,23 +1085,24 @@ export function App() {
                 ];
               };
               return (
-                <CommandPalette commands={cmds} intent={ruleIntent} onClose={() => setShowPalette(false)} />
+                <CommandPalette
+                  commands={cmds}
+                  intent={readOnly ? () => [] : ruleIntent}
+                  onClose={() => setShowPalette(false)}
+                />
               );
             })()}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".nexmap,.json,application/json"
-            style={{ display: 'none' }}
-            onChange={async (e) => {
-              const file = e.target.files?.[0];
-              if (file) persistence.openText(await file.text());
-              e.target.value = '';
-            }}
-          />
+          {fileInput}
+          {unsavedDialog}
         </>
       }
-      bottom={isRack ? undefined : <BottomPanel />}
+      bottom={
+        isRack ? undefined : (
+          <ReadOnlyGate on={readOnly}>
+            <BottomPanel />
+          </ReadOnlyGate>
+        )
+      }
       status={<StatusBar persistence={persistence} mode={mode} />}
     />
   );

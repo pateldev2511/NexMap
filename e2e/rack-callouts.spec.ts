@@ -80,10 +80,10 @@ test('rack callouts do NOT leak onto the flat network canvas', async ({ page }) 
   await page.getByRole('button', { name: 'Annotate all' }).click();
   expect(await boxes(page)).toBeGreaterThan(0);
 
-  // Switch to the Network designer; its canvas must not show the rack callouts.
-  page.on('dialog', (d) => d.accept()); // the "discard changes?" switch confirm
+  // Switch to the Network designer — the SAME project (#54), so the rack-scoped
+  // callouts are still in the document — and its canvas must not show them.
   await page.getByRole('button', { name: 'Switch designer' }).click();
-  await page.getByRole('button', { name: /Network Designer/ }).click();
   await expect(page.getByTestId('rack-canvas')).toHaveCount(0); // left the rack designer
+  await expect(page.getByPlaceholder('Search components')).toBeVisible();
   await expect(page.locator('svg [data-callout-id]')).toHaveCount(0);
 });

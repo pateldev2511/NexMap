@@ -24,6 +24,7 @@ export function usePasteToCanvas(): void {
         return; // let the field handle its own paste
       }
       const store = useProjectStore.getState();
+      if (store.readOnly) return; // view-only tab: another tab is the writer (#24)
       if (store.hasClipboard()) return; // internal copied-devices paste wins (Cmd+V)
 
       const dt = e.clipboardData;
