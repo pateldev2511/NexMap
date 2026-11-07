@@ -1,14 +1,22 @@
 import { useMemo, useState } from 'react';
 import { useProjectStore, type Projection } from '@/store/projectStore';
-import { localDate, runExport, type ExportFormat, type ExportOptions } from '@/io/export';
-import { buildSvg } from '@/io/export/buildSvg';
-import type { CanvasObject, Device, Link } from '@/model/types';
+import {
+  exportDiagramSvg,
+  formatHasScope,
+  runExport,
+  type ExportFormat,
+  type ExportOptions,
+  type ExportScene,
+} from '@/io/export';
+import { documentRules } from '@/io/export/rulesReport';
 import { NexIcon } from '@/ui/icons/NexIcon';
 import styles from './ImportDialog.module.css';
 
 /**
  * Export dialog (Phase 3 upgrade): live preview, crop-to-selection, custom
  * filename, DPI/scale slider, transparent checkerboard preview, and a ZIP package.
+ * The preview is the very SVG the chosen format writes (exportDiagramSvg), and the
+ * ZIP package is always the whole project, so Scope isn't offered for it.
  */
 const FORMATS: { key: ExportFormat; label: string }[] = [
   { key: 'png', label: 'PNG' },
@@ -29,7 +37,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const store = useProjectStore.getState;
   const projectName = useProjectStore((s) => s.projectName);
   const selection = useProjectStore((s) => s.selection);
-  useProjectStore((s) => s.rev); // refresh preview on model change
+  const rev = useProjectStore((s) => s.rev); // refresh preview on model change
   const [format, setFormat] = useState<ExportFormat>('png');
   const [scope, setScope] = useState<Scope>('all');
   const [scale, setScale] = useState(2);
@@ -51,16 +59,27 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const supportsTransparent = format === 'png' || format === 'svg';
   const isCsv = format.startsWith('csv');
   const declaredRules = useProjectStore((s) => s.invariantsEnabled.size + s.customRules.length);
+  const hasScope = formatHasScope(format);
+  const effectiveScope: Scope = hasScope ? scope : 'all';
 
-  // Scope the scene to the selection if requested.
-  const scene = useMemo(() => {
+  // Scope the scene to the selection if requested (and the format honors a scope).
+  const scene = useMemo((): ExportScene => {
+    void rev;
     const allD = store().devicesAll();
     const allL = store().linksAll();
     const allO = store().objectsAll();
     const doc = store().getDocument();
-    const semantics = { vlans: doc.vlans, subnets: doc.subnets, racks: doc.racks };
-    if (scope === 'all')
-      return { devices: allD, links: allL, objects: allO, ...semantics };
+    const whole = {
+      vlans: doc.vlans,
+      subnets: doc.subnets,
+      racks: doc.racks,
+      projectName,
+      doc,
+      // Rules describe the whole design, so they're never cut to the export scope.
+      rules: documentRules(doc),
+    };
+    if (effectiveScope === 'all')
+      return { devices: allD, links: allL, objects: allO, ...whole };
     const sel = new Set(selection);
     const selectedLinks = allL.filter((l) => sel.has(l.id));
     const endpointIds = new Set<string>();
@@ -79,61 +98,35 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
           sel.has(l.sourceId) &&
           sel.has(l.targetId)),
     );
-    return { devices, links, objects, ...semantics };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, selection, store]);
+    return { devices, links, objects, ...whole };
+  }, [effectiveScope, selection, store, rev, projectName]);
 
-  const previewSvg = useMemo(
-    () =>
-      buildSvg(scene.devices as Device[], scene.links as Link[], {
-        background: supportsTransparent && transparent ? null : bgColor,
-        includeLabels,
-        objects: scene.objects as CanvasObject[],
-        projection,
-        health: highlightHealth ? store().health : null,
-        modern,
-        title: projectName,
-        date: localDate(),
-      }),
-    [scene, transparent, bgColor, includeLabels, supportsTransparent, projection, highlightHealth, modern, projectName, store],
+  // One option set for the preview AND the export, so the file is what you saw.
+  const health = useProjectStore((s) => s.health);
+  const opts = useMemo(
+    (): ExportOptions => ({
+      format,
+      scale,
+      background: supportsTransparent && transparent ? null : bgColor,
+      includeLabels,
+      quality,
+      pageSize: 'a4',
+      orientation: 'landscape',
+      fileName,
+      projection,
+      health: highlightHealth ? health : null,
+      modern,
+    }),
+    [format, scale, supportsTransparent, transparent, bgColor, includeLabels, quality, fileName, projection, highlightHealth, health, modern],
   );
+  const previewSvg = useMemo(() => exportDiagramSvg(scene, opts), [scene, opts]);
   const previewUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(previewSvg);
 
   async function doExport() {
     setBusy(true);
     setMsg(null);
     try {
-      const opts: ExportOptions = {
-        format,
-        scale,
-        background: supportsTransparent && transparent ? null : bgColor,
-        includeLabels,
-        quality,
-        pageSize: 'a4',
-        orientation: 'landscape',
-        fileName,
-        projection,
-        health: highlightHealth ? store().health : null,
-        modern,
-      };
-      const doc = store().getDocument();
-      const outcome = await runExport(
-        {
-          ...scene,
-          projectName,
-          docJson: JSON.stringify(doc, null, 2),
-          // Rules describe the whole design, so they're never cut to the export scope.
-          rules: {
-            devices: doc.devices,
-            links: doc.links,
-            subnets: doc.subnets,
-            rackCables: doc.rackCables,
-            invariants: doc.invariants,
-            customRules: doc.customRules,
-          },
-        },
-        opts,
-      );
+      const outcome = await runExport(scene, opts);
       setMsg(
         outcome.warning
           ? { tone: 'warning', text: outcome.warning }
@@ -201,7 +194,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
               {empty ? (
                 <span style={{ color: 'var(--chrome-fg-muted)', fontSize: 12 }}>
                   Nothing to preview{' '}
-                  {scope === 'selection' ? '(no selection)' : '(empty canvas)'}
+                  {effectiveScope === 'selection' ? '(no selection)' : '(empty canvas)'}
                 </span>
               ) : (
                 <img
@@ -214,11 +207,12 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
           )}
 
           <div className={styles.mapGrid}>
-            {/* Rules describe the whole design, so the rules report has no scope. */}
-            {format !== 'csv-rules' && (
+            {/* Rules describe the whole design, and a package is the whole project,
+                so neither has a scope. */}
+            {hasScope && (
               <>
-                <label>Scope</label>
-                <select value={scope} onChange={(e) => setScope(e.target.value as Scope)}>
+                <label htmlFor="export-scope">Scope</label>
+                <select id="export-scope" value={scope} onChange={(e) => setScope(e.target.value as Scope)}>
                   <option value="all">Entire diagram</option>
                   <option value="selection">Selection only ({selection.size})</option>
                 </select>
@@ -342,7 +336,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
               : isCsv
               ? `Exports the ${format === 'csv-inventory' ? 'device inventory' : 'link list'} as CSV.`
               : format === 'zip'
-                ? `Bundles .nexmap + PNG + SVG + PDF + CSVs + validation report (${countSummary}${rulesNote}).`
+                ? `Packages the whole project${scope === 'selection' ? ', not just the selection' : ''}: .nexmap + PNG + SVG + PDF + CSVs + validation report (${countSummary}${rulesNote}).`
                 : format === 'html'
                   ? `A single self-contained .html file with a pan/zoom viewer — opens in any browser, 100% local, no NexMap needed (${countSummary}${rulesNote}).`
                   : `Exports ${scope === 'selection' ? 'the selection' : 'the whole diagram'} (${countSummary}${format === 'pdf' ? rulesNote : ''}).`}

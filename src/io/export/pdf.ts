@@ -8,7 +8,7 @@
  * raster keeps fonts/strokes faithful and avoids the svg2pdf fidelity pitfalls the
  * review flagged, which is the right tradeoff for a quick "export a PDF" MVP.
  */
-import { rasterize } from './raster';
+import { rasterize, type RasterResult } from './raster';
 import { pdfSafe, rulesReportLines, rulesVerdict, type RuleReportEntry } from './rulesReport';
 
 export type PageSize = 'a4' | 'letter';
@@ -69,12 +69,23 @@ export async function buildPdfBlob(
   rules: readonly RuleReportEntry[] = [],
   projectName = '',
 ): Promise<Blob> {
-  const { blob, width, height } = await rasterize(svg, {
+  return (await buildPdf(svg, opts, rules, projectName)).blob;
+}
+
+/** The PDF plus the raster it embeds, so a caller can warn when that came out smaller than asked. */
+export async function buildPdf(
+  svg: string,
+  opts: PdfOptions,
+  rules: readonly RuleReportEntry[] = [],
+  projectName = '',
+): Promise<{ blob: Blob; raster: RasterResult }> {
+  const raster = await rasterize(svg, {
     scale: opts.scale,
     mimeType: 'image/png',
     background: '#ffffff',
   });
-  const dataUrl = await blobToDataUrl(blob);
+  const { width, height } = raster;
+  const dataUrl = await blobToDataUrl(raster.blob);
 
   // Lazy-load jsPDF so non-PDF users don't pay for it (it pulls in html2canvas).
   const { jsPDF } = await import('jspdf');
@@ -98,7 +109,7 @@ export async function buildPdfBlob(
 
   doc.addImage(dataUrl, 'PNG', x, y, drawW, drawH);
   appendRulesPages(doc, rules, projectName);
-  return doc.output('blob');
+  return { blob: doc.output('blob'), raster };
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {
