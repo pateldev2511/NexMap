@@ -13,6 +13,34 @@ the cables down to the hardware, with a user control to dial the motion.
 
 ### Added
 
+- **Gear that looks like gear.** Every canvas node is redrawn as a product render
+  of the real hardware: anodized and brushed metal, glass screens, RJ45 jacks with
+  link lights, drive caddies, rubber antennas, lit from one direction. Cloud
+  objects get physical stand-ins in the same light (a frosted-glass VPC, a chrome
+  padlock, a steel bucket). The family colour survives as a bezel stripe, LED ring
+  or badge, so diagrams stay colour-coded. The 3D view uses the same finishes. The
+  icons share their gradients per document, so a 1,000-node diagram carries one
+  set of definitions, not a thousand.
+- **Five new node types:** laptop, IP phone, mobile, modem and NAS, with art in
+  every view (2D, 3D, blueprint), NexText words (`laptop`, `phone`, `mobile`,
+  `modem`, `nas`) and library entries. A modem counts as the network edge for the
+  failure lens when no ISP is drawn. The home templates use them in place of
+  stand-ins: laptops are laptops, a NAS is a NAS, and the apartment's modem is a
+  modem. A NAS offers the storage models in the catalog. Older builds draw them as
+  a generic node.
+- **Rack faceplates rebuilt from scratch.** Every unit sits between mounting ears
+  with a captive screw per U. Switches have shielded RJ45s in banks of six, SFP+
+  uplink cages, a console port and a mode button, and 10G+ ports draw as SFP
+  cages. Servers have hot-swap SFF caddies, a power button and an intake grille.
+  Storage has LFF carriers, and the UPS a backlit display and grille. Patch panels
+  have keystones on a numbered write-on strip, with the model on the bottom rail;
+  fibre panels have aqua LC duplex adapters. The rears show what the hot aisle
+  does: PCIe slots and onboard I/O on servers, stacked controllers on arrays, a fan
+  wall and I/O modules on blade chassis. The cabinet has square-hole EIA posts
+  (three cage-nut holes per U), side panels, a vented top cap and levelling feet.
+- **New rack units:** spine switch (32× 100G), GPU server (4U), 1U NAS, tape
+  library, KVM console drawer, 48-port fibre enclosure and brush panel, plus real
+  faceplates for blade chassis, PSU shelves, shelves and blanking panels.
 - **The UPS behind each feed.** A rack UPS's Power tab says which feed it backs
   and takes its output rating in watts (nameplate W, not VA). The feed's load,
   normal and if the other feed fails, is checked against it. Smart suggestions
@@ -714,6 +742,18 @@ the cables down to the hardware, with a user control to dial the motion.
 - Refreshed brand assets: new app icon, Open Graph image, and theme color.
 
 ### Fixed
+
+- **Vendor-skinned switches lined up with their cable hit points.** A Cisco, Arista
+  or Juniper faceplate drew its ports in a different layout from the one cables
+  attach to, so a jack you clicked wasn't always the jack you saw. Skins are now
+  themes over the one renderer, so drawn ports and hit points come from the same
+  layout. Labels no longer run under the console ports on routers, load balancers
+  and WLAN controllers, or over the status LCD on 1U servers.
+- **Gear mounted on the rear faces you when you view the rear.** A full-depth unit
+  mounted on the rear rails showed its own back panel from the rear aisle, so its
+  cables landed on PSU art. It now shows its front there; its back still shows
+  from the front aisle. A branded rail PDU (APC) draws as an outlet strip, not a
+  squeezed UPS faceplate.
 
 - Tables in a rack PNG export (connections, power cords, power strips) were dark
   text on the dark page: the title, every other row and the notes were unreadable.

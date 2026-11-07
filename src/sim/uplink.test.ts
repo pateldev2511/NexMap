@@ -40,6 +40,11 @@ describe('planUplink', () => {
     expect(plan.existingIspId).toBe('isp');
   });
 
+  it('treats a modem as the internet hand-off: wire into it, never add a second internet', () => {
+    expect(planUplink([d('m', 'modem'), d('r', 'router')], [])!.existingIspId).toBe('m');
+    expect(planUplink([d('m', 'modem'), d('r', 'router')], [link('m', 'r')])).toBeNull();
+  });
+
   it('is a no-op once the edge already reaches an ISP (idempotent)', () => {
     const devices = [d('isp', 'isp'), d('f', 'firewall')];
     expect(planUplink(devices, [link('isp', 'f')])).toBeNull();

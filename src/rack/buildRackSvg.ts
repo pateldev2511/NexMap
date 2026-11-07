@@ -167,7 +167,8 @@ function renderCabinet(
     if (slotOf(d).side !== face) continue;
     const r = deviceRect(rack, d);
     const panel: Rect = { x: origin.x + r.x, y: origin.y + r.y, w: r.w, h: r.h };
-    parts.push(...deviceFaceParts(d, panel, face, rack.hideFaceplateText));
+    // Mounted on this face, so its front faces the viewer (backs come via the opposite pass).
+    parts.push(...deviceFaceParts(d, panel, 'front', rack.hideFaceplateText));
   }
   return parts;
 }

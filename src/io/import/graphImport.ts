@@ -23,7 +23,7 @@ const TYPE_KEYWORDS: [string, DeviceType][] = [
   ['cloud', 'cloud'],
   ['printer', 'printer'],
   ['camera', 'camera'],
-  ['laptop', 'end-user'],
+  ['laptop', 'laptop'],
   ['workstation', 'end-user'],
   ['pc', 'end-user'],
 ];

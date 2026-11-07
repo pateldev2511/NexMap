@@ -29,6 +29,12 @@ export type DeviceType =
   | 'patch-panel'
   | 'ups'
   | 'camera'
+  // Endpoints and edge gear (schema-additive: an older build draws them as generic).
+  | 'laptop'
+  | 'ip-phone'
+  | 'mobile'
+  | 'modem'
+  | 'nas'
   // Cloud objects (Phase 6).
   | 'vpc'
   | 'cloud-subnet'

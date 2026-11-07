@@ -8,6 +8,7 @@ import { NexIcon } from '@/ui/icons/NexIcon';
 import { pickHub } from '@/sim/hub';
 import { useProjectStore, type AlignEdge, type Projection, type ProjectStore } from '@/store/projectStore';
 import { BLUEPRINT } from './blueprintArt';
+import { FLAT_ART_DEFS } from './deviceFlatArt';
 import { CanvasSearch } from './CanvasSearch';
 import { MiniMap } from './MiniMap';
 import { getConnectMode, getWheelAction } from '@/lib/prefs';
@@ -1699,6 +1700,8 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
             <stop offset="100%" stopColor="#1e293b" stopOpacity={0.17} />
           </radialGradient>
         </defs>
+        {/* Device icon gradients, defined once for every node on the canvas. */}
+        <g dangerouslySetInnerHTML={{ __html: FLAT_ART_DEFS }} />
         {blueprint ? (
           <>
             <rect x={0} y={0} width="100%" height="100%" fill="url(#nexmap-bp-minor)" />

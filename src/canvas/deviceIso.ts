@@ -180,9 +180,37 @@ function antenna(gx: number, gy: number, baseZ: number, len: number, c: string):
 const DETAIL = '#e2e8f0';
 const LED = '#fef08a';
 
+/**
+ * Physical gear in the finish it really ships in — anodized charcoal, white plastic,
+ * a green PCB — so the 3-D view matches the 2-D product renders. Logical and cloud
+ * objects have no physical finish and keep their family colour.
+ */
+const MATERIAL: Partial<Record<DeviceType, string>> = {
+  router: '#3d4550',
+  switch: '#363e48',
+  firewall: '#5a2a30',
+  'access-point': '#e8ecf0',
+  'wireless-controller': '#3d4550',
+  server: '#323943',
+  'load-balancer': '#3d4550',
+  'end-user': '#2d333b',
+  printer: '#e3e8ed',
+  iot: '#1f7a45',
+  rack: '#2a3038',
+  'patch-panel': '#323943',
+  ups: '#2d333b',
+  camera: '#e8ecf0',
+  laptop: '#c5ccd4',
+  'ip-phone': '#2d333b',
+  mobile: '#2d333b',
+  modem: '#f1f4f7',
+  nas: '#2d333b',
+  generic: '#aeb7c1',
+};
+
 function buildIso(type: DeviceType): string {
   const g = deviceGradient(type);
-  const c = g.via; // body base color
+  const c = MATERIAL[type] ?? g.via; // body base color
   const dark = mixHex(c, '#000000', 0.45);
 
   switch (type) {
@@ -577,6 +605,75 @@ function buildIso(type: DeviceType): string {
       const pin = mixHex(c, '#000', 0.2);
       for (let i = -1; i <= 1; i++) {
         p += line(pt(W / 2 + 0.2, i * 2, 0), pt(W / 2 + 1.6, i * 2, -1), pin, 0.7);
+      }
+      return p;
+    }
+    case 'laptop': {
+      // Open laptop: a thin deck with a keyboard well, the lid standing at the back
+      // (its screen faces the viewer on the lid's right face).
+      const W = 13,
+        D = 11,
+        H = 1;
+      const shell = mixHex(c, '#cbd5e1', 0.55);
+      let p = box(-W / 2, -D / 2, W, D, H, shell);
+      p += poly(
+        [pt(-W / 2 + 2.6, -D / 2 + 1.2, H), pt(W / 2 - 1.4, -D / 2 + 1.2, H), pt(W / 2 - 1.4, D / 2 - 1.2, H), pt(-W / 2 + 2.6, D / 2 - 1.2, H)],
+        mixHex(shell, '#000000', 0.42),
+      );
+      const lx = -W / 2 + 0.8;
+      p += box(-W / 2, -D / 2, 0.8, D, 8.5, mixHex(c, '#0f172a', 0.6), 0.6, H);
+      const scr = [pt(lx, -D / 2 + 0.7, H + 8), pt(lx, D / 2 - 0.7, H + 8), pt(lx, D / 2 - 0.7, H + 0.8), pt(lx, -D / 2 + 0.7, H + 0.8)];
+      p += poly(scr, '#0e7490');
+      p += `<polygon class="nxScreen" points="${join(scr)}" fill="#bfe3ff" opacity="0.2"/>`;
+      return p;
+    }
+    case 'ip-phone': {
+      // Desk phone: a sloped base, the handset in its cradle on the left, a lit display.
+      const W = 11,
+        D = 9,
+        H = 2.6;
+      const dark = mixHex(c, '#0f172a', 0.7);
+      let p = box(-W / 2, -D / 2, W, D, H, dark);
+      p += box(-W / 2 + 0.6, -D / 2 + 0.6, W - 1.2, 2.6, 1.3, mixHex(dark, '#000000', 0.2), 0.5, H);
+      const disp = [pt(-1.5, 0.4, H), pt(3.8, 0.4, H), pt(3.8, 3.2, H), pt(-1.5, 3.2, H)];
+      p += poly(disp, '#0e7490');
+      p += `<polygon class="nxScreen" points="${join(disp)}" fill="#bfe3ff" opacity="0.2"/>`;
+      p += led(pt(4.4, 3.6, H), 0.5, '#4ade80', -300);
+      return p;
+    }
+    case 'mobile': {
+      // Smartphone standing on its edge: a slim slab with a glass face.
+      const W = 1.2,
+        D = 7,
+        H = 13;
+      let p = box(-W / 2, -D / 2, W, D, H, mixHex(c, '#0f172a', 0.55));
+      const face = [pt(W / 2, -D / 2 + 0.5, H - 0.6), pt(W / 2, D / 2 - 0.5, H - 0.6), pt(W / 2, D / 2 - 0.5, 0.6), pt(W / 2, -D / 2 + 0.5, 0.6)];
+      p += poly(face, mixHex(c, '#1e1b4b', 0.35));
+      p += `<polygon class="nxScreen" points="${join(face)}" fill="#e9d5ff" opacity="0.22"/>`;
+      return p;
+    }
+    case 'modem': {
+      // White desktop modem with a row of link lights along its face.
+      const W = 13,
+        D = 8,
+        H = 4.5;
+      let p = box(-W / 2, -D / 2, W, D, H, mixHex(c, '#ffffff', 0.78));
+      for (let i = 0; i < 5; i++) {
+        p += led(pt(W / 2, -D / 2 + 1.4 + i * 1.3, H * 0.55), 0.45, i === 4 ? '#fbbf24' : '#4ade80', -i * 260, i === 4);
+      }
+      return p;
+    }
+    case 'nas': {
+      // Desktop NAS: a dark cube with four drive trays across its face.
+      const W = 8,
+        D = 9,
+        H = 10;
+      const body = mixHex(c, '#0f172a', 0.65);
+      let p = box(-W / 2, -D / 2, W, D, H, body);
+      for (let i = 0; i < 4; i++) {
+        const gy = -D / 2 + 1.6 + i * 1.95;
+        p += line(pt(W / 2, gy, H - 1.4), pt(W / 2, gy, 2), mixHex(body, '#ffffff', 0.35), 1.1);
+        p += led(pt(W / 2, gy, 1.2), 0.4, i === 3 ? '#fbbf24' : '#4ade80', -i * 380, i === 3);
       }
       return p;
     }

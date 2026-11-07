@@ -4,6 +4,7 @@ import { IsoIcon } from '@/canvas/IsoIcon';
 import { FlatIcon } from '@/canvas/FlatIcon';
 import { BlueprintIcon } from '@/canvas/BlueprintIcon';
 import { deviceVisual } from '@/canvas/deviceVisuals';
+import { FLAT_ART_DEFS } from '@/canvas/deviceFlatArt';
 import { useProjectStore, type Projection } from '@/store/projectStore';
 import { defaultDeviceName } from '@/model/schema';
 import { NexIcon } from '@/ui/icons/NexIcon';
@@ -35,9 +36,9 @@ const GROUPS: Group[] = [
       'generic',
     ],
   },
-  { name: 'Network', types: ['wireless-controller', 'load-balancer', 'isp'] },
-  { name: 'Compute & Storage', types: ['vm', 'container', 'storage'] },
-  { name: 'Endpoints', types: ['printer', 'iot', 'camera'] },
+  { name: 'Network', types: ['wireless-controller', 'load-balancer', 'modem', 'isp'] },
+  { name: 'Compute & Storage', types: ['vm', 'container', 'storage', 'nas'] },
+  { name: 'Endpoints', types: ['laptop', 'mobile', 'ip-phone', 'printer', 'iot', 'camera'] },
   { name: 'Physical', types: ['rack', 'patch-panel', 'ups'] },
   {
     name: 'Cloud',
@@ -112,6 +113,11 @@ export function Library() {
 
   return (
     <div className={styles.library}>
+      {/* The chips' icon gradients, once for the whole library (an invisible, not
+          display:none, svg — gradients inside display:none don't paint). */}
+      <svg width="0" height="0" style={{ position: 'absolute' }} aria-hidden="true">
+        <g dangerouslySetInnerHTML={{ __html: FLAT_ART_DEFS }} />
+      </svg>
       <input
         className={styles.search}
         placeholder="Search components"

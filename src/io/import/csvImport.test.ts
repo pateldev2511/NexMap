@@ -42,6 +42,14 @@ describe('parseDeviceType', () => {
     expect(parseDeviceType('frobnicator')).toEqual({ type: 'generic', known: false });
     expect(parseDeviceType(undefined)).toEqual({ type: 'generic', known: false });
   });
+
+  it('round-trips the endpoint and edge types the CSV export writes', () => {
+    expect(parseDeviceType('Laptop').type).toBe('laptop');
+    expect(parseDeviceType('IP Phone').type).toBe('ip-phone');
+    expect(parseDeviceType('Mobile').type).toBe('mobile');
+    expect(parseDeviceType('Modem').type).toBe('modem');
+    expect(parseDeviceType('NAS').type).toBe('nas');
+  });
 });
 
 describe('buildDevices', () => {

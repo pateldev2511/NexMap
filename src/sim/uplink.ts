@@ -49,7 +49,8 @@ export function planUplink(
 
   // Internet nodes are searched across the WHOLE diagram, not just the pool: "connect
   // this firewall" should reuse the internet that's already drawn, wherever it sits.
-  const isps = devices.filter((d) => d.type === 'isp');
+  // A modem/ONT is the ISP's hand-off on the premises: wiring the edge to it IS the uplink.
+  const isps = devices.filter((d) => d.type === 'isp' || d.type === 'modem');
   const ispIds = new Set(isps.map((d) => d.id));
 
   // Idempotent: if the edge already reaches any ISP, there's nothing to do.

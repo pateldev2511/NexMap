@@ -1,6 +1,6 @@
 # The NexMap icon system
 
-NexMap draws its 30 device types in four skins. This document is the spec they
+NexMap draws its 35 device types in four skins. This document is the spec they
 all draw to. The numbers live in code, in
 [`src/canvas/iconSystem.ts`](../src/canvas/iconSystem.ts), and
 [`src/canvas/iconSystem.test.ts`](../src/canvas/iconSystem.test.ts) measures every
@@ -9,7 +9,7 @@ skin against them. If an icon drifts, CI fails; nobody has to catch it by eye.
 | Skin | Where | Look | Used for |
 | --- | --- | --- | --- |
 | **Line** | `deviceVisuals.ts` → `DEVICE_ICONS` | One-colour strokes. The house style. | The master every other 2D skin traces. |
-| **Flat** | `deviceFlatArt.ts` | Filled illustration, 3-tone bodies, live LEDs. | The 2D canvas, Library, flat export. |
+| **Flat** | `deviceFlatArt.ts` | A product render of the real hardware: lit metal and glass, ports, LEDs. | The 2D canvas, Library, flat export. |
 | **Iso** | `deviceIso.ts` | Solid 3D models, top-lit. | Isometric view and export. |
 | **Blueprint** | `blueprintArt.ts` | The line set in pale ink on cyanotype paper, plus registration ticks. | Blueprint view and the blueprint sheet export. |
 
@@ -27,8 +27,10 @@ skin against them. If an icon drifts, CI fails; nobody has to catch it by eye.
   overrides it. Detail comes from geometry, not thinner pens.
 - **Blueprint uses one weight: 1.25.** It is the same geometry with a finer
   drafting pen. Registration ticks are 0.5, at 60% opacity.
-- **Flat art is filled.** Its few detail lines (meridians, vents, arrows) stay
-  between 0.6 and 1.4.
+- **Flat art is filled.** It is a product render: every surface is a gradient lit
+  from the top-left, with a hairline specular edge where it turns to the light.
+  Its detail lines stay between 0.3 (engraved seams, corrugation, brick courses)
+  and 1.4 (Wi-Fi arcs).
 
 ## Corners
 
@@ -54,15 +56,15 @@ It also has a **silhouette box**: the ink bounds on the grid, stroke included.
 
 | Form | Types |
 | --- | --- |
-| chassis (wide, low) | router, switch, wireless controller, patch panel |
-| tower (tall) | server, UPS, rack |
+| chassis (wide, low) | router, switch, wireless controller, patch panel, modem |
+| tower (tall) | server, UPS, rack, NAS |
 | shield | firewall, security group |
 | dome | access point, camera |
 | cylinder | storage, managed DB, object storage |
 | globe | ISP, internet gateway |
-| screen | PC, VM |
+| screen | PC, VM, laptop, mobile |
 | region | VPC, subnet |
-| block | load balancer, printer, IoT, NAT gateway, route table, VPN gateway |
+| block | load balancer, printer, IoT, NAT gateway, route table, VPN gateway, IP phone |
 | hex | container, k8s, generic |
 | cloud | cloud |
 
@@ -89,6 +91,19 @@ counterparts:
 These icons were redrawn to the flat silhouettes. Until blueprint, line art had
 not appeared on the canvas, so no user saw the old shapes. Blueprint is the
 first place line art is shown, which made this the moment to fix them.
+
+## Flat art gradients are shared
+
+Product renders need gradients, and a gradient is an element. If every icon
+carried its own, a 1,000-node diagram would carry ~14,000 extra elements. So an
+icon's markup only *references* gradient ids, namespaced by type
+(`nxa-<type>-<n>`), and each SVG root that draws icons defines them once:
+
+- The canvas and the Library include `FLAT_ART_DEFS` (every type).
+- An SVG/PNG export includes `deviceFlatDefs(types)`, just the types on the sheet.
+
+A new place that draws flat icons must do one of the two, or its icons paint
+flat. `iconSystem.test.ts` checks every referenced id is defined exactly once.
 
 ## Adding a device type
 

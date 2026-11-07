@@ -29,6 +29,11 @@ describe('rack catalog — data integrity', () => {
     }
   });
 
+  it('a NAS is offered the storage models', () => {
+    expect(catalogForType('nas').map((m) => m.id)).toEqual(catalogForType('storage').map((m) => m.id));
+    expect(catalogForType('nas').length).toBeGreaterThan(0);
+  });
+
   it('UPS models are power sources (0 W draw)', () => {
     for (const m of catalogForType('ups')) expect(m.watts).toBe(0);
   });

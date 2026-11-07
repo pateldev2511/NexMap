@@ -110,10 +110,9 @@ function GearThumb({ preset, device }: { preset?: RackDevicePreset; device?: Dev
     ...(preset?.accessory ? { rackAccessory: preset.accessory } : {}),
     interfaces: Array.from({ length: Math.min(preset?.ports ?? 0, 48) }, (_, i) => ({ id: `p${i}`, name: preset?.portName(i) ?? `p${i}` })),
   };
-  const face = device ? slotOf(device).side : 'front';
   return (
     <svg className={styles.gearThumb} viewBox={`0 0 122 ${panelH + 10}`} aria-hidden="true">
-      <g dangerouslySetInnerHTML={{ __html: RACK_ART_DEFS + deviceFaceParts(source, panel, face).join('') }} />
+      <g dangerouslySetInnerHTML={{ __html: RACK_ART_DEFS + deviceFaceParts(source, panel, 'front').join('') }} />
     </svg>
   );
 }

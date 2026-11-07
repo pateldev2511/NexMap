@@ -40,6 +40,11 @@ const VISUALS: Record<DeviceType, DeviceVisual> = {
   'patch-panel': { glyph: 'PP', accent: '#52525b' },
   ups: { glyph: 'UPS', accent: '#d97706' },
   camera: { glyph: 'CAM', accent: '#9333ea' },
+  laptop: { glyph: 'LT', accent: '#64748b' },
+  'ip-phone': { glyph: 'TEL', accent: '#16a34a' },
+  mobile: { glyph: 'MOB', accent: '#7c3aed' },
+  modem: { glyph: 'MDM', accent: '#0369a1' },
+  nas: { glyph: 'NAS', accent: '#0d9488' },
   vpc: { glyph: 'VPC', accent: '#0ea5e9' },
   'cloud-subnet': { glyph: 'SUB', accent: '#38bdf8' },
   'internet-gateway': { glyph: 'IGW', accent: '#0284c7' },
@@ -82,6 +87,11 @@ const GRADIENTS: Record<DeviceType, DeviceGradient> = {
   'patch-panel': { from: '#d4d4d8', via: '#52525b', to: '#38bdf8', glow: '#a1a1aa' },
   ups: { from: '#fde68a', via: '#d97706', to: '#fb7185', glow: '#fbbf24' },
   camera: { from: '#e9d5ff', via: '#9333ea', to: '#f472b6', glow: '#c084fc' },
+  laptop: { from: '#cbd5e1', via: '#64748b', to: '#38bdf8', glow: '#94a3b8' },
+  'ip-phone': { from: '#86efac', via: '#16a34a', to: '#38bdf8', glow: '#4ade80' },
+  mobile: { from: '#c4b5fd', via: '#7c3aed', to: '#f472b6', glow: '#a78bfa' },
+  modem: { from: '#7dd3fc', via: '#0369a1', to: '#34d399', glow: '#38bdf8' },
+  nas: { from: '#5eead4', via: '#0d9488', to: '#60a5fa', glow: '#2dd4bf' },
   vpc: { from: '#67e8f9', via: '#0ea5e9', to: '#818cf8', glow: '#38bdf8' },
   'cloud-subnet': { from: '#bae6fd', via: '#38bdf8', to: '#34d399', glow: '#7dd3fc' },
   'internet-gateway': {
@@ -149,6 +159,15 @@ const DEVICE_ICONS: Record<DeviceType, string> = {
   ups: '<rect x="6" y="4" width="12" height="16" rx="1.5"/><path d="M13 8 10.2 12.6h3.4L11 17"/><circle cx="8.6" cy="6.6" r=".8" fill="#fff" stroke="none"/>',
   camera:
     '<path d="M5.5 18a6.5 6.5 0 0 1 13 0z"/><path d="M8 18v2h8v-2"/><circle cx="12" cy="15.2" r="2"/><circle cx="12" cy="15.2" r=".8" fill="#fff" stroke="none"/>',
+  laptop:
+    '<rect x="4.5" y="5" width="15" height="10.5" rx="1.5"/><path d="M3 19h18l-1.5-3.5h-15z"/><path d="M10.5 17.5h3"/>',
+  'ip-phone':
+    '<rect x="4.5" y="4" width="4" height="16" rx="1.5"/><path d="M8.5 9.5h10.5l-1 10.5h-9.5"/><rect x="11" y="11" width="6" height="2.5" rx=".4"/><circle cx="12" cy="16.5" r=".8" fill="#fff" stroke="none"/><circle cx="14.5" cy="16.5" r=".8" fill="#fff" stroke="none"/><circle cx="17" cy="16.5" r=".8" fill="#fff" stroke="none"/>',
+  mobile:
+    '<rect x="8" y="3.5" width="8" height="17" rx="1.5"/><path d="M11 6h2"/><circle cx="12" cy="17.5" r=".9" fill="#fff" stroke="none"/>',
+  modem:
+    '<rect x="4" y="10" width="16" height="7.5" rx="1.5"/><path d="M5.5 10l1-2h11l1 2"/><circle cx="7.5" cy="13.7" r=".8" fill="#fff" stroke="none"/><circle cx="10" cy="13.7" r=".8" fill="#fff" stroke="none"/><circle cx="12.5" cy="13.7" r=".8" fill="#fff" stroke="none"/><circle cx="15" cy="13.7" r=".8" fill="#fff" stroke="none"/>',
+  nas: '<rect x="6" y="4" width="12" height="16" rx="1.5"/><path d="M9 7v9M12 7v9M15 7v9"/><circle cx="9" cy="17.6" r=".7" fill="#fff" stroke="none"/><circle cx="12" cy="17.6" r=".7" fill="#fff" stroke="none"/><circle cx="15" cy="17.6" r=".7" fill="#fff" stroke="none"/>',
   vpc: '<rect x="3" y="5" width="18" height="14" rx="2.5" stroke-dasharray="3 2"/><path d="M8 12h8M12 8v8"/><circle cx="8" cy="12" r="1" fill="#fff" stroke="none"/><circle cx="12" cy="8" r="1" fill="#fff" stroke="none"/><circle cx="16" cy="12" r="1" fill="#fff" stroke="none"/><circle cx="12" cy="16" r="1" fill="#fff" stroke="none"/>',
   'cloud-subnet':
     '<rect x="3" y="5" width="18" height="14" rx="2.5" stroke-dasharray="2 2"/><path d="M3 12h18M12 5v14"/><rect x="6.5" y="8" width="3" height="2.5" rx=".4" fill="#fff" stroke="none"/><rect x="14.5" y="14" width="3" height="2.5" rx=".4" fill="#fff" stroke="none"/>',
@@ -282,9 +301,10 @@ export function deviceIcon3DGroup(
 }
 
 /**
- * Flat 2D device icon: a detailed, multi-colored flat illustration that resembles
- * the real hardware (see {@link deviceFlatArt}), with NO background tile. The art is
- * authored in a 0..24 box, so we just translate+scale it to (cx,cy,size).
+ * Flat 2D device icon: a product render of the real hardware (see
+ * {@link deviceFlatArt}), with NO background tile. The art is authored in a 0..24
+ * box, so we just translate+scale it to (cx,cy,size). Its gradients are NOT in this
+ * markup: the SVG root must include FLAT_ART_DEFS or deviceFlatDefs (see there).
  *
  * Used only in flat projection; iso keeps the 3D {@link deviceIcon3DGroup}/deviceIso.
  */

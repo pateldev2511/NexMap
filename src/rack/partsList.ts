@@ -210,6 +210,7 @@ export function parsePartsList(text: string): PartsLine[] {
 const STACK_ORDER: Partial<Record<DeviceType, number>> = {
   ups: 0,
   storage: 1,
+  nas: 1,
   server: 2,
   router: 3,
   firewall: 3,
