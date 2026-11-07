@@ -1,24 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { AppShell } from './ui/shell/AppShell';
 import { MoreMenu } from './ui/shell/MoreMenu';
-import { LeftPanel } from './ui/LeftSidebar/LeftPanel';
-import { Inspector } from './ui/Inspector/Inspector';
-import { BottomPanel } from './ui/BottomPanel/BottomPanel';
 import { FirstRun } from './ui/firstrun/FirstRun';
 import { RecoveryDialog } from './ui/dialogs/RecoveryDialog';
-import { ImportDialog } from './ui/dialogs/ImportDialog';
-import { NexTextDialog } from './ui/dialogs/NexTextDialog';
 import { usePasteToCanvas } from './io/import/usePasteToCanvas';
-import { ExportDialog } from './ui/dialogs/ExportDialog';
-import { ShortcutsDialog } from './ui/dialogs/ShortcutsDialog';
 import { ViewSwitcher } from './ui/ViewSwitcher';
-import { RackDesigner } from './rack/RackDesigner';
 import { DesignerChooser, type DesignerMode } from './ui/DesignerChooser';
 import { designerFor } from './persistence/draft';
 import { UnsavedChangesDialog, type UnsavedChoice } from './ui/dialogs/UnsavedChangesDialog';
-import { SettingsDialog } from './ui/dialogs/SettingsDialog';
-import { AboutDialog } from './ui/dialogs/AboutDialog';
-import { OutlineDialog } from './ui/dialogs/OutlineDialog';
 import { CommandPalette, type PaletteCommand } from './ui/CommandPalette';
 import {
   countedDevices,
@@ -54,8 +43,6 @@ import {
   NoticeToast,
 } from './ui/dialogs/ReadOnlyBanner';
 import { NexIcon } from './ui/icons/NexIcon';
-import { Canvas } from './canvas/Canvas';
-import { PerfHarness } from './perf/PerfHarness';
 import { useProjectStore } from './store/projectStore';
 import {
   usePersistence,
@@ -68,6 +55,89 @@ import { defaultDeviceName } from './model/schema';
 import { QUICK_CREATE_TYPES } from './canvas/QuickCreateMenu';
 import { TEMPLATES } from './model/templates';
 import shell from './ui/shell/AppShell.module.css';
+
+// Code-split (#44). The launch screen needs none of these: each designer, the
+// network panels, the perf harness and every on-demand dialog load as their own
+// chunks. They are prefetched once the launch screen is idle (prefetchEditor), so
+// picking a designer doesn't wait on the network, and the service worker precaches
+// every chunk, so they open offline too.
+const loadCanvas = () => import('./canvas/Canvas');
+const loadRack = () => import('./rack/RackDesigner');
+const loadLeft = () => import('./ui/LeftSidebar/LeftPanel');
+const loadInspector = () => import('./ui/Inspector/Inspector');
+const loadBottom = () => import('./ui/BottomPanel/BottomPanel');
+const Canvas = lazy(() => loadCanvas().then((m) => ({ default: m.Canvas })));
+const RackDesigner = lazy(() => loadRack().then((m) => ({ default: m.RackDesigner })));
+const LeftPanel = lazy(() => loadLeft().then((m) => ({ default: m.LeftPanel })));
+const Inspector = lazy(() => loadInspector().then((m) => ({ default: m.Inspector })));
+const BottomPanel = lazy(() => loadBottom().then((m) => ({ default: m.BottomPanel })));
+const PerfHarness = lazy(() =>
+  import('./perf/PerfHarness').then((m) => ({ default: m.PerfHarness })),
+);
+const ImportDialog = lazy(() =>
+  import('./ui/dialogs/ImportDialog').then((m) => ({ default: m.ImportDialog })),
+);
+const ExportDialog = lazy(() =>
+  import('./ui/dialogs/ExportDialog').then((m) => ({ default: m.ExportDialog })),
+);
+const NexTextDialog = lazy(() =>
+  import('./ui/dialogs/NexTextDialog').then((m) => ({ default: m.NexTextDialog })),
+);
+const ShortcutsDialog = lazy(() =>
+  import('./ui/dialogs/ShortcutsDialog').then((m) => ({ default: m.ShortcutsDialog })),
+);
+const SettingsDialog = lazy(() =>
+  import('./ui/dialogs/SettingsDialog').then((m) => ({ default: m.SettingsDialog })),
+);
+const AboutDialog = lazy(() =>
+  import('./ui/dialogs/AboutDialog').then((m) => ({ default: m.AboutDialog })),
+);
+const OutlineDialog = lazy(() =>
+  import('./ui/dialogs/OutlineDialog').then((m) => ({ default: m.OutlineDialog })),
+);
+
+/** Warm both designers' chunks in idle time, once per page. */
+let prefetched = false;
+function prefetchEditor(): void {
+  if (prefetched) return;
+  prefetched = true;
+  const go = () => {
+    // Both designers' main chunks first, so either tile is ready soonest.
+    for (const load of [loadCanvas, loadRack, loadLeft, loadInspector, loadBottom])
+      void load().catch(() => {});
+  };
+  // Soon after the launch screen paints: on a slow link the chunks need that head
+  // start to be there by the time someone has picked a designer.
+  if ('requestIdleCallback' in window) window.requestIdleCallback(go, { timeout: 200 });
+  else setTimeout(go, 50);
+}
+
+// A returning visitor skips the launch screen into their last designer: start that
+// chunk now, in parallel with the first render, rather than after it.
+{
+  const remembered = readPref('nexmap.mode');
+  if (remembered === 'rack') void loadRack().catch(() => {});
+  else if (remembered === 'network')
+    for (const load of [loadCanvas, loadLeft, loadInspector, loadBottom]) void load().catch(() => {});
+}
+
+/** What the canvas area shows while a designer's chunk is still arriving. */
+function DesignerLoading() {
+  return (
+    <div
+      role="status"
+      style={{
+        display: 'grid',
+        placeItems: 'center',
+        height: '100%',
+        color: 'var(--chrome-fg-muted)',
+        fontSize: 13,
+      }}
+    >
+      Loading designer…
+    </div>
+  );
+}
 
 type Theme = 'light' | 'dark';
 
@@ -564,7 +634,11 @@ export function App() {
       <AppShell
         actions={actions}
         projectName="M0 SVG perf harness"
-        canvas={<PerfHarness />}
+        canvas={
+          <Suspense fallback={<DesignerLoading />}>
+            <PerfHarness />
+          </Suspense>
+        }
         status={<span>M0 benchmark — drives the M2 renderer decision</span>}
       />
     );
@@ -573,7 +647,9 @@ export function App() {
   if (presentation) {
     return (
       <div style={{ position: 'fixed', inset: 0, background: 'var(--canvas-bg)' }}>
-        <Canvas readOnly showPages={showPages} />
+        <Suspense fallback={<DesignerLoading />}>
+          <Canvas readOnly showPages={showPages} />
+        </Suspense>
         <button
           className={shell.topbarBtn}
           onClick={() => setPresentation(false)}
@@ -604,6 +680,7 @@ export function App() {
   // mode===null state; the recovery prompt appears inside whichever designer
   // is then chosen.
   if (mode === null) {
+    prefetchEditor();
     return (
       <>
         <DesignerChooser
@@ -633,27 +710,33 @@ export function App() {
       left={
         isRack ? undefined : (
           <ReadOnlyGate on={readOnly}>
-            <LeftPanel />
+            <Suspense fallback={null}>
+              <LeftPanel />
+            </Suspense>
           </ReadOnlyGate>
         )
       }
       right={
         isRack ? undefined : (
           <ReadOnlyGate on={readOnly}>
-            <Inspector />
+            <Suspense fallback={null}>
+              <Inspector />
+            </Suspense>
           </ReadOnlyGate>
         )
       }
       canvas={
         <>
           {readOnly && <ReadOnlyBanner />}
-          {isRack ? (
-            <ReadOnlyGate on={readOnly}>
-              <RackDesigner />
-            </ReadOnlyGate>
-          ) : (
-            <Canvas showPages={showPages} readOnly={readOnly} />
-          )}
+          <Suspense fallback={<DesignerLoading />}>
+            {isRack ? (
+              <ReadOnlyGate on={readOnly}>
+                <RackDesigner />
+              </ReadOnlyGate>
+            ) : (
+              <Canvas showPages={showPages} readOnly={readOnly} />
+            )}
+          </Suspense>
           {showFirstRun && (
             <FirstRun
               onDone={() => setFirstRunDone(true)}
@@ -683,19 +766,21 @@ export function App() {
           {flash && (
             <NoticeToast message={flash} onDismiss={() => useProjectStore.getState().setFlash(null)} />
           )}
-          {nexText && <NexTextDialog onClose={() => setNexText(false)} />}
-          {importing && <ImportDialog onClose={() => setImporting(false)} />}
-          {exporting && <ExportDialog onClose={() => setExporting(false)} />}
-          {showHelp && <ShortcutsDialog onClose={() => setShowHelp(false)} />}
-          {showAbout && <AboutDialog onClose={() => setShowAbout(false)} />}
-          {showOutline && <OutlineDialog onClose={() => setShowOutline(false)} />}
-          {showSettings && (
-            <SettingsDialog
-              theme={theme}
-              onToggleTheme={toggleTheme}
-              onClose={() => setShowSettings(false)}
-            />
-          )}
+          <Suspense fallback={null}>
+            {nexText && <NexTextDialog onClose={() => setNexText(false)} />}
+            {importing && <ImportDialog onClose={() => setImporting(false)} />}
+            {exporting && <ExportDialog onClose={() => setExporting(false)} />}
+            {showHelp && <ShortcutsDialog onClose={() => setShowHelp(false)} />}
+            {showAbout && <AboutDialog onClose={() => setShowAbout(false)} />}
+            {showOutline && <OutlineDialog onClose={() => setShowOutline(false)} />}
+            {showSettings && (
+              <SettingsDialog
+                theme={theme}
+                onToggleTheme={toggleTheme}
+                onClose={() => setShowSettings(false)}
+              />
+            )}
+          </Suspense>
           <ValidationAnnouncer />
           {showPalette &&
             (() => {
@@ -1122,7 +1207,9 @@ export function App() {
       bottom={
         isRack ? undefined : (
           <ReadOnlyGate on={readOnly}>
-            <BottomPanel />
+            <Suspense fallback={null}>
+              <BottomPanel />
+            </Suspense>
           </ReadOnlyGate>
         )
       }

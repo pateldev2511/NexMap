@@ -22,14 +22,14 @@ const inRack = (page: Page) =>
 test('Rack card opens the Rack designer (not Network)', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /Rack Designer/ }).click();
-  expect(await inRack(page)).toBe(true);
+  await expect.poll(() => inRack(page)).toBe(true); // designers load as lazy chunks (#44)
   expect(await inNetwork(page)).toBe(false);
 });
 
 test('Network card opens the Network designer', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /Network Designer/ }).click();
-  expect(await inNetwork(page)).toBe(true);
+  await expect.poll(() => inNetwork(page)).toBe(true); // designers load as lazy chunks (#44)
   expect(await inRack(page)).toBe(false);
 });
 
@@ -112,7 +112,7 @@ test('switch designer keeps the same project: network ↔ racks round trip', asy
     mimeType: 'application/json',
     buffer: Buffer.from(twoRackProject),
   });
-  expect(await inNetwork(page)).toBe(true);
+  await expect.poll(() => inNetwork(page)).toBe(true); // designers load as lazy chunks (#44)
   await expect(page.locator('g[data-id="sw-a"]')).toBeVisible();
 
   // An unsaved edit before switching.
@@ -140,7 +140,7 @@ test('switch designer keeps the same project: network ↔ racks round trip', asy
   await expect(page.getByLabel('Project name')).toHaveValue('Two racks, edited');
 
   await page.getByRole('button', { name: 'Switch designer' }).click();
-  expect(await inNetwork(page)).toBe(true);
+  await expect.poll(() => inNetwork(page)).toBe(true); // designers load as lazy chunks (#44)
   await expect(page.locator('g[data-id="sw-b"]')).toBeVisible();
   expect(await snapshot(page)).toEqual(before);
   expect(prompted).toBe(false);
