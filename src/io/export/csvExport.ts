@@ -6,7 +6,6 @@
  * export in Excel/Sheets can't execute it. Cells with commas/quotes/newlines are
  * RFC-4180 quoted.
  */
-import { stripPrefix } from '@/lib/ipcidr';
 import { defaultDeviceName } from '@/model/schema';
 import type { Device, Link } from '@/model/types';
 import { buildRulesReport, type RulesReportInput } from './rulesReport';
@@ -44,7 +43,9 @@ export function exportInventoryCsv(devices: Device[]): string {
     d.model ?? '',
     d.role ?? '',
     d.location ?? '',
-    d.managementIp ? stripPrefix(d.managementIp) : '',
+    // Verbatim, prefix included ("10.0.0.1/24"): the inventory CSV round-trips back
+    // through Import, so stripping it here would silently lose the entered subnet.
+    d.managementIp ?? '',
     d.notes ?? '',
   ]);
   return toCsv(headers, rows);

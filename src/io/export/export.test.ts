@@ -277,7 +277,7 @@ describe('CSV export', () => {
     const lines = csv.split('\r\n');
     expect(lines[0]).toBe('name,type,vendor,model,role,location,management_ip,notes');
     expect(lines[1]).toContain('R1');
-    expect(lines[1]).toContain('10.0.0.1'); // prefix stripped
+    expect(lines[1]).toContain('10.0.0.1/24'); // entered prefix preserved
     expect(lines[1]).toContain('Acme');
   });
 

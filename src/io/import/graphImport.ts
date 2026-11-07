@@ -6,7 +6,7 @@
  */
 import { createDevice, createLink } from '@/model/schema';
 import type { Device, DeviceType, Link } from '@/model/types';
-import { parseDeviceType } from './csvImport';
+import { describeAmbiguous, deviceNameResolver, parseDeviceType } from './csvImport';
 
 // Keyword inference for free-text labels ("Core Router" → router). Order matters:
 // more specific keywords first.
@@ -172,57 +172,90 @@ export function parseGraphml(text: string, layerId: string): ImportResult {
   return { devices, links, warnings, skipped };
 }
 
-/** Parse draw.io (mxGraph) XML: vertex cells → devices, edge cells → links. */
+/**
+ * Parse draw.io (mxGraph) XML: vertex cells → devices, edge cells → links. A
+ * multi-page file repeats cell ids on every page ("2", "3", …), so each <diagram>
+ * page gets its own id map and an edge only ever resolves within its own page —
+ * a document-wide map let the last page's cells win. Pages are merged, each
+ * starting on a fresh layout row.
+ */
 export function parseDrawio(text: string, layerId: string): ImportResult {
   const warnings: string[] = [];
   const doc = new DOMParser().parseFromString(text, 'application/xml');
   if (doc.querySelector('parsererror')) {
     return { devices: [], links: [], warnings: ['File is not valid XML.'], skipped: 0 };
   }
-  const cells = [...doc.querySelectorAll('mxCell')];
-  if (cells.length === 0) {
+  const compressedHint =
+    'If this is a compressed draw.io file, re-export as uncompressed XML (Extras → Edit Diagram, or uncheck "Compressed").';
+  const diagrams = [...doc.querySelectorAll('diagram')];
+  const pages =
+    diagrams.length > 0
+      ? diagrams.map((d, i) => ({
+          name: d.getAttribute('name') || `Page-${i + 1}`,
+          cells: [...d.querySelectorAll('mxCell')],
+        }))
+      : [{ name: '', cells: [...doc.querySelectorAll('mxCell')] }];
+  const readable = pages.filter((p) => p.cells.length > 0);
+  if (readable.length === 0) {
     return {
       devices: [],
       links: [],
-      warnings: [
-        'No mxCell elements found. If this is a compressed draw.io file, re-export as uncompressed XML (Extras → Edit Diagram, or uncheck "Compressed").',
-      ],
+      warnings: [`No mxCell elements found. ${compressedHint}`],
       skipped: 0,
     };
   }
-  const idToDevice = new Map<string, Device>();
+  const multi = pages.length > 1;
+  for (const p of pages)
+    if (p.cells.length === 0)
+      warnings.push(
+        `Page "${p.name}" has no readable cells and was skipped. ${compressedHint}`,
+      );
+  if (readable.length > 1)
+    warnings.push(
+      `Merged ${readable.length} draw.io pages (${readable.map((p) => p.name).join(', ')}); links are matched within each page.`,
+    );
+
   const devices: Device[] = [];
+  const links: Link[] = [];
+  let skipped = 0;
   const stripHtml = (s: string) =>
     s
       .replace(/<[^>]+>/g, ' ')
       .replace(/&[^;]+;/g, ' ')
       .trim();
-  cells.forEach((cell, i) => {
-    if (cell.getAttribute('vertex') !== '1') return;
-    const gid = cell.getAttribute('id') ?? `v${i}`;
-    const label = stripHtml(cell.getAttribute('value') ?? '');
-    const device = deviceFromLabel(label, devices.length, layerId);
-    idToDevice.set(gid, device);
-    devices.push(device);
-  });
+  let slot = 0;
+  for (const page of readable) {
+    if (slot % COLS !== 0) slot += COLS - (slot % COLS);
+    const idToDevice = new Map<string, Device>();
+    page.cells.forEach((cell, i) => {
+      if (cell.getAttribute('vertex') !== '1') return;
+      const gid = cell.getAttribute('id') ?? `v${i}`;
+      const label = stripHtml(cell.getAttribute('value') ?? '');
+      const device = deviceFromLabel(label, slot++, layerId);
+      idToDevice.set(gid, device);
+      devices.push(device);
+    });
 
-  const links: Link[] = [];
-  let skipped = 0;
-  cells.forEach((cell) => {
-    if (cell.getAttribute('edge') !== '1') return;
-    const src = idToDevice.get(cell.getAttribute('source') ?? '');
-    const tgt = idToDevice.get(cell.getAttribute('target') ?? '');
-    if (!src || !tgt) {
-      skipped++;
-      return;
-    }
-    const label = (cell.getAttribute('value') ?? '').trim();
-    links.push(
-      createLink(src.id, tgt.id, layerId, label ? { name: stripHtml(label) } : {}),
-    );
-  });
-  if (skipped > 0)
-    warnings.push(`${skipped} edge(s) had unmapped endpoints and were skipped.`);
+    let pageSkipped = 0;
+    page.cells.forEach((cell) => {
+      if (cell.getAttribute('edge') !== '1') return;
+      const src = idToDevice.get(cell.getAttribute('source') ?? '');
+      const tgt = idToDevice.get(cell.getAttribute('target') ?? '');
+      if (!src || !tgt) {
+        pageSkipped++;
+        return;
+      }
+      const label = (cell.getAttribute('value') ?? '').trim();
+      links.push(
+        createLink(src.id, tgt.id, layerId, label ? { name: stripHtml(label) } : {}),
+      );
+    });
+    if (pageSkipped > 0)
+      warnings.push(
+        `${multi ? `Page "${page.name}": ` : ''}${pageSkipped} edge(s) had unmapped endpoints and were skipped.`,
+      );
+    skipped += pageSkipped;
+  }
   return { devices, links, warnings, skipped };
 }
 
@@ -281,42 +314,75 @@ export function looksLikeNetbox(text: string): boolean {
   }
 }
 
-/** Parse a NetBox device-list JSON export (`results[]`). Links aren't included. */
+/** A JSON object (not null, not an array) — the only row shape a parser may read. */
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** A usable name/endpoint value: a non-blank string, or a number (`"name": 7`). */
+function nameText(v: unknown): string | undefined {
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+  return typeof v === 'string' && v.trim() ? v.trim() : undefined;
+}
+
+/**
+ * Parse a NetBox device-list JSON export (`results[]`). Links aren't included. Every
+ * row is checked before any field is read: a null/non-object row is skipped with a
+ * row-level warning instead of throwing and aborting the whole file.
+ */
 export function parseNetboxJson(text: string, layerId: string): ImportResult {
-  let data: { results?: unknown[] };
+  let data: unknown;
   try {
     data = JSON.parse(text);
   } catch {
     return { devices: [], links: [], warnings: ['File is not valid JSON.'], skipped: 0 };
   }
-  const results = Array.isArray(data.results) ? data.results : [];
+  if (!isRecord(data) || !Array.isArray(data.results)) {
+    return {
+      devices: [],
+      links: [],
+      warnings: ['NetBox JSON has no "results" array of devices.'],
+      skipped: 0,
+    };
+  }
   const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
   const nested = (o: unknown, ...path: string[]): string | undefined => {
     let cur: unknown = o;
-    for (const k of path) cur = (cur as Record<string, unknown> | null)?.[k];
+    for (const k of path) cur = isRecord(cur) ? cur[k] : undefined;
     return str(cur);
   };
-  const devices: Device[] = results.map((raw, i) => {
-    const d = raw as Record<string, unknown>;
+  const warnings: string[] = [];
+  let skipped = 0;
+  const devices: Device[] = [];
+  data.results.forEach((d, i) => {
+    if (!isRecord(d)) {
+      skipped++;
+      warnings.push(`Device ${i + 1}: not a device object — skipped.`);
+      return;
+    }
     const name = str(d.name) || str(d.display) || `device-${i}`;
     const roleLabel = nested(d.device_role, 'name') ?? nested(d.role, 'name') ?? '';
-    const pos = layout(i);
-    return createDevice(inferType(roleLabel || name), pos.x, pos.y, layerId, {
-      name,
-      role: roleLabel || undefined,
-      model: nested(d.device_type, 'model'),
-      vendor: nested(d.device_type, 'manufacturer', 'name'),
-      location: nested(d.site, 'name'),
-      managementIp: nested(d.primary_ip, 'address') ?? nested(d.primary_ip4, 'address'),
-    });
+    const pos = layout(devices.length);
+    devices.push(
+      createDevice(inferType(roleLabel || name), pos.x, pos.y, layerId, {
+        name,
+        role: roleLabel || undefined,
+        model: nested(d.device_type, 'model'),
+        vendor: nested(d.device_type, 'manufacturer', 'name'),
+        location: nested(d.site, 'name'),
+        managementIp: nested(d.primary_ip, 'address') ?? nested(d.primary_ip4, 'address'),
+      }),
+    );
   });
-  return { devices, links: [], warnings: [], skipped: 0 };
+  return { devices, links: [], warnings, skipped };
 }
 
 /**
  * Parse a generic topology JSON: `{ devices: [...], links: [...] }` (NexMap-ish).
  * Full `.nexmap` documents (with schemaVersion) are handled by the open flow, not
- * here — this is the merge-into-current path.
+ * here — this is the merge-into-current path. The root and every device/link row
+ * are shape-checked before any field is read; bad rows are skipped with a warning
+ * naming them, so a partly-broken file still previews instead of throwing.
  */
 export function parseTopologyJson(text: string, layerId: string): ImportResult {
   let data: unknown;
@@ -325,8 +391,7 @@ export function parseTopologyJson(text: string, layerId: string): ImportResult {
   } catch {
     return { devices: [], links: [], warnings: ['File is not valid JSON.'], skipped: 0 };
   }
-  const obj = data as { devices?: unknown[]; links?: unknown[] };
-  if (!Array.isArray(obj.devices)) {
+  if (!isRecord(data) || !Array.isArray(data.devices)) {
     return {
       devices: [],
       links: [],
@@ -335,13 +400,17 @@ export function parseTopologyJson(text: string, layerId: string): ImportResult {
     };
   }
   const warnings: string[] = [];
-  const nameToDevice = new Map<string, Device>();
   const devices: Device[] = [];
-  obj.devices.forEach((raw, i) => {
-    const d = raw as Record<string, unknown>;
-    const name = String(d.name ?? d.hostname ?? `node-${i}`);
+  let skipped = 0;
+  data.devices.forEach((d, i) => {
+    if (!isRecord(d)) {
+      skipped++;
+      warnings.push(`Device ${i + 1}: not a device object — skipped.`);
+      return;
+    }
+    const name = nameText(d.name) ?? nameText(d.hostname) ?? `node-${i}`;
     const { type } = parseDeviceType(typeof d.type === 'string' ? d.type : undefined);
-    const pos = layout(i);
+    const pos = layout(devices.length);
     const device = createDevice(type, pos.x, pos.y, layerId, {
       name,
       managementIp:
@@ -353,23 +422,41 @@ export function parseTopologyJson(text: string, layerId: string): ImportResult {
       vendor: typeof d.vendor === 'string' ? d.vendor : undefined,
       notes: typeof d.notes === 'string' ? d.notes : undefined,
     });
-    nameToDevice.set(name.toLowerCase(), device);
     devices.push(device);
   });
 
+  // Same order-independent matching as the CSV link import: a duplicated name is
+  // ambiguous and skipped, never resolved to whichever device came last.
+  const resolve = deviceNameResolver(devices);
   const links: Link[] = [];
-  let skipped = 0;
-  for (const raw of Array.isArray(obj.links) ? obj.links : []) {
-    const l = raw as Record<string, unknown>;
-    const src = nameToDevice.get(String(l.source ?? '').toLowerCase());
-    const tgt = nameToDevice.get(String(l.target ?? '').toLowerCase());
-    if (!src || !tgt) {
+  let unknown = 0;
+  if (data.links !== undefined && !Array.isArray(data.links))
+    warnings.push('"links" is not an array — no links imported.');
+  const rawLinks = Array.isArray(data.links) ? data.links : [];
+  rawLinks.forEach((l, i) => {
+    if (!isRecord(l)) {
       skipped++;
-      continue;
+      warnings.push(`Link ${i + 1}: not a link object — skipped.`);
+      return;
     }
-    links.push(createLink(src.id, tgt.id, layerId));
-  }
-  if (skipped > 0)
-    warnings.push(`${skipped} link(s) referenced unknown devices and were skipped.`);
+    const srcName = nameText(l.source);
+    const tgtName = nameText(l.target);
+    const src = srcName ? resolve(srcName) : null;
+    const tgt = tgtName ? resolve(tgtName) : null;
+    if (src?.kind === 'found' && tgt?.kind === 'found') {
+      links.push(createLink(src.device.id, tgt.device.id, layerId));
+      return;
+    }
+    skipped++;
+    const ambiguous = [
+      src?.kind === 'ambiguous' ? describeAmbiguous(srcName!, src.matches) : null,
+      tgt?.kind === 'ambiguous' ? describeAmbiguous(tgtName!, tgt.matches) : null,
+    ].filter(Boolean);
+    if (ambiguous.length > 0)
+      warnings.push(`Link ${i + 1}: ${ambiguous.join('; ')} — skipped.`);
+    else unknown++;
+  });
+  if (unknown > 0)
+    warnings.push(`${unknown} link(s) referenced unknown devices and were skipped.`);
   return { devices, links, warnings, skipped };
 }
