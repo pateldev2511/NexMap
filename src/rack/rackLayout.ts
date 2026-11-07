@@ -126,12 +126,14 @@ export interface PortRect extends Rect {
  */
 export const PATCH_PORT_OPTS = {
   rows: 1,
-  nameZone: 28,
-  rightInset: 12,
+  // Room for the silkscreen between the ear and the first keystone bank.
+  nameZone: 64,
+  rightInset: 16,
   gap: 2,
   groupEvery: 6,
   groupGap: 7,
-  maxJack: 16,
+  // 15px keystones leave a 1U panel room for its model line under the row.
+  maxJack: 15,
 } as const;
 
 export function portLayout(

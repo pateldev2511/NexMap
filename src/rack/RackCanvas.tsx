@@ -193,7 +193,9 @@ const RackFocusScene = memo(function RackFocusScene({
             {/* realistic device art (shared, hex SVG strings) */}
             <g
               dangerouslySetInnerHTML={{
-                __html: deviceFaceParts(d, panel, side, rack.hideFaceplateText).join(''),
+                // Gear mounted on the face you're viewing shows you its FRONT; the
+                // back of a chassis only appears via deviceOppositeFaceParts.
+                __html: deviceFaceParts(d, panel, 'front', rack.hideFaceplateText).join(''),
               }}
             />
             {/* transparent hit area so the whole panel drags/selects */}

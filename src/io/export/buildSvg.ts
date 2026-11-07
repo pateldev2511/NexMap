@@ -19,6 +19,7 @@ import {
 } from '@/canvas/connector';
 import { deviceIsoGroup } from '@/canvas/deviceIso';
 import { deviceIconFlatGroup } from '@/canvas/deviceVisuals';
+import { deviceFlatDefs } from '@/canvas/deviceFlatArt';
 import { BLUEPRINT, deviceIconBlueprintGroup } from '@/canvas/blueprintArt';
 import { clampIconScale } from '@/canvas/nodeCard';
 import { isoProjectPx, DEFAULT_TILE } from '@/canvas/iso';
@@ -294,6 +295,8 @@ export function buildSvg(
   );
   parts.push(bp ? BLUEPRINT_DEFS : ARROW_MARKER_DEF);
   if (modern) parts.push(MODERN_DEFS);
+  // The product-render icons' gradients, once, for just the types on this sheet.
+  if (!bp) parts.push(deviceFlatDefs(new Set(devices.map((d) => d.type))));
   if (bp) {
     // The paper is the drawing: ink is pale, so a blueprint is never transparent.
     parts.push(blueprintSheet(b.minX, b.minY, w, h));

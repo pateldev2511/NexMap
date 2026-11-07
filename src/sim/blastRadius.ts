@@ -37,6 +37,8 @@ export interface BlastResult {
 /** Devices nearer the edge/egress make the most honest reference for "reachable". */
 const EGRESS_RANK: Partial<Record<DeviceType, number>> = {
   isp: 6,
+  // The customer-premises modem/ONT is the hand-off to the ISP: the edge when no ISP is drawn.
+  modem: 5,
   'internet-gateway': 5,
   'nat-gateway': 4,
   'vpn-gateway': 3,

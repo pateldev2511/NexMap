@@ -13,8 +13,9 @@ interface FlatIconProps {
 }
 
 /**
- * Flat 2D device icon: a multi-colored rounded tile with a white pictogram
- * (see {@link deviceIconFlatGroup}). Used in flat projection; the isometric view
+ * Flat 2D device icon: a product render of the device (see
+ * {@link deviceIconFlatGroup}); its host SVG document must carry FLAT_ART_DEFS
+ * (the canvas and the Library do). Used in flat projection; the isometric view
  * uses the 3D {@link IsoIcon} instead. The markup is a trusted compile-time
  * constant, so dangerouslySetInnerHTML is injection-safe.
  */

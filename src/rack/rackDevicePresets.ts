@@ -53,6 +53,7 @@ export const RACK_DEVICE_PRESETS: readonly RackDevicePreset[] = [
   { key: 'sw-8', label: '8-port switch', type: 'switch', span: 1, ports: 8, portName: gi, watts: 15, weightKg: 2, group: 'Switches' },
   { key: 'sw-4', label: '4-port switch', type: 'switch', span: 1, ports: 4, portName: gi, watts: 10, weightKg: 1.5, group: 'Switches' },
   { key: 'sw-core', label: 'Core switch (10G)', type: 'switch', span: 2, ports: 24, portName: te, watts: 350, weightKg: 9, group: 'Switches' },
+  { key: 'sw-spine', label: 'Spine switch (32× 100G)', name: 'Spine', type: 'switch', span: 1, ports: 32, portName: (i) => `Hu1/0/${i + 1}`, watts: 350, weightKg: 9, group: 'Switches' },
   // Network appliances
   { key: 'router', label: 'Router', type: 'router', span: 1, ports: 8, portName: gi, watts: 80, weightKg: 4, group: 'Network' },
   { key: 'firewall', label: 'Firewall', type: 'firewall', span: 1, ports: 6, portName: eth, watts: 60, weightKg: 4, group: 'Network' },
@@ -63,7 +64,10 @@ export const RACK_DEVICE_PRESETS: readonly RackDevicePreset[] = [
   { key: 'server-2u', label: 'Server (2U)', type: 'server', span: 2, ports: 2, portName: nic, watts: 400, weightKg: 18, group: 'Compute' },
   { key: 'server-1u', label: 'Server (1U)', type: 'server', span: 1, ports: 2, portName: nic, watts: 250, weightKg: 12, group: 'Compute' },
   { key: 'blade', label: 'Blade chassis (6U)', type: 'server', span: 6, ports: 0, portName: nic, watts: 2500, weightKg: 90, group: 'Compute' },
+  { key: 'gpu-4u', label: 'GPU server (4U)', name: 'GPU server', type: 'server', span: 4, ports: 4, portName: nic, watts: 2000, weightKg: 45, group: 'Compute' },
   { key: 'storage', label: 'Storage / NAS (4U)', type: 'storage', span: 4, ports: 2, portName: nic, watts: 300, weightKg: 30, group: 'Compute' },
+  { key: 'nas-1u', label: 'NAS (1U, 4-bay)', name: 'NAS', type: 'nas', span: 1, ports: 2, portName: nic, watts: 80, weightKg: 8, group: 'Compute' },
+  { key: 'tape', label: 'Tape library (2U)', name: 'Tape library', type: 'storage', span: 2, ports: 1, portName: eth, watts: 80, weightKg: 20, group: 'Compute' },
   { key: 'pc', label: 'PC / Host', type: 'end-user', span: 1, ports: 1, portName: eth, watts: 200, weightKg: 8, group: 'Compute' },
   // Power & cable (UPS/PSU/PDU are power SOURCES → 0 W draw)
   { key: 'ups', label: 'UPS (2U)', type: 'ups', span: 2, ports: 0, portName: eth, watts: 0, weightKg: 25, group: 'Power & cable' },
@@ -76,7 +80,10 @@ export const RACK_DEVICE_PRESETS: readonly RackDevicePreset[] = [
   { key: 'patch-24', label: 'Patch panel (24)', type: 'patch-panel', span: 1, ports: 24, portName: keystone, watts: 0, weightKg: 1.5, group: 'Other' },
   { key: 'patch-48', label: 'Patch panel (48)', type: 'patch-panel', span: 1, ports: 48, portName: keystone, watts: 0, weightKg: 2.5, group: 'Other' },
   { key: 'fiber', label: 'Fiber patch (24)', type: 'patch-panel', span: 1, ports: 24, portName: (i) => `LC${i + 1}`, watts: 0, weightKg: 1.5, group: 'Other' },
+  { key: 'fiber-48', label: 'Fiber enclosure (48 LC)', name: 'Fiber enclosure', type: 'patch-panel', span: 1, ports: 48, portName: (i) => `LC${i + 1}`, watts: 0, weightKg: 2, group: 'Other' },
+  { key: 'kvm', label: 'KVM console drawer', name: 'KVM console', type: 'end-user', span: 1, ports: 1, portName: eth, watts: 30, weightKg: 15, group: 'Other' },
   { key: 'blank', label: 'Blanking panel', name: 'Blank', type: 'generic', span: 1, ports: 0, portName: eth, watts: 0, weightKg: 0.3, group: 'Other' },
+  { key: 'brush', label: 'Brush panel', name: 'Brush panel', type: 'generic', span: 1, ports: 0, portName: eth, watts: 0, weightKg: 0.4, group: 'Other' },
   { key: 'shelf', label: 'Shelf (2U)', name: 'Shelf', type: 'generic', span: 2, ports: 0, portName: eth, watts: 0, weightKg: 3, group: 'Other' },
 ] as const;
 

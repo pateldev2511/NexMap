@@ -1,7 +1,7 @@
 /**
  * The NexMap icon system — the one spec every device skin draws to.
  *
- * Four skins render the same 30 device types: line (deviceVisuals, the house
+ * Four skins render the same 35 device types: line (deviceVisuals, the house
  * style), flat (deviceFlatArt), iso (deviceIso) and blueprint (blueprintArt,
  * which traces the line set in drafting ink). Without a shared spec they drift:
  * a UPS that is a tower in one skin and a wide box in another reads as two
@@ -28,11 +28,12 @@ export const ICON_LIVE_SLACK = 0.1;
 /**
  * Outline stroke weight per stroked skin, in grid units. One weight per skin:
  * line art never overrides it per element (detail weight comes from geometry,
- * not thinner pens). Flat art is fill-based; its few detail lines stay in
- * {@link FLAT_DETAIL_STROKE}.
+ * not thinner pens). Flat art is a filled product render; its detail lines —
+ * engraved seams, corrugation, brick courses at the thin end, antenna-free
+ * wifi arcs at the thick end — stay in {@link FLAT_DETAIL_STROKE}.
  */
 export const ICON_STROKE = { line: 2, blueprint: 1.25 } as const;
-export const FLAT_DETAIL_STROKE = { min: 0.6, max: 1.4 } as const;
+export const FLAT_DETAIL_STROKE = { min: 0.3, max: 1.4 } as const;
 
 /**
  * Corner radii for line art, by role: a port or small detail, a device body, a
@@ -91,6 +92,11 @@ export const ICON_SILHOUETTES: Record<DeviceType, IconSilhouette> = {
   'patch-panel': { form: 'chassis', box: [2.5, 7.5, 21.5, 16.5] },
   ups: { form: 'tower', box: [5, 3, 19, 21] },
   camera: { form: 'dome', box: [4.5, 10.5, 19.5, 21] },
+  laptop: { form: 'screen', box: [2, 4.5, 22, 19.5] },
+  'ip-phone': { form: 'block', box: [3.5, 3, 20.5, 21] },
+  mobile: { form: 'screen', box: [7, 2.5, 17, 21.5] },
+  modem: { form: 'chassis', box: [3, 7, 21, 18.5] },
+  nas: { form: 'tower', box: [5, 3, 19, 21] },
   vpc: { form: 'region', box: [2.5, 4, 22, 20] },
   'cloud-subnet': { form: 'region', box: [2.5, 5, 21.5, 19] },
   'internet-gateway': { form: 'globe', box: [2, 5, 21, 19] },

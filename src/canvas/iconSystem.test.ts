@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { DEVICE_TYPES } from '@/model/schema';
+import { DEVICE_TYPES, createDevice } from '@/model/schema';
+import { buildSvg } from '@/io/export/buildSvg';
 import { artBounds, artElements, pathBounds, type ArtBox } from './iconBounds';
 import { deviceIcon } from './deviceVisuals';
-import { deviceFlatArt } from './deviceFlatArt';
+import { deviceFlatArt, FLAT_ART_DEFS } from './deviceFlatArt';
 import { BLUEPRINT, deviceBlueprintArt } from './blueprintArt';
 import {
   FLAT_DETAIL_STROKE,
@@ -156,5 +157,31 @@ describe('blueprint skin', () => {
   it('marks the silhouette box with corner registration ticks', () => {
     // UPS box starts at (5, 3); the 0.5 pen sits half inside it.
     expect(deviceBlueprintArt('ups')).toContain('M5.25 4.85V3.25H6.85');
+  });
+});
+
+describe('flat art — shared gradient defs', () => {
+  const ids = (markup: string) => new Set([...markup.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]!));
+  const refs = (markup: string) => new Set([...markup.matchAll(/url\(#([^)]+)\)/g)].map((m) => m[1]!));
+
+  it('every gradient an icon paints with is defined in FLAT_ART_DEFS, exactly once', () => {
+    const defined = [...FLAT_ART_DEFS.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]!);
+    expect(new Set(defined).size).toBe(defined.length); // no duplicate ids
+    const missing = DEVICE_TYPES.flatMap((t) => [...refs(deviceFlatArt(t))].filter((r) => !defined.includes(r)));
+    expect(missing).toEqual([]);
+  });
+
+  it('icon markup carries no defs of its own (they are shared per document)', () => {
+    for (const t of DEVICE_TYPES) expect(deviceFlatArt(t)).not.toContain('<defs');
+  });
+
+  it('an export defines just the gradients of the types it draws', () => {
+    const a = createDevice('router', 0, 0, 'L');
+    const b = createDevice('ups', 200, 0, 'L');
+    const svg = buildSvg([a, b], [], { background: '#fff', includeLabels: false });
+    const got = ids(svg);
+    for (const r of refs(deviceFlatArt('router'))) expect(got.has(r)).toBe(true);
+    for (const r of refs(deviceFlatArt('ups'))) expect(got.has(r)).toBe(true);
+    expect([...got].some((id) => id.startsWith('nxa-switch-'))).toBe(false);
   });
 });

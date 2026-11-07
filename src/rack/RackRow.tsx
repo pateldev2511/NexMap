@@ -231,7 +231,7 @@ const RowScene = memo(function RowScene({
               style={{ cursor: 'grab' }}
               opacity={dimmedId === d.id ? 0.35 : 1}
             >
-              <g dangerouslySetInnerHTML={{ __html: deviceFaceParts(d, panel, face).join('') }} />
+              <g dangerouslySetInnerHTML={{ __html: deviceFaceParts(d, panel, 'front').join('') }} />
               {colorBy !== 'gear' && (() => {
                 const tint = deviceColorBy(d, colorBy, failure);
                 return tint ? <rect x={panel.x} y={panel.y} width={panel.w} height={panel.h} rx={3} fill={tint} fillOpacity={0.6} pointerEvents="none" /> : null;

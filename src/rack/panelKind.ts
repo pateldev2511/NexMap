@@ -26,11 +26,13 @@ export function panelKindFor(type: DeviceType): PanelKind {
     case 'load-balancer':
     case 'access-point':
     case 'wireless-controller':
+    case 'modem':
       return 'appliance';
     case 'patch-panel':
       return 'patch';
     case 'server':
     case 'storage':
+    case 'nas':
     case 'vm':
     case 'container':
       return 'server';

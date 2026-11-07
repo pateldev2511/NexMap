@@ -4,8 +4,10 @@ import {
   deviceGhostParts,
   deviceOppositeFaceParts,
   devicePortLayout,
+  faceStyleFor,
   RACK_ART_DEFS,
 } from './rackDeviceArt';
+import { RACK_DEVICE_PRESETS } from './rackDevicePresets';
 import type { Device, DeviceType } from '@/model/types';
 
 const panel = { x: 100, y: 50, w: 560, h: 30 };
@@ -209,7 +211,54 @@ describe('rackDeviceArt — export-safe shared art', () => {
   it('switch draws RJ45 jacks with notch tabs + SFP cages', () => {
     const svg = join(deviceFaceParts(dev('switch'), panel));
     expect(svg).toContain('url(#rkLedG)'); // link LEDs
-    expect((svg.match(/rx="1.5"/g) ?? []).length).toBeGreaterThanOrEqual(8); // jacks
+    expect((svg.match(/url\(#rkJack\)/g) ?? []).length).toBe(8); // one metal shield per port
+    expect((svg.match(/url\(#rkCage\)/g) ?? []).length).toBeGreaterThanOrEqual(4); // uplink cages
+  });
+
+  it('10G+ ports draw as SFP cages, copper as RJ45', () => {
+    const optical = dev('switch', {
+      interfaces: Array.from({ length: 8 }, (_, i) => ({ id: `t${i}`, name: `Te1/${i + 1}` })),
+    });
+    const svg = join(deviceFaceParts(optical, panel));
+    expect(svg).not.toContain('url(#rkJack)');
+    expect((svg.match(/url\(#rkCage\)/g) ?? []).length).toBe(8 + 4); // 8 ports + 4 uplinks
+  });
+
+  it('every drawn jack sits on its cable hit rect, for every faceplate style', () => {
+    const types: DeviceType[] = ['switch', 'firewall', 'router', 'server', 'storage', 'patch-panel'];
+    for (const t of types) {
+      const d = dev(t);
+      const rects = devicePortLayout(d, { ...panel, h: 60 });
+      const svg = join(deviceFaceParts(d, { ...panel, h: 60 }));
+      for (const r of rects) expect(svg, `${t} ${r.name}`).toContain(`x="${r.x.toFixed(1)}" y="${r.y.toFixed(1)}"`);
+    }
+  });
+
+  it('dense port fields stay clear of the uplink block and the mounting ears', () => {
+    const full = { x: 10, y: 0, w: 580, h: 30 };
+    for (const [type, count] of [['switch', 52], ['switch', 48], ['firewall', 16], ['router', 8]] as const) {
+      const d = dev(type, { interfaces: Array.from({ length: count }, (_, i) => ({ id: `p${i}`, name: `Gi1/0/${i + 1}` })) });
+      const svg = join(deviceFaceParts(d, full));
+      const right = Math.max(...devicePortLayout(d, full).map((r) => r.x + r.w));
+      // Every right-hand block element (cages, console, LCD) starts after the last jack.
+      const blockXs = [...svg.matchAll(/<rect x="([\d.]+)"[^>]*(url\(#rkCage\)|#38bdf8|url\(#rkLCD\))/g)]
+        .map((m) => parseFloat(m[1]!))
+        .filter((x) => x > full.x + full.w / 2); // the right-hand block, not the left-zone console
+      expect(blockXs.length, type).toBeGreaterThan(0);
+      expect(Math.min(...blockXs), `${type} ${count}`).toBeGreaterThanOrEqual(right);
+      expect(right, `${type} ${count}`).toBeLessThan(full.x + full.w - 11);
+    }
+  });
+
+  it('the silkscreen never runs into the first port', () => {
+    const long = 'a-very-long-hostname-for-the-core-distribution-switch-01';
+    for (const t of ['switch', 'firewall', 'router', 'server'] as DeviceType[]) {
+      const d = dev(t, { name: long });
+      const first = Math.min(...devicePortLayout(d, panel).map((r) => r.x));
+      const label = /<text data-facelabel="1" x="([\d.]+)"[^>]*font-size="([\d.]+)"[^>]*>([^<]*)</.exec(join(deviceFaceParts(d, panel)))!;
+      const end = parseFloat(label[1]!) + label[3]!.length * parseFloat(label[2]!) * 0.6;
+      expect(end, t).toBeLessThanOrEqual(first + 0.5);
+    }
   });
 
   it('patch panel numbers its ports', () => {
@@ -335,5 +384,57 @@ describe('deviceFaceParts — hide faceplate name labels', () => {
     const cisco = dev('switch', { vendor: 'Cisco', name: 'core-sw' });
     // hiding the name does not blank the whole faceplate (LED glow still there)
     expect(join(deviceFaceParts(cisco, panel, 'front', true))).toContain('url(#rkLedG)');
+  });
+});
+
+describe('deviceFaceParts — review regressions', () => {
+  const ports = (n: number, name = (i: number) => `Gi1/0/${i + 1}`) =>
+    Array.from({ length: n }, (_, i) => ({ id: `p${i}`, name: name(i) }));
+  const withPresets = (h: (d: Device, p: { x: number; y: number; w: number; h: number }) => void) => {
+    for (const p of RACK_DEVICE_PRESETS) {
+      const d = dev(p.type, { name: p.name ?? p.label, rackAccessory: p.accessory, mount: p.mount, ruSpan: p.span, interfaces: ports(Math.min(p.ports, 48), p.portName) });
+      h(d, p.mount === 'rail' ? { x: 50, y: 5, w: 16, h: 30 } : { x: 5, y: 5, w: 112, h: Math.max(22, Math.min(34, p.span * 13)) });
+    }
+  };
+
+  it('library thumbnails and short rail strips never emit a negative size', () => {
+    withPresets((d, p) => {
+      for (const face of ['front', 'rear'] as const) {
+        const svg = join(deviceFaceParts(d, p, face));
+        expect(svg, `${d.name} ${face}`).not.toMatch(/(width|height|rx|r)="-/);
+        expect(svg, `${d.name} ${face}`).not.toContain('NaN');
+      }
+    });
+  });
+
+  it('a branded rail PDU still draws as an outlet strip', () => {
+    const pdu = dev('ups', { name: 'PDU', vendor: 'APC', model: 'AP8853', mount: 'rail', interfaces: ports(8, (i) => `C13-${i}`) });
+    const svg = join(deviceFaceParts(pdu, { x: 500, y: 40, w: 16, h: 240 }));
+    expect(svg).toContain('url(#rkPduBody)');
+    expect(svg).not.toContain('url(#rkLCD)');
+  });
+
+  it('a 24-port patch panel fits a half-width bay', () => {
+    const half = { x: 10, y: 0, w: 288, h: 30 };
+    const rects = devicePortLayout(dev('patch-panel', { interfaces: ports(24, (i) => `${i + 1}`) }), half);
+    expect(Math.max(...rects.map((r) => r.x + r.w))).toBeLessThanOrEqual(half.x + half.w);
+  });
+
+  it('storage I/O ports stay left of the drive cage; blade I/O stays above the PSU bay', () => {
+    const full = { x: 10, y: 0, w: 580, h: 120 };
+    const sto = dev('storage', { interfaces: ports(8) });
+    const cageX = Math.min(...[...join(deviceFaceParts(sto, full)).matchAll(/<rect x="([\d.]+)"[^>]*fill="url\(#rkCaddy\)"/g)].map((m) => parseFloat(m[1]!)));
+    expect(Math.max(...devicePortLayout(sto, full).map((r) => r.x + r.w))).toBeLessThan(cageX);
+
+    const blade = dev('server', { name: 'Blade chassis', ruSpan: 6, interfaces: ports(4) });
+    const six = { x: 10, y: 0, w: 580, h: 180 };
+    const io = devicePortLayout(blade, six);
+    expect(io.length).toBe(4);
+    expect(Math.max(...io.map((r) => r.y + r.h))).toBeLessThan(six.y + 14); // inside the top bezel
+  });
+
+  it('a 1U unit named "chassis" is a server, not a squeezed blade bay', () => {
+    expect(faceStyleFor(dev('server', { name: 'chassis-01', ruSpan: 1 }))).toBe('server');
+    expect(faceStyleFor(dev('server', { name: 'Blade chassis', ruSpan: 6 }))).toBe('blade');
   });
 });

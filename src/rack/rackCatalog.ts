@@ -85,9 +85,11 @@ export const RACK_CATALOG: readonly CatalogModel[] = [
   { id: 'panduit-48', vendor: 'Panduit', model: '48-port Cat6 patch', type: 'patch-panel', span: 1, ports: 48, watts: 0, weightKg: 2.5 },
 ] as const;
 
-/** Models matching a device type (so a switch only offers switch models). */
+/** Models matching a device type (so a switch only offers switch models). A NAS is
+ * rack storage, so it is offered the storage models (Synology, NetApp, …). */
 export function catalogForType(type: DeviceType): CatalogModel[] {
-  return RACK_CATALOG.filter((m) => m.type === type);
+  const want = type === 'nas' ? 'storage' : type;
+  return RACK_CATALOG.filter((m) => m.type === want);
 }
 
 export function catalogById(id: string): CatalogModel | undefined {
