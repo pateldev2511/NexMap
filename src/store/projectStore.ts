@@ -33,7 +33,7 @@ import { bayOrigin, BAY_W } from '@/rack/rackLayout';
 import { DEFAULT_LEADER } from '@/model/leader';
 import { calloutRowsOrPlaceholder } from '@/model/callout';
 import { titleBlockBlocks, legendBlocks, legendEntries } from '@/model/docBlocks';
-import { canFit, isFullDepth, isFullHeightRail, nearestFreeRail, type FitResult, type Slot } from '@/rack/rackModel';
+import { canFit, isFullDepth, isFullHeightRail, nearestFreeRail, slotOf, type FitResult, type Slot } from '@/rack/rackModel';
 import { checkConnect, pruneCablesForInterfaces } from '@/rack/rackCables';
 import { presetByKey, presetSpan } from '@/rack/rackDevicePresets';
 import { catalogById, planCatalogDepths } from '@/rack/rackCatalog';
@@ -186,6 +186,19 @@ let resizeOrig: { id: string; box: Box } | null = null;
 /** Clipboard of copied model snapshots. Module-scoped, session-only. */
 let clipboard: Array<Device | CanvasObject> = [];
 let pasteOffset = 0;
+/**
+ * A pending MOVE (#51): exactly what the last cut removed, so paste can put those
+ * very entities back — same ids, interfaces and the links' port references,
+ * addresses, callout anchors, groups — with every link and rack cable the cut took
+ * along. Cleared by a copy. Paste moves while the cut entities are absent from the
+ * project, and copies once they're back (see pasteCut).
+ */
+let cutPayload: {
+  projectId: string;
+  movables: Array<Device | CanvasObject>;
+  links: Link[];
+  cables: RackCable[];
+} | null = null;
 /** Latest canvas camera, reported by the renderer (module-scoped to avoid re-render loops). */
 let currentCamera = { tx: 0, ty: 0, scale: 1 };
 /** Camera the canvas should jump to (set by applyView, read on cameraTick). */
@@ -1060,6 +1073,92 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       canRedo: history.canRedo,
       dirty: true,
     });
+  }
+
+  /**
+   * Paste a cut back as a move (#51). Returns false — leaving the paste to the copy
+   * path — once any cut entity is back in the project (the move already landed, or
+   * the cut was undone): re-adding those ids would clash, and a second set of the
+   * same addresses is a copy's job, which drops them.
+   *
+   * The entities land as they were cut, where they were cut from. Links and cables
+   * come back when both their ends exist; into ANOTHER project only those inside
+   * the cut do, since an outside id there names a different device. A crossing
+   * link whose outside port was removed meanwhile keeps the link, not the stale
+   * port ref; a cable needs both ports. A layer or rack that's gone falls back to
+   * the first layer / the unplaced tray, as does a rack slot taken meanwhile.
+   */
+  function pasteCut(cut: NonNullable<typeof cutPayload>): boolean {
+    const back = (id: string) => model.devices.has(id) || model.objects.has(id) || model.links.has(id);
+    if (cut.movables.some((m) => back(m.id)) || cut.links.some((l) => back(l.id))) return false;
+    if (cut.movables.length === 0 && cut.links.length === 0) return false;
+    const sameProject = cut.projectId === model.project.id;
+    const layerOf = (id: string) => (model.layers.has(id) ? id : firstLayerId());
+    const cutIds = new Set(cut.movables.map((m) => m.id));
+
+    const devices: Device[] = [];
+    const objects: CanvasObject[] = [];
+    for (const m of cut.movables) {
+      if (m.kind !== 'device') {
+        objects.push({ ...m, layerId: layerOf(m.layerId) });
+        continue;
+      }
+      let d: Device = { ...m, layerId: layerOf(m.layerId) };
+      const rack = d.rackId != null ? model.racks.get(d.rackId) : undefined;
+      if (
+        d.rackId != null &&
+        (!rack || !canFit(rack, [...model.devices.values(), ...devices], slotOf(d), d.id).ok)
+      ) {
+        d = { ...d, rackId: undefined, ru: undefined, mount: undefined, side: undefined, bay: undefined };
+      }
+      devices.push(d);
+    }
+
+    const pasted = new Map(devices.map((d) => [d.id, d]));
+    const deviceOf = (id: string) => pasted.get(id) ?? model.devices.get(id);
+    const hasPort = (deviceId: string, ifaceId: string | undefined) =>
+      ifaceId != null && (deviceOf(deviceId)?.interfaces ?? []).some((i) => i.id === ifaceId);
+    const reachable = (a: string, b: string) =>
+      !!deviceOf(a) && !!deviceOf(b) && (sameProject || (cutIds.has(a) && cutIds.has(b)));
+
+    const links: Link[] = [];
+    for (const l of cut.links) {
+      if (!reachable(l.sourceId, l.targetId)) continue;
+      let next: Link = { ...l, layerId: layerOf(l.layerId) };
+      if (next.sourceIfaceId != null && !hasPort(next.sourceId, next.sourceIfaceId))
+        next = { ...next, sourceIfaceId: undefined };
+      if (next.targetIfaceId != null && !hasPort(next.targetId, next.targetIfaceId))
+        next = { ...next, targetIfaceId: undefined };
+      links.push(next);
+    }
+    const cables = cut.cables.filter(
+      (c) =>
+        !model.rackCables.has(c.id) &&
+        reachable(c.aEnd.deviceId, c.bEnd.deviceId) &&
+        hasPort(c.aEnd.deviceId, c.aEnd.ifaceId) &&
+        hasPort(c.bEnd.deviceId, c.bEnd.ifaceId),
+    );
+
+    history.dispatch(
+      transaction('Paste', [
+        ...devices.map((d) => new AddDeviceCommand(d)),
+        ...objects.map((o) => new AddObjectCommand(o)),
+        ...links.map((l) => new AddLinkCommand(l)),
+        ...cables.map((c) => new AddRackCableCommand(c)),
+      ]),
+      model,
+    );
+    for (const d of devices) index.insert(d.id, deviceBox(d));
+    for (const o of objects) index.insert(o.id, objBox(o));
+    history.commitCoalesceBoundary();
+    set({
+      rev: get().rev + 1,
+      selection: new Set([...devices, ...objects].map((m) => m.id)),
+      canUndo: history.canUndo,
+      canRedo: history.canRedo,
+      dirty: true,
+    });
+    return true;
   }
 
   /**
@@ -2824,18 +2923,42 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       const ids = [...get().selection].filter((id) => movable(id));
       clipboard = ids.map((id) => ({ ...movable(id)! }));
       pasteOffset = 0;
+      cutPayload = null;
     },
 
     cutSelection() {
-      get().copySelection();
+      // A cut is a move (#51): hold exactly what the delete is about to remove —
+      // the unlocked selection plus the links and rack cables that cascade with
+      // it — so paste can put the same entities back. Nothing removable (all
+      // locked) stays a plain copy, as before.
+      const { deviceIds, linkIds, objectIds } = get().deletable([...get().selection]);
+      if (deviceIds.length === 0 && linkIds.length === 0 && objectIds.length === 0) {
+        get().copySelection();
+        return;
+      }
+      const cutDevices = new Set(deviceIds);
+      const linkSet = new Set(linkIds);
+      for (const id of deviceIds) for (const lid of model.adjacency.get(id) ?? []) linkSet.add(lid);
+      const movables = [...deviceIds, ...objectIds].map((id) => movable(id)!);
+      clipboard = movables.map((m) => ({ ...m }));
+      pasteOffset = 0;
+      cutPayload = {
+        projectId: model.project.id,
+        movables,
+        links: [...linkSet].map((id) => model.links.get(id)!),
+        cables: [...model.rackCables.values()].filter(
+          (c) => cutDevices.has(c.aEnd.deviceId) || cutDevices.has(c.bEnd.deviceId),
+        ),
+      };
       get().deleteSelection();
     },
 
     hasClipboard() {
-      return clipboard.length > 0;
+      return clipboard.length > 0 || (cutPayload?.links.length ?? 0) > 0;
     },
 
     paste() {
+      if (cutPayload && pasteCut(cutPayload)) return;
       if (clipboard.length === 0) return;
       pasteOffset += 24;
       const clones = remapCloneGroups(
