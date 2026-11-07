@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="d-p1" x1="56" y1="96" x2="200" y2="440" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7a5cff"/><stop offset="1" stop-color="#5a3fe0"/>
+    </linearGradient>
+    <linearGradient id="d-p2" x1="184" y1="72" x2="328" y2="416" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4c8dff"/><stop offset="1" stop-color="#2459e8"/>
+    </linearGradient>
+    <linearGradient id="d-p3" x1="312" y1="96" x2="456" y2="440" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#0891b2"/>
+    </linearGradient>
+  </defs>
+  <!-- three panels of a folded map (zig-zag) -->
+  <path d="M56 120 L184 72 L184 392 L56 440 Z" fill="url(#d-p1)"/>
+  <path d="M184 72 L328 120 L328 440 L184 392 Z" fill="url(#d-p2)"/>
+  <path d="M328 120 L456 72 L456 392 L328 440 Z" fill="url(#d-p3)"/>
+  <!-- fold shading -->
+  <path d="M184 72 L184 392" stroke="#000000" stroke-opacity="0.2" stroke-width="6"/>
+  <path d="M328 120 L328 440" stroke="#000000" stroke-opacity="0.2" stroke-width="6"/>
+  <!-- a cable routed across the folds, device to device -->
+  <path d="M120 300 V214 L184 190 L256 214 V300 L328 324 L392 300 V214" fill="none" stroke="#ffffff" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="#ffffff">
+    <rect x="96" y="276" width="48" height="48" rx="12"/>
+    <rect x="232" y="276" width="48" height="48" rx="12"/>
+  </g>
+  <rect x="368" y="190" width="48" height="48" rx="12" fill="#0b1020" stroke="#ffffff" stroke-width="12"/>
+</svg>

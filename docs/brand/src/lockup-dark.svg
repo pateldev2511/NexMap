@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 320">
+  <g transform="translate(16 16) scale(0.5625)">
+  
+  <defs>
+    <linearGradient id="dk-nx-tile" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#141d3a"/>
+      <stop offset="1" stop-color="#060a16"/>
+    </linearGradient>
+    <linearGradient id="dk-nx-sheen" x1="256" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="dk-nx-cable" x1="150" y1="392" x2="362" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7a5cff"/>
+      <stop offset="0.5" stop-color="#2f6bff"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+    <radialGradient id="dk-nx-glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.4" stop-color="#8af5ff"/>
+      <stop offset="1" stop-color="#22d3ee" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="url(#dk-nx-tile)"/>
+  <rect width="512" height="512" rx="116" fill="url(#dk-nx-sheen)"/>
+  <rect x="8" y="8" width="496" height="496" rx="108" fill="none" stroke="#ffffff" stroke-opacity="0.09" stroke-width="4"/>
+  <path d="M152 388 V152 L360 360 V124" fill="none" stroke="url(#dk-nx-cable)" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="152" cy="152" r="34" fill="#060a16" stroke="#ffffff" stroke-width="15"/>
+  <circle cx="360" cy="360" r="34" fill="#060a16" stroke="#ffffff" stroke-width="15"/>
+  <circle cx="256" cy="256" r="44" fill="url(#dk-nx-glow)"/>
+  <circle cx="256" cy="256" r="12" fill="#ffffff"/>
+</g>
+  <text x="352" y="214" font-family="Inter" font-weight="600" font-size="176" letter-spacing="-7"><tspan fill="#ffffff">Nex</tspan><tspan fill="#4c8dff">Map</tspan></text>
+</svg>
