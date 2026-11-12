@@ -13,6 +13,8 @@ export interface LayoutNode {
   id: string;
   width: number;
   height: number;
+  /** Site/location to keep together (autoLayoutGrouped). Case and outer spaces ignored. */
+  group?: string;
 }
 
 export interface LayoutLink {
@@ -33,6 +35,8 @@ export interface LayoutOptions {
   grid?: number;
   /** Margin from the origin. */
   margin?: number;
+  /** Gap between site blocks (autoLayoutGrouped). */
+  groupGap?: number;
 }
 
 export function autoLayoutPositions(
@@ -167,6 +171,112 @@ export function autoLayoutPositions(
   }
 
   // Normalize to a margin and snap to grid.
+  let minX = Infinity;
+  let minY = Infinity;
+  for (const p of pos.values()) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+  }
+  for (const [id, p] of pos) {
+    pos.set(id, {
+      x: Math.round((p.x - minX + margin) / grid) * grid,
+      y: Math.round((p.y - minY + margin) / grid) * grid,
+    });
+  }
+  return pos;
+}
+
+/**
+ * Auto-layout that keeps each group (a site) together: every group is laid out on its
+ * own as a block, then the blocks are shelf-packed — most inter-site links first, so the
+ * hub leads. Nodes with no group share one block. A link between sites doesn't pull
+ * its ends out of their blocks, and a block's inside depends only on that block, so
+ * editing one site leaves the others' arrangement alone.
+ *
+ * With fewer than two named groups there is nothing to keep apart: this is
+ * autoLayoutPositions. Otherwise the result doesn't depend on input order.
+ */
+export function autoLayoutGrouped(
+  nodes: LayoutNode[],
+  links: LayoutLink[],
+  opts: LayoutOptions = {},
+): Map<string, { x: number; y: number }> {
+  const keyOf = (n: LayoutNode) => n.group?.trim().toLowerCase() ?? '';
+  const named = new Set(nodes.map(keyOf).filter((k) => k !== ''));
+  if (named.size < 2) return autoLayoutPositions(nodes, links, opts);
+
+  const grid = opts.grid ?? 16;
+  const margin = opts.margin ?? 40;
+  const groupGap = opts.groupGap ?? 160;
+
+  // '' (ungrouped) sorts last among ties.
+  const byKey = (a: string, b: string) =>
+    a === b ? 0 : a === '' ? 1 : b === '' ? -1 : a < b ? -1 : 1;
+
+  const buckets = new Map<string, LayoutNode[]>();
+  const groupOfId = new Map<string, string>();
+  for (const n of nodes) {
+    const k = keyOf(n);
+    groupOfId.set(n.id, k);
+    const list = buckets.get(k);
+    if (list) list.push(n);
+    else buckets.set(k, [n]);
+  }
+
+  const crossLinks = new Map<string, number>();
+  const linksIn = new Map<string, LayoutLink[]>();
+  for (const l of links) {
+    const a = groupOfId.get(l.sourceId);
+    const b = groupOfId.get(l.targetId);
+    if (a === undefined || b === undefined || l.sourceId === l.targetId) continue;
+    if (a === b) {
+      const list = linksIn.get(a);
+      if (list) list.push(l);
+      else linksIn.set(a, [l]);
+    } else {
+      crossLinks.set(a, (crossLinks.get(a) ?? 0) + 1);
+      crossLinks.set(b, (crossLinks.get(b) ?? 0) + 1);
+    }
+  }
+
+  const blocks = [...buckets.keys()].sort(byKey).map((key) => {
+    const members = [...buckets.get(key)!].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const local = autoLayoutPositions(members, linksIn.get(key) ?? [], { ...opts, margin: 0 });
+    let w = 0;
+    let h = 0;
+    for (const n of members) {
+      const p = local.get(n.id)!;
+      w = Math.max(w, p.x + n.width);
+      h = Math.max(h, p.y + n.height);
+    }
+    return { key, local, w, h };
+  });
+  blocks.sort(
+    (a, b) => (crossLinks.get(b.key) ?? 0) - (crossLinks.get(a.key) ?? 0) || byKey(a.key, b.key),
+  );
+
+  const area = blocks.reduce((s, b) => s + b.w * b.h, 0);
+  const rowWidth = Math.max(opts.rowWidth ?? 0, Math.ceil(Math.sqrt(area)) * 1.3);
+
+  // Shelf-pack. Block origins sit on the grid so the final snap moves every node by
+  // the same amount and a block's inside survives it.
+  const onGrid = (v: number) => Math.ceil(v / grid) * grid;
+  const pos = new Map<string, { x: number; y: number }>();
+  let cursorX = 0;
+  let cursorY = 0;
+  let rowMaxH = 0;
+  for (const b of blocks) {
+    if (cursorX > 0 && cursorX + b.w > rowWidth) {
+      cursorX = 0;
+      cursorY = onGrid(cursorY + rowMaxH + groupGap);
+      rowMaxH = 0;
+    }
+    for (const [id, p] of b.local) pos.set(id, { x: cursorX + p.x, y: cursorY + p.y });
+    cursorX = onGrid(cursorX + b.w + groupGap);
+    rowMaxH = Math.max(rowMaxH, b.h);
+  }
+
+  // Normalize to a margin and snap to grid, as autoLayoutPositions does.
   let minX = Infinity;
   let minY = Infinity;
   for (const p of pos.values()) {

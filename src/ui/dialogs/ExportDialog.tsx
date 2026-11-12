@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useDeferredValue, useMemo, useState } from 'react';
 import { useProjectStore, type Projection } from '@/store/projectStore';
 import {
   exportDiagramSvg,
@@ -31,6 +31,15 @@ const FORMATS: { key: ExportFormat; label: string }[] = [
   { key: 'csv-links', label: 'CSV · Links' },
   { key: 'csv-rules', label: 'CSV · Rules' },
 ];
+
+/** Render-irrelevant defaults for the preview's options (see previewInput). */
+const PREVIEW_BASE = {
+  scale: 2,
+  quality: 0.92,
+  pageSize: 'a4',
+  orientation: 'landscape',
+  fileName: '',
+} as const;
 
 type Scope = 'all' | 'selection';
 type ExportMessage = { tone: 'success' | 'warning' | 'error'; text: string };
@@ -122,8 +131,35 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     }),
     [format, scale, supportsTransparent, transparent, bgColor, includeLabels, quality, fileName, projection, highlightHealth, health, modern],
   );
-  const previewSvg = useMemo(() => exportDiagramSvg(scene, opts), [scene, opts]);
-  const previewUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(previewSvg);
+  // The preview only depends on what changes the SVG: the scope and these render
+  // fields. Scale, quality, filename and page settings never do, so they are kept
+  // out of the memo's inputs (by primitive fields) and cost no re-serialisation.
+  const isZip = format === 'zip';
+  const previewBackground = supportsTransparent && transparent ? null : bgColor;
+  const previewHealth = highlightHealth ? health : null;
+  const previewInput = useMemo(
+    () => ({
+      scene,
+      opts: {
+        ...PREVIEW_BASE,
+        format: isZip ? ('zip' as const) : ('png' as const),
+        background: previewBackground,
+        includeLabels,
+        projection,
+        health: previewHealth,
+        modern,
+      } satisfies ExportOptions,
+    }),
+    [scene, isZip, previewBackground, includeLabels, projection, previewHealth, modern],
+  );
+  const deferredInput = useDeferredValue(previewInput);
+  const previewStale = deferredInput !== previewInput;
+  const previewUrl = useMemo(
+    () =>
+      'data:image/svg+xml;charset=utf-8,' +
+      encodeURIComponent(exportDiagramSvg(deferredInput.scene, deferredInput.opts)),
+    [deferredInput],
+  );
 
   async function doExport() {
     setBusy(true);
@@ -192,6 +228,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                     ? 'repeating-conic-gradient(#0000000d 0% 25%, transparent 0% 50%) 50% / 16px 16px'
                     : bgColor,
                 display: 'grid',
+                position: 'relative',
                 placeItems: 'center',
                 minHeight: 160,
                 maxHeight: 220,
@@ -203,11 +240,26 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                   {effectiveScope === 'selection' ? '(no selection)' : '(empty canvas)'}
                 </span>
               ) : (
+                <>
+                  <span
+                    aria-live="polite"
+                    style={{
+                      position: 'absolute',
+                      margin: 6,
+                      fontSize: 11,
+                      color: 'var(--chrome-fg-muted)',
+                      alignSelf: 'start',
+                      justifySelf: 'end',
+                    }}
+                  >
+                    {previewStale ? 'Updating preview…' : ''}
+                  </span>
                 <img
                   src={previewUrl}
                   alt="Export preview"
-                  style={{ maxWidth: '100%', maxHeight: 218, objectFit: 'contain' }}
+                  style={{ maxWidth: '100%', maxHeight: 218, objectFit: 'contain', opacity: previewStale ? 0.6 : 1 }}
                 />
+                </>
               )}
             </div>
           )}

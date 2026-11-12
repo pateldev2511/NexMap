@@ -24,6 +24,11 @@ interface IsoDeviceNodeProps {
   holdsUp?: number;
   /** At least one rule it holds up is enforced (a delete would be blocked). */
   holdsEnforced?: boolean;
+  /**
+   * Flow (stress-test) only: whether this device is pulled. When defined, the node
+   * is a "fail this device" toggle and reports that as its pressed state (#87).
+   */
+  flowFailed?: boolean;
   onPointerDown: (e: React.PointerEvent, id: string) => void;
   onLabelDoubleClick?: (e: React.MouseEvent, id: string) => void;
   onActivate?: (id: string) => void;
@@ -45,6 +50,7 @@ function IsoDeviceNodeImpl({
   breaksRule,
   holdsUp = 0,
   holdsEnforced = false,
+  flowFailed,
   onPointerDown,
   onLabelDoubleClick,
   onActivate,
@@ -83,7 +89,7 @@ function IsoDeviceNodeImpl({
       tabIndex={0}
       role="button"
       aria-label={ariaLabel}
-      aria-pressed={selected}
+      aria-pressed={flowFailed ?? selected}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();

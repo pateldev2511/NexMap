@@ -899,6 +899,13 @@
   pointer-events: none;
 }
 
+/* Flow is a mode (#87): every device region is a "pull this" target, not a drag
+   handle — the label card and (in isometric) the tile included. */
+.flowDimmed .node,
+.flowDimmed .isoNode {
+  cursor: crosshair;
+}
+
 /* Transparent hover/click targets over every node, above the dimmed scene. */
 .flowHit {
   fill: transparent;

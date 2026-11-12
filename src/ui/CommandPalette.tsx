@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { NexIcon } from './icons/NexIcon';
 import { firstSelectable, nextSelectable } from './commandPaletteNav';
 import { paletteResults } from './commandPaletteSearch';
+import { useModalDialog } from './dialogs/useModalDialog';
 
 export interface PaletteCommand {
   id: string;
@@ -49,6 +50,14 @@ export function CommandPalette({
   const [q, setQ] = useState('');
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listId = useId();
+  const optionId = (i: number) => `${listId}-opt-${i}`;
+
+  // Modal contract (aria-modal, Tab cycling, focus pull-back, opener restore, Escape
+  // routing). Declared BEFORE the focus effect below: its effect must capture the
+  // opener while it still holds focus, so the input is focused only afterwards (and
+  // not via autoFocus, which would run first and make the input its own "opener").
+  const { dialogProps } = useModalDialog(onClose);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -93,6 +102,13 @@ export function CommandPalette({
 
   useEffect(() => setActive(firstSelectable(ordered)), [ordered]);
 
+  // Keep the highlighted row visible as the arrows move it (jsdom has no scrollIntoView).
+  useEffect(() => {
+    if (active < 0) return;
+    document.getElementById(optionId(active))?.scrollIntoView?.({ block: 'nearest' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, ordered]);
+
   function run(c?: PaletteCommand) {
     if (!c || c.disabled) return;
     onClose();
@@ -109,10 +125,9 @@ export function CommandPalette({
     } else if (e.key === 'Enter') {
       e.preventDefault();
       run(ordered[active]);
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      onClose();
     }
+    // Escape is the modal hook's (on the dialog element, which this input bubbles to);
+    // handling it here too would close twice.
   }
 
   /** One command row. `i` is its index into `filtered` (the nav/active space). */
@@ -120,6 +135,7 @@ export function CommandPalette({
     return (
       <li
         key={c.id}
+        id={optionId(i)}
         role="option"
         aria-selected={i === active}
         aria-disabled={c.disabled || undefined}
@@ -202,7 +218,8 @@ export function CommandPalette({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        role="dialog"
+        {...dialogProps}
+        aria-labelledby={undefined}
         aria-label="Command palette"
         style={{
           width: 'min(580px, 92vw)',
@@ -232,6 +249,11 @@ export function CommandPalette({
             onKeyDown={onKeyDown}
             placeholder="Type a command…"
             aria-label="Command"
+            role="combobox"
+            aria-expanded={ordered.length > 0}
+            aria-autocomplete="list"
+            aria-controls={listId}
+            aria-activedescendant={ordered[active] ? optionId(active) : undefined}
             style={{
               flex: 1,
               boxSizing: 'border-box',
@@ -259,19 +281,16 @@ export function CommandPalette({
           </kbd>
         </div>
         <ul
+          id={listId}
           role="listbox"
+          aria-label="Commands"
           style={{ listStyle: 'none', margin: 0, padding: 6, maxHeight: 376, overflowY: 'auto' }}
         >
-          {ordered.length === 0 && (
-            <li style={{ padding: '16px 12px', color: 'var(--chrome-fg-subtle)', fontSize: 13, textAlign: 'center' }}>
-              No matching command.
-            </li>
-          )}
           {sections
             ? sections.map((sec) => (
-                <li key={`sec-${sec.group}`} style={{ listStyle: 'none' }}>
+                <li key={`sec-${sec.group}`} role="presentation" style={{ listStyle: 'none' }}>
                   <div
-                    role="presentation"
+                    aria-hidden="true"
                     style={{
                       padding: '10px 12px 4px',
                       fontFamily: 'var(--font-mono-pre)',
@@ -291,6 +310,14 @@ export function CommandPalette({
               ))
             : ordered.map((c, i) => renderRow(c, i))}
         </ul>
+        {ordered.length === 0 && (
+          <div
+            role="status"
+            style={{ padding: '16px 12px', color: 'var(--chrome-fg-subtle)', fontSize: 13, textAlign: 'center' }}
+          >
+            No matching command.
+          </div>
+        )}
       </div>
     </div>
   );

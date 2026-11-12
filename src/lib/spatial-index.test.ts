@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SpatialIndex, boxesIntersect, pointInBox } from './spatial-index';
+import { MAX_ENTRY_CELLS, SpatialIndex, boxesIntersect, pointInBox } from './spatial-index';
 
 const box = (x: number, y: number, w = 50, h = 30) => ({ x, y, width: w, height: h });
 
@@ -75,6 +75,83 @@ describe('SpatialIndex', () => {
       const cy = b.y + b.height / 2;
       expect(idx.hit(cx, cy)).toContain(`n${i}`);
     }
+  });
+});
+
+describe('SpatialIndex — oversized entries (#78)', () => {
+  it('never materialises more than MAX_ENTRY_CELLS cells for one entry', () => {
+    const idx = new SpatialIndex();
+    // 157 x 157 cells: cheap enough to index naively, so this fails fast on the old code.
+    idx.insert('zone', { x: 0, y: 0, width: 20_000, height: 20_000 });
+    expect(idx.cellCount).toBeLessThanOrEqual(MAX_ENTRY_CELLS);
+    expect(idx.cellCount).toBe(0);
+    expect(idx.hit(10_000, 10_000)).toEqual(['zone']);
+  });
+
+  it('inserts a 1e9-sized box promptly and still finds it', () => {
+    const idx = new SpatialIndex();
+    idx.insert('small', box(0, 0));
+    const t0 = performance.now();
+    idx.insert('huge', { x: -10, y: -10, width: 1e9, height: 1e9 });
+    expect(performance.now() - t0).toBeLessThan(250);
+    expect(idx.size).toBe(2);
+    expect(idx.cellCount).toBeLessThan(10);
+    expect(idx.query(box(5000, 5000)).sort()).toEqual(['huge']);
+    expect(idx.query(box(0, 0)).sort()).toEqual(['huge', 'small']);
+    expect(idx.hit(123_456, 654_321)).toEqual(['huge']);
+    expect(idx.hit(-500, -500)).toEqual([]);
+  });
+
+  it('finds an oversized entry on the cell-walk path too (many entries, small query)', () => {
+    const idx = new SpatialIndex();
+    for (let i = 0; i < 50; i++) idx.insert(`n${i}`, box(i * 300, 0));
+    idx.insert('huge', { x: 0, y: 0, width: 1e9, height: 1e9 });
+    expect(idx.query(box(40_000, 40_000, 10, 10))).toEqual(['huge']);
+    expect(idx.query(box(0, 0, 10, 10)).sort()).toEqual(['huge', 'n0']);
+  });
+
+  it('re-indexes when updated back to a small box, and oversizes on growth', () => {
+    const idx = new SpatialIndex();
+    for (let i = 0; i < 20; i++) idx.insert(`n${i}`, box(5000 + i * 300, 5000));
+    idx.insert('a', { x: 0, y: 0, width: 1e9, height: 1e9 });
+    idx.update('a', box(0, 0));
+    expect(idx.hit(10, 10)).toEqual(['a']);
+    expect(idx.hit(9000, 9000)).toEqual([]);
+    expect(idx.query(box(0, 0, 10, 10))).toEqual(['a']);
+    const cells = idx.cellCount;
+    idx.update('a', { x: 0, y: 0, width: 1e9, height: 1e9 });
+    expect(idx.cellCount).toBeLessThan(cells);
+    expect(idx.hit(9000, 9000)).toEqual(['a']);
+    // Same-size update while oversized keeps it findable at the new place.
+    idx.update('a', { x: 1e6, y: 1e6, width: 1e9, height: 1e9 });
+    expect(idx.hit(9000, 9000)).toEqual([]);
+    expect(idx.hit(2e6, 2e6)).toEqual(['a']);
+  });
+
+  it('removes and clears oversized entries', () => {
+    const idx = new SpatialIndex();
+    idx.insert('a', { x: 0, y: 0, width: 1e9, height: 1e9 });
+    idx.insert('b', { x: 0, y: 0, width: 1e9, height: 1e9 });
+    idx.remove('a');
+    expect(idx.hit(10, 10)).toEqual(['b']);
+    idx.clear();
+    expect(idx.size).toBe(0);
+    for (let i = 0; i < 20; i++) idx.insert(`n${i}`, box(i * 300, 0));
+    expect(idx.query(box(0, 0, 10, 10))).toEqual(['n0']);
+  });
+
+  it('does not throw on a NaN or infinite box, and can recover it', () => {
+    const idx = new SpatialIndex();
+    expect(() => idx.insert('nan', { x: NaN, y: 0, width: NaN, height: 10 })).not.toThrow();
+    expect(() => idx.insert('inf', { x: 0, y: 0, width: Infinity, height: 10 })).not.toThrow();
+    expect(() => idx.query(box(0, 0))).not.toThrow();
+    expect(() => idx.hit(1, 1)).not.toThrow();
+    expect(idx.query(box(0, 0))).not.toContain('nan');
+    idx.update('nan', box(0, 0));
+    expect(idx.hit(10, 10)).toContain('nan');
+    idx.remove('nan');
+    idx.remove('inf');
+    expect(idx.size).toBe(0);
   });
 });
 

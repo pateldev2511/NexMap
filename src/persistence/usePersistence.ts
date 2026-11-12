@@ -4,7 +4,7 @@ import {
   useProjectStore,
   type ProjectStore,
 } from '@/store/projectStore';
-import { loadDocument, migrateDocument } from '@/model/migrate';
+import { loadDocument, loadRepairSummary, migrateDocument } from '@/model/migrate';
 import { SCHEMA_VERSION } from '@/model/schema';
 import { prefsPersistent } from '@/lib/prefs';
 import {
@@ -18,8 +18,8 @@ import { acquireWriter } from './locks';
 import {
   absorbStashedDraft,
   deleteDraft,
-  getDraft,
-  getLatestDraft,
+  readDraft,
+  readLatestDraft,
   makeDraft,
   putDraft,
   readStashedDraft,
@@ -139,6 +139,20 @@ export function usePersistence(): Persistence {
     );
   }
 
+  /**
+   * Tell the user what a load had to repair (a removed outside image, a limited
+   * rack height…). Without this the repair is silent and the next autosave makes
+   * it permanent. `join` keeps the notice the same load just raised (upgraded, took over).
+   */
+  function noticeRepairs(
+    result: { warnings?: string[]; repairs?: number },
+    verb: string,
+    join: boolean,
+  ) {
+    const summary = loadRepairSummary(result, verb);
+    if (summary) setNotice((prev) => (join && prev ? `${summary} ${prev}` : summary));
+  }
+
   const fileRef = useRef<FileBinding | null>(null);
   const genRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -233,15 +247,17 @@ export function usePersistence(): Persistence {
     }
     // Still deciding on recovery: offer the newest draft, not the one seen at launch.
     if (recoverableRef.current) {
-      const latest = await getLatestDraft();
-      if (latest) setRecoverable(latest);
+      const read = await readLatestDraft();
+      if (read.ok && read.value) setRecoverable(read.value);
       return;
     }
     const s = store();
     const identity = s.docIdentity;
     const projectId = s.getDocument().project.id;
     const stash = readStashedDraft();
-    const stored = await getDraft(projectId);
+    const storedRead = await readDraft(projectId);
+    if (!storedRead.ok) return; // can't tell what the other tab saved — change nothing
+    const stored = storedRead.value;
     const latest =
       stash?.projectId === projectId && (!stored || stash.updatedAt > stored.updatedAt)
         ? stash
@@ -255,6 +271,9 @@ export function usePersistence(): Persistence {
     baselineRef.current = latest.updatedAt;
     if (binding?.identity === identity) bindFile(binding.handle, binding.fileName);
     setNotice('You can edit in this tab now. It has the latest autosave from the other tab.');
+    noticeRepairs(result, 'Loaded', true);
+    // noticeRepairs only calls a state setter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bindFile, schedule, store]);
 
   // Acquire the writer role; read-only if another tab holds it.
@@ -280,8 +299,15 @@ export function usePersistence(): Persistence {
     let cancelled = false;
     void (async () => {
       await absorbStashedDraft();
-      const draft = await getLatestDraft();
-      if (!cancelled && draft) setRecoverable(draft);
+      const read = await readLatestDraft();
+      if (cancelled) return;
+      if (!read.ok) {
+        setNotice(
+          "Couldn't read autosaved drafts in this browser — if you had unsaved work, reload to try again.",
+        );
+      } else if (read.value) {
+        setRecoverable(read.value);
+      }
     })();
     if (!prefsPersistent()) {
       setNotice(
@@ -425,6 +451,7 @@ export function usePersistence(): Persistence {
       setRecoverable(null);
       setError(null);
       noticeIfMigrated(result.migratedFrom);
+      noticeRepairs(result, 'Opened', result.migratedFrom != null);
       return true;
     },
     // noticeIfMigrated only calls a state setter.
@@ -449,7 +476,10 @@ export function usePersistence(): Persistence {
     store().loadDoc(result.doc);
     baselineRef.current = recoverable.updatedAt;
     setRecoverable(null);
+    noticeRepairs(result, 'Recovered', false);
     return true;
+    // noticeRepairs only calls a state setter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recoverable, store]);
 
   const discardDraft = useCallback(() => {

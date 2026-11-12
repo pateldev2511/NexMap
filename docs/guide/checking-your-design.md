@@ -70,7 +70,9 @@ you can undo.
 | Missing endpoint 🔴 | A link isn't connected to a device at one end. |
 | Unnamed device 🟠 | A device has no name. |
 | Duplicate name 🟠 | Two devices share a name, which makes the diagram ambiguous. |
-| Disconnected device 🔵 | A device has no connections at all. |
+| Disconnected device 🔵 | A network device has no links in the diagram. |
+| Cabled but not drawn 🔵 | A device is cabled in a rack but has no link in the network diagram. |
+| Passive rack assets 🔵 | One line counting the power gear, cable managers and panels that aren't expected to have network links. |
 | Missing port 🟠 | A link refers to a [port](glossary.md#interface-port) that was removed. |
 | Overloaded port 🟠 | Several links use the same port. |
 

@@ -1,7 +1,8 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { AppShell } from './ui/shell/AppShell';
 import { MoreMenu } from './ui/shell/MoreMenu';
-import { FirstRun } from './ui/firstrun/FirstRun';
+import { FirstRun, shouldShowFirstRun } from './ui/firstrun/FirstRun';
+import { ErrorBoundary } from './ui/shell/ErrorBoundary';
 import { RecoveryDialog } from './ui/dialogs/RecoveryDialog';
 import { usePasteToCanvas } from './io/import/usePasteToCanvas';
 import { ViewSwitcher } from './ui/ViewSwitcher';
@@ -221,6 +222,7 @@ export function App() {
   const runValidation = useProjectStore((s) => s.runValidation);
   const newProject = useProjectStore((s) => s.newProject);
   const flash = useProjectStore((s) => s.flash);
+  const docRevision = useProjectStore((s) => s.docRevision);
 
   const persistence = usePersistence();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -647,9 +649,18 @@ export function App() {
   if (presentation) {
     return (
       <div style={{ position: 'fixed', inset: 0, background: 'var(--canvas-bg)' }}>
-        <Suspense fallback={<DesignerLoading />}>
-          <Canvas readOnly showPages={showPages} />
-        </Suspense>
+        <ErrorBoundary
+          label="presentation"
+          extraActions={
+            <button type="button" className={shell.topbarBtn} onClick={() => setPresentation(false)}>
+              Exit presentation
+            </button>
+          }
+        >
+          <Suspense fallback={<DesignerLoading />}>
+            <Canvas readOnly showPages={showPages} />
+          </Suspense>
+        </ErrorBoundary>
         <button
           className={shell.topbarBtn}
           onClick={() => setPresentation(false)}
@@ -669,8 +680,12 @@ export function App() {
   }
 
   const showRecovery = !firstRunDone && persistence.recoverable !== null;
-  const showFirstRun =
-    !firstRunDone && persistence.recoverable === null && mode === 'network';
+  const showFirstRun = shouldShowFirstRun({
+    done: firstRunDone,
+    docRevision,
+    recoverable: persistence.recoverable !== null,
+    mode,
+  });
 
   // Entry chooser: ask which designer whenever none is active. This must NOT
   // also require `recoverable === null` — a lingering autosave draft used to
@@ -740,6 +755,7 @@ export function App() {
           {showFirstRun && (
             <FirstRun
               onDone={() => setFirstRunDone(true)}
+              onBlank={() => setFirstRunDone(true)}
               onOpenText={(text) =>
                 persistence.openText(text, confirmReplace('opening another file'))
               }
@@ -1097,6 +1113,13 @@ export function App() {
                 { id: 'import', label: 'Import…', group: 'File', run: () => setImporting(true) },
                 { id: 'nextext', label: 'NexText (describe in text)…', group: 'Build', run: () => setNexText(true) },
                 { id: 'layout', label: 'Auto-layout (tidy)', group: 'View', run: () => st().autoLayout() },
+                {
+                  id: 'layout-by-site',
+                  label: 'Auto-layout by site',
+                  hint: "uses each device's Location",
+                  group: 'View',
+                  run: () => st().autoLayoutBySite(),
+                },
                 {
                   id: 'projection',
                   label: 'Toggle 2D / isometric view',

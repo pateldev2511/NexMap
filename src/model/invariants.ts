@@ -13,7 +13,7 @@ import { nanoid } from 'nanoid';
 import type { Device, Link, RackCable, Subnet, CustomRuleSpec } from './types';
 import { isAddressable, usedAddresses, type AddressAssignment } from '@/sim/autoAddress';
 import { findSpofs } from '@/sim/resilience';
-import { nextFreeHost } from '@/lib/ipam';
+import { createHostAllocator } from '@/lib/ipam';
 import { ipInCidr, stripPrefix } from '@/lib/ipcidr';
 import { describePortVlan, wrongPortVlans, type PortVlan } from './portVlan';
 
@@ -520,17 +520,16 @@ export function planPlacement(
   const offenders = placementOffenders(role, targets, devices).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   if (targets.length !== 1) return { assignments: [], unplaced: offenders.map((d) => d.id) };
   const target = targets[0]!;
-  const used = usedAddresses(devices).map((ip) => stripPrefix(ip));
+  const alloc = createHostAllocator(usedAddresses(devices).map((ip) => stripPrefix(ip)));
   const assignments: AddressAssignment[] = [];
   const unplaced: string[] = [];
   for (const d of offenders) {
-    const ip = nextFreeHost(target.cidr, used, { gateway: target.gateway });
+    const ip = alloc.next(target.cidr, target.gateway);
     if (!ip) {
       unplaced.push(d.id);
       continue;
     }
     assignments.push({ deviceId: d.id, ip });
-    used.push(ip);
   }
   return { assignments, unplaced };
 }

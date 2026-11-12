@@ -150,12 +150,32 @@ function runsOf(spans: RichSpan[]): CalloutRun[] {
 }
 
 /**
+ * Font size bounds (px) for RENDERING only. The Inspector's size field is
+ * unbounded, so the loader keeps any finite size as typed; renderers and
+ * exporters clamp to this (a negative `font-size` is an SVG error).
+ */
+export const MIN_FONT_SIZE = 0;
+export const MAX_FONT_SIZE = 10_000;
+const DEFAULT_FONT_SIZE = 14;
+
+/**
+ * A finite, in-range font size. A non-number (a hostile file's string) falls back
+ * to the default rather than reaching an SVG attribute.
+ */
+export function clampFontSize(fontSize: unknown): number {
+  if (typeof fontSize !== 'number' || !Number.isFinite(fontSize)) return DEFAULT_FONT_SIZE;
+  return Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, fontSize));
+}
+
+/**
  * Flatten blocks into visual rows. Sizing mirrors the original annotation card:
  * heading = round(fs*1.3) @700, subheading = round(fs*0.95) @500 muted, body = fs
  * @400. Empty spans collapse (matching the old absent-field behavior).
  */
 export function calloutRows(blocks: CalloutBlock[], fontSize: number): CalloutRow[] {
-  const fs = fontSize;
+  // Row sizes are interpolated into SVG `font-size` attributes by every renderer
+  // and exporter, so they must be finite numbers whatever the document holds.
+  const fs = clampFontSize(fontSize);
   const rows: CalloutRow[] = [];
   for (const b of blocks) {
     switch (b.kind) {
@@ -206,7 +226,7 @@ export function calloutRowsOrPlaceholder(
 ): CalloutRow[] {
   const rows = calloutRows(blocks, fontSize);
   if (rows.length > 0) return rows;
-  return [{ runs: [{ text: 'Text' }], size: fontSize, weight: 400 }];
+  return [{ runs: [{ text: 'Text' }], size: clampFontSize(fontSize), weight: 400 }];
 }
 
 /** Left/center/right → the x anchor for a row inside [boxX, boxX+width]. */

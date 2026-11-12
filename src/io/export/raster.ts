@@ -34,7 +34,7 @@ export interface RasterResult {
   clamped: boolean;
 }
 
-function svgDimensions(svg: string): { w: number; h: number } {
+export function svgDimensions(svg: string): { w: number; h: number } {
   const w = Number(/width="(\d+(?:\.\d+)?)"/.exec(svg)?.[1] ?? 800);
   const h = Number(/height="(\d+(?:\.\d+)?)"/.exec(svg)?.[1] ?? 600);
   return { w, h };

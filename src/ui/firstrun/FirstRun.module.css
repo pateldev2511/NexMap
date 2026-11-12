@@ -171,3 +171,26 @@
     grid-template-columns: 1fr;
   }
 }
+
+.close {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--chrome-fg-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.close:hover {
+  background: var(--chrome-bg-3);
+  color: var(--chrome-fg);
+}
+.close:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}

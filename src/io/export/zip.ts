@@ -10,7 +10,7 @@
  * couldn't keep its rules report honest.)
  */
 import { zipSync, strToU8 } from 'fflate';
-import type { Device, Link, NexMapDocument, Rack, Subnet, Vlan } from '@/model/types';
+import type { Device, Link, NexMapDocument, Rack, RackCable, Subnet, Vlan } from '@/model/types';
 import { validate, severityRank } from '@/model/validate';
 import { buildDiagramSvg, type DiagramRenderOptions } from './diagram';
 import { rasterize, scaleWarning } from './raster';
@@ -43,6 +43,7 @@ export function validationReport(input: {
   vlans?: Vlan[];
   subnets?: Subnet[];
   racks?: Rack[];
+  rackCables?: RackCable[];
   projectName?: string;
 }): string {
   const {
@@ -53,7 +54,7 @@ export function validationReport(input: {
     racks = [],
     projectName = 'project export',
   } = input;
-  const issues = validate({ devices, links, vlans, subnets, racks }).sort(
+  const issues = validate({ devices, links, vlans, subnets, racks, rackCables: input.rackCables }).sort(
     (a, b) => severityRank(b.severity) - severityRank(a.severity),
   );
   const lines = [

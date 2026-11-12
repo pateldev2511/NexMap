@@ -169,43 +169,103 @@ export function detectCsvKind(headers: string[]): ImportKind | 'subnets' | 'vlan
   return 'devices';
 }
 
+/**
+ * Strict VLAN id parse: a trimmed run of digits and nothing else. `Number()` would
+ * turn "" into 0, "1e1" into 10, "0x10" into 16 and "VLAN-ten" into NaN. Returns
+ * null for anything that is not a plain non-negative integer. The 1–4094 range is
+ * deliberately NOT enforced here — validation already flags out-of-range ids.
+ */
+export function parseVlanId(raw: string | undefined): number | null {
+  const t = (raw ?? '').trim();
+  if (!/^\d+$/.test(t)) return null;
+  const n = Number(t);
+  return Number.isSafeInteger(n) ? n : null;
+}
+
+const outOfRange = (n: number) => n < 1 || n > 4094;
+
+export interface BuildResult<T> {
+  items: T[];
+  warnings: string[];
+  /** Rows dropped (blank cidr / blank or non-numeric VLAN id). */
+  skipped: number;
+}
+
 export function buildSubnets(
   rows: Record<string, string>[],
   headers: string[],
-): Subnet[] {
+): BuildResult<Subnet> {
   const m = autoMap(headers, SUBNET_FIELDS);
   const get = (r: Record<string, string>, k: string) =>
     m[k] ? r[m[k]!]?.trim() : undefined;
-  return rows
-    .map((r) => {
-      const cidr = get(r, 'cidr');
-      if (!cidr) return null;
-      const vlanRaw = get(r, 'vlanId');
-      return createSubnet(cidr, {
+  const items: Subnet[] = [];
+  const warnings: string[] = [];
+  let skipped = 0;
+  rows.forEach((r, i) => {
+    const cidr = get(r, 'cidr');
+    if (!cidr) {
+      skipped++;
+      return;
+    }
+    const vlanRaw = get(r, 'vlanId');
+    let vlanId: number | undefined;
+    if (vlanRaw) {
+      const id = parseVlanId(vlanRaw);
+      if (id === null) {
+        warnings.push(`Row ${i + 1}: VLAN id "${vlanRaw}" is not a number — subnet ${cidr} imported without a VLAN.`);
+      } else {
+        vlanId = id;
+        if (outOfRange(id)) {
+          warnings.push(`Row ${i + 1}: VLAN id ${id} is outside 1–4094 — kept, but validation will flag it.`);
+        }
+      }
+    }
+    items.push(
+      createSubnet(cidr, {
         name: get(r, 'name'),
         gateway: get(r, 'gateway'),
-        vlanId: vlanRaw ? Number(vlanRaw) : undefined,
+        vlanId,
         zone: get(r, 'zone'),
         notes: get(r, 'notes'),
-      });
-    })
-    .filter((s): s is Subnet => s !== null);
+      }),
+    );
+  });
+  return { items, warnings, skipped };
 }
 
-export function buildVlans(rows: Record<string, string>[], headers: string[]): Vlan[] {
+export function buildVlans(
+  rows: Record<string, string>[],
+  headers: string[],
+): BuildResult<Vlan> {
   const m = autoMap(headers, VLAN_FIELDS);
   const get = (r: Record<string, string>, k: string) =>
     m[k] ? r[m[k]!]?.trim() : undefined;
-  return rows
-    .map((r, i) => {
-      const idRaw = get(r, 'vlanId');
-      if (!idRaw) return null;
-      return createVlan(Number(idRaw), get(r, 'name') || `VLAN ${idRaw || i}`, {
+  const items: Vlan[] = [];
+  const warnings: string[] = [];
+  let skipped = 0;
+  rows.forEach((r, i) => {
+    const idRaw = get(r, 'vlanId');
+    if (!idRaw) {
+      skipped++;
+      return;
+    }
+    const id = parseVlanId(idRaw);
+    if (id === null) {
+      warnings.push(`Row ${i + 1}: VLAN id "${idRaw}" is not a number — skipped.`);
+      skipped++;
+      return;
+    }
+    if (outOfRange(id)) {
+      warnings.push(`Row ${i + 1}: VLAN id ${id} is outside 1–4094 — kept, but validation will flag it.`);
+    }
+    items.push(
+      createVlan(id, get(r, 'name') || `VLAN ${id}`, {
         zone: get(r, 'zone'),
         notes: get(r, 'notes'),
-      });
-    })
-    .filter((v): v is Vlan => v !== null);
+      }),
+    );
+  });
+  return { items, warnings, skipped };
 }
 
 /** Auto-map CSV headers to canonical fields. Returns field → headerName | null. */

@@ -50,15 +50,15 @@ export function importPastedCsv(
   const kind = detectCsvKind(headers);
 
   if (kind === 'subnets') {
-    const subnets = buildSubnets(rows, headers);
-    return subnets.length
-      ? { kind, devices: [], links: [], subnets, vlans: [], warnings: [] }
+    const r = buildSubnets(rows, headers);
+    return r.items.length || r.warnings.length
+      ? { kind, devices: [], links: [], subnets: r.items, vlans: [], warnings: r.warnings }
       : null;
   }
   if (kind === 'vlans') {
-    const vlans = buildVlans(rows, headers);
-    return vlans.length
-      ? { kind, devices: [], links: [], subnets: [], vlans, warnings: [] }
+    const r = buildVlans(rows, headers);
+    return r.items.length || r.warnings.length
+      ? { kind, devices: [], links: [], subnets: [], vlans: r.items, warnings: r.warnings }
       : null;
   }
   if (kind === 'links') {

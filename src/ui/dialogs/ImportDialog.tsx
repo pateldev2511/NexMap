@@ -24,6 +24,7 @@ import {
 } from '@/io/import/graphImport';
 import type { Subnet, Vlan } from '@/model/types';
 import { NexIcon } from '@/ui/icons/NexIcon';
+import { readFileAsDataUrl } from '@/io/readFileAsDataUrl';
 import { useModalDialog } from './useModalDialog';
 import styles from './ImportDialog.module.css';
 
@@ -154,11 +155,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
 
     // Raster image → background underlay (read dims from the loaded image).
     if (IMAGE_EXTS.has(ext)) {
-      const dataUrl = await new Promise<string>((res) => {
-        const r = new FileReader();
-        r.onload = () => res(r.result as string);
-        r.readAsDataURL(file);
-      });
+      const dataUrl = await readFileAsDataUrl(file);
       const img = new Image();
       img.onload = () => {
         const w = img.naturalWidth || 400;
@@ -225,24 +222,24 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
     const p = parseCsv(raw);
     const csvKind = detectCsvKind(p.headers);
     if (csvKind === 'subnets') {
-      const subnets = buildSubnets(p.rows, p.headers);
+      const built = buildSubnets(p.rows, p.headers);
       setSemanticResult({
         name: file.name,
-        subnets,
+        subnets: built.items,
         vlans: [],
-        warnings: [],
-        skipped: p.rows.length - subnets.length,
+        warnings: built.warnings,
+        skipped: built.skipped,
       });
       return;
     }
     if (csvKind === 'vlans') {
-      const vlans = buildVlans(p.rows, p.headers);
+      const built = buildVlans(p.rows, p.headers);
       setSemanticResult({
         name: file.name,
         subnets: [],
-        vlans,
-        warnings: [],
-        skipped: p.rows.length - vlans.length,
+        vlans: built.items,
+        warnings: built.warnings,
+        skipped: built.skipped,
       });
       return;
     }
@@ -412,6 +409,13 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
                   </tbody>
                 </table>
               </div>
+              {semanticResult.warnings.length > 0 && (
+                <div className={styles.warnings}>
+                  {semanticResult.warnings.slice(0, 30).map((w, i) => (
+                    <WarningLine key={i} text={w} />
+                  ))}
+                </div>
+              )}
             </>
           )}
 

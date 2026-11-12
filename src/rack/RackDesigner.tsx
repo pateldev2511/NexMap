@@ -140,6 +140,13 @@ function inventoryCompleteness(devices: Device[]) {
  * preset to arm it, click a U slot to drop (auto-populated ports), click a device to
  * select, drag it vertically to reposition. List-first cabling. Export PNG + CSV.
  */
+type RackPane = 'library' | 'rack' | 'inspect';
+const RACK_PANES: { id: RackPane; label: string }[] = [
+  { id: 'library', label: 'Library' },
+  { id: 'rack', label: 'Rack' },
+  { id: 'inspect', label: 'Inspect' },
+];
+
 export function RackDesigner() {
   const rev = useProjectStore((s) => s.rev);
   const selection = useProjectStore((s) => s.selection);
@@ -176,6 +183,39 @@ export function RackDesigner() {
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [inspectorTab, setInspectorTab] = useState<'placement' | 'hardware' | 'power' | 'cabling' | 'asset'>('placement');
   const [rowReject, setRowReject] = useState<string | null>(null);
+  // Narrow screens (<900px, CSS-only breakpoint) show ONE panel at a time. Panels
+  // are hidden by CSS, never unmounted, so scroll/zoom/search/inspector tab survive.
+  const [pane, setPane] = useState<RackPane>('rack');
+  const paneFocusPending = useRef(false);
+  const libRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const sideRef = useRef<HTMLDivElement>(null);
+  const paneTabRefs = useRef<Partial<Record<RackPane, HTMLButtonElement | null>>>({});
+  useEffect(() => {
+    if (!paneFocusPending.current) return;
+    paneFocusPending.current = false;
+    const el = { library: libRef, rack: stageRef, inspect: sideRef }[pane].current;
+    el?.focus({ preventScroll: true });
+  }, [pane]);
+  // Templates / parts overlays live inside the rack pane — show it when one opens.
+  useEffect(() => {
+    if (showTemplates || showParts) setPane('rack');
+  }, [showTemplates, showParts]);
+  function choosePane(next: RackPane) {
+    paneFocusPending.current = next !== pane;
+    setPane(next);
+  }
+  /** Escape inside Library/Inspect returns to the rack, unless something more specific owns Escape. */
+  function paneEscape(e: React.KeyboardEvent) {
+    if (e.key !== 'Escape' || e.defaultPrevented || pane === 'rack') return;
+    if (armed || selCable || connecting || showTemplates || showParts || exportOpen) return;
+    e.stopPropagation(); // keep the global router from also clearing the selection
+    // Not choosePane(): that would move focus into the stage after this handler,
+    // and the keyboard user should land back on the tab they can continue from.
+    paneFocusPending.current = false;
+    setPane('rack');
+    paneTabRefs.current.rack?.focus();
+  }
 
   // Snapshot the store collections ONCE per revision. devicesAll()/rackCablesAll() each
   // return a fresh array, so memoizing them on `rev` is what makes every downstream memo
@@ -815,7 +855,7 @@ export function RackDesigner() {
   }
 
   return (
-    <div className={styles.root}>
+    <div className={styles.root} data-pane={pane}>
       {wheelHint && (
         <div
           aria-hidden="true" /* announced via the shared live region instead */
@@ -968,7 +1008,15 @@ export function RackDesigner() {
       </div>
 
       {/* library */}
-      <div className={styles.lib}>
+      <div
+        className={styles.lib}
+        id="rack-pane-library"
+        ref={libRef}
+        tabIndex={-1}
+        role="region"
+        aria-label="Device library"
+        onKeyDown={paneEscape}
+      >
         <div className={styles.panelTabs} aria-label="Rack library sections">
           <button className={styles.activeTab}>Library</button>
           <button onClick={() => setShowTemplates(true)}>Templates</button>
@@ -1003,6 +1051,7 @@ export function RackDesigner() {
                 onClick={() => {
                   setReject(null);
                   setArmed(armed?.key === p.key ? null : p);
+                  if (armed?.key !== p.key) setPane('rack'); // arm → go place it
                 }}
                 aria-pressed={armed?.key === p.key}
                 title={`Click to arm, or drag onto a slot — ${p.label}`}
@@ -1029,7 +1078,7 @@ export function RackDesigner() {
       </div>
 
       {/* canvas */}
-      <div className={`${styles.stage} ${armed && view === 'focus' ? styles.placing : ''}`} style={view === 'row' ? { flexDirection: 'column', alignItems: 'stretch' } : undefined}>
+      <div id="rack-pane-rack" ref={stageRef} tabIndex={-1} role="region" aria-label="Rack" className={`${styles.stage} ${armed && view === 'focus' ? styles.placing : ''}`} style={view === 'row' ? { flexDirection: 'column', alignItems: 'stretch' } : undefined}>
         {showParts && rack && (
           <div className={styles.templateOverlay} onClick={() => setShowParts(false)}>
             <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 640 }}>
@@ -1266,7 +1315,16 @@ export function RackDesigner() {
       </div>
 
       {/* sidebar */}
-      <div className={styles.side} data-demote="panel">
+      <div
+        className={styles.side}
+        data-demote="panel"
+        id="rack-pane-inspect"
+        ref={sideRef}
+        tabIndex={-1}
+        role="region"
+        aria-label="Inspector"
+        onKeyDown={paneEscape}
+      >
         <div className={styles.sec}>
           <h3>{multi ? `Bulk edit · ${selection.size} devices` : 'Selected device'}</h3>
           {multi ? (
@@ -1852,6 +1910,40 @@ export function RackDesigner() {
           </div>
         </div>
       )}
+
+      <div className={styles.paneTabs} role="tablist" aria-label="Rack designer panels">
+        {RACK_PANES.map(({ id, label }) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            id={`rack-tab-${id}`}
+            ref={(el) => {
+              paneTabRefs.current[id] = el;
+            }}
+            aria-selected={pane === id}
+            aria-controls={`rack-pane-${id}`}
+            aria-label={id === 'inspect' && selection.size > 0 ? `Inspect, ${selection.size} selected` : undefined}
+            tabIndex={pane === id ? 0 : -1}
+            className={styles.paneTab}
+            onClick={() => choosePane(id)}
+            onKeyDown={(e) => {
+              const i = RACK_PANES.findIndex((x) => x.id === id);
+              const n = e.key === 'ArrowRight' ? i + 1 : e.key === 'ArrowLeft' ? i - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? RACK_PANES.length - 1 : null;
+              if (n == null) return;
+              e.preventDefault();
+              const next = RACK_PANES[(n + RACK_PANES.length) % RACK_PANES.length]!.id;
+              setPane(next);
+              paneTabRefs.current[next]?.focus();
+            }}
+          >
+            {label}
+            {id === 'inspect' && selection.size > 0 && (
+              <span className={styles.paneBadge} aria-hidden="true">{selection.size}</span>
+            )}
+          </button>
+        ))}
+      </div>
 
       {connecting && (
         <ConnectPortsDialog

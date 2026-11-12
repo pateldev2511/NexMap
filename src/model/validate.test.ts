@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { validate, resetIssueIds } from './validate';
-import { createDevice, createLink, createVlan, createSubnet, createRack } from './schema';
+import { createDevice, createInterface, createLink, createRackCable, createVlan, createSubnet, createRack } from './schema';
 import type { Device, Subnet } from './types';
 import { cidrsOverlap, ipInCidr, isValidCidr } from '@/lib/ipcidr';
 
@@ -472,5 +472,130 @@ describe('validate — subnet overlap at scale (#43)', () => {
       .filter((i) => i.code === 'ip-outside-subnet')
       .map((i) => i.message.split(' ')[0]);
     expect(outside).toEqual(ips.filter((ip) => !subnets.some((s) => ipInCidr(ip, s.cidr))));
+  });
+});
+
+describe('validate — unlinked devices: network gear vs passive rack assets (#91)', () => {
+  const racked = (type: Device['type'], name: string, over: Partial<Device> = {}): Device =>
+    createDevice(type, 0, 0, LAYER, { name, rackId: 'rack-1', interfaces: [], ...over });
+  const about = (issues: ReturnType<typeof validate>) =>
+    issues.filter((i) => ['orphaned-device', 'cabled-no-logical-link', 'passive-assets'].includes(i.code));
+
+  it('an unlinked, uncabled network device has no logical connections', () => {
+    const a = dev('a');
+    const b = dev('b');
+    const c = dev('c');
+    const found = about(validate({ devices: [a, b, c], links: [createLink(a.id, b.id, LAYER)] }));
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({
+      code: 'orphaned-device',
+      severity: 'info',
+      message: 'c has no logical connections.',
+      objectIds: [c.id],
+    });
+  });
+
+  it('a device cabled in the rack but not drawn says so instead', () => {
+    const p1 = createInterface('Gi1/0/1');
+    const p2 = createInterface('Gi1/0/1');
+    const sw1 = racked('switch', 'sw-1', { interfaces: [p1] });
+    const sw2 = racked('switch', 'sw-2', { interfaces: [p2] });
+    const cable = createRackCable({ deviceId: sw1.id, ifaceId: p1.id }, { deviceId: sw2.id, ifaceId: p2.id }, '#22d3ee');
+    const found = about(validate({ devices: [sw1, sw2], links: [], rackCables: [cable] }));
+    expect(found.map((i) => i.code)).toEqual(['cabled-no-logical-link', 'cabled-no-logical-link']);
+    expect(found[0]).toMatchObject({
+      severity: 'info',
+      message: 'sw-1 is cabled in the rack but has no link in the network diagram.',
+      objectIds: [sw1.id],
+    });
+  });
+
+  it('passive rack assets get one summary line and no per-device finding', () => {
+    const a = dev('a');
+    const b = dev('b');
+    const passive = [
+      racked('ups', 'PDU A'),
+      racked('generic', 'Cable manager', { rackAccessory: 'cable-manager' }),
+      racked('generic', 'Blank'),
+      racked('patch-panel', 'Patch panel', { interfaces: [createInterface('1')] }),
+    ];
+    const found = about(validate({ devices: [a, b, ...passive], links: [createLink(a.id, b.id, LAYER)] }));
+    expect(found).toEqual([
+      expect.objectContaining({
+        code: 'passive-assets',
+        severity: 'info',
+        message: '4 passive rack assets (power, cable management, panels) are not expected to have network links.',
+        objectIds: [],
+      }),
+    ]);
+  });
+
+  it('counts one passive asset in the singular, and none not at all', () => {
+    const a = dev('a');
+    const b = dev('b');
+    const link = createLink(a.id, b.id, LAYER);
+    expect(about(validate({ devices: [a, b, racked('ups', 'UPS')], links: [link] }))[0]?.message).toBe(
+      '1 passive rack asset (power, cable management, panels) is not expected to have network links.',
+    );
+    expect(about(validate({ devices: [a, b], links: [link] }))).toEqual([]);
+  });
+
+  it('the role override works in both directions', () => {
+    const a = dev('a');
+    const b = dev('b');
+    const link = createLink(a.id, b.id, LAYER);
+    const managedUps = racked('ups', 'managed-ups', { topologyRole: 'logical' });
+    const spare = racked('switch', 'spare-sw', { topologyRole: 'physical-only' });
+    const found = about(validate({ devices: [a, b, managedUps, spare], links: [link] }));
+    expect(found.map((i) => [i.code, i.objectIds])).toEqual([
+      ['orphaned-device', [managedUps.id]],
+      ['passive-assets', []],
+    ]);
+    expect(found[1]!.message).toMatch(/^1 passive rack asset /);
+  });
+
+  it('a device with a logical link is never reported, whatever its role', () => {
+    const a = dev('a');
+    const ups = racked('ups', 'UPS');
+    const off = racked('switch', 'sw', { topologyRole: 'physical-only' });
+    const links = [createLink(a.id, ups.id, LAYER), createLink(a.id, off.id, LAYER)];
+    expect(about(validate({ devices: [a, ups, off], links }))).toEqual([]);
+  });
+
+  it('a mixed document only ever loses findings against the old one-per-unlinked-device rule', () => {
+    const a = dev('a');
+    const b = dev('b');
+    const p1 = createInterface('p1');
+    const p2 = createInterface('p2');
+    const devices = [
+      a,
+      b,
+      dev('lonely'),
+      racked('switch', 'tor-1', { interfaces: [p1] }),
+      racked('switch', 'tor-2', { interfaces: [p2] }),
+      racked('ups', 'PDU A'),
+      racked('ups', 'PDU B'),
+      racked('generic', 'Cable manager', { rackAccessory: 'cable-manager' }),
+      racked('generic', 'Blank'),
+      racked('generic', 'Shelf'),
+    ];
+    const links = [createLink(a.id, b.id, LAYER)];
+    const cable = createRackCable(
+      { deviceId: devices[3]!.id, ifaceId: p1.id },
+      { deviceId: devices[4]!.id, ifaceId: p2.id },
+      '#22d3ee',
+    );
+    const linked = new Set(links.flatMap((l) => [l.sourceId, l.targetId]));
+    const oldCount = devices.filter((d) => !linked.has(d.id)).length; // 8
+    const all = validate({ devices, links, rackCables: [cable] });
+    const found = about(all);
+    expect(all).toHaveLength(found.length); // nothing else in this document
+    expect(found.map((i) => i.code)).toEqual([
+      'orphaned-device',
+      'cabled-no-logical-link',
+      'cabled-no-logical-link',
+      'passive-assets',
+    ]);
+    expect(found.length).toBeLessThan(oldCount);
   });
 });

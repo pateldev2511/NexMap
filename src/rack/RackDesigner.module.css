@@ -495,7 +495,9 @@
   border: 1px solid var(--chrome-border);
   border-radius: 12px;
   width: 460px;
-  max-width: 92vw;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
 }
 .dialog .dhead {
@@ -849,6 +851,8 @@
 .panelTabs,
 .inspectorTabs {
   display: flex;
+  /* Five tabs do not fit a 300px inspector on one line (#89): wrap, never clip. */
+  flex-wrap: wrap;
   gap: 4px;
   padding: 3px;
   margin-bottom: 10px;
@@ -1513,7 +1517,7 @@
 
 @media (max-width: 1180px) {
   .root {
-    grid-template-columns: 214px minmax(360px, 1fr) 310px;
+    grid-template-columns: 210px minmax(0, 1fr) 300px;
   }
 
   .brandBlock span:last-child,
@@ -1653,4 +1657,87 @@
   font-size: 13px;
   font-weight: 600;
   color: var(--chrome-fg);
+}
+
+/* ── Narrow screens: one panel at a time (issue #89) ─────────────────────────
+   Same 900px breakpoint as the app shell. Panels are hidden, never unmounted. */
+.paneTabs {
+  display: none;
+}
+.lib:focus,
+.stage:focus,
+.side:focus {
+  outline: none;
+}
+
+@media (max-width: 900px) {
+  .root {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 52px minmax(0, 1fr) 48px;
+  }
+  .toolbar {
+    grid-column: 1;
+  }
+  .lib,
+  .stage,
+  .side {
+    grid-column: 1;
+    grid-row: 2;
+    min-width: 0;
+    min-height: 0;
+    border-left: 0;
+    border-right: 0;
+  }
+  .root[data-pane='rack'] .lib,
+  .root[data-pane='rack'] .side,
+  .root[data-pane='library'] .side,
+  .root[data-pane='inspect'] .lib {
+    display: none;
+  }
+  .root[data-pane='library'] .stage,
+  .root[data-pane='inspect'] .stage {
+    visibility: hidden;
+  }
+  .paneTabs {
+    grid-column: 1;
+    grid-row: 3;
+    display: flex;
+    background: var(--chrome-bg);
+    border-top: 1px solid var(--chrome-border);
+  }
+  .paneTab {
+    flex: 1 1 0;
+    min-height: 44px;
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--chrome-fg-muted);
+    background: transparent;
+    border: 0;
+    border-top: 2px solid transparent;
+    cursor: pointer;
+  }
+  .paneTab[aria-selected='true'] {
+    color: var(--chrome-fg);
+    border-top-color: var(--accent);
+  }
+  .paneTab:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -3px;
+  }
+  .paneBadge {
+    min-width: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    font-size: 11px;
+    line-height: 18px;
+    text-align: center;
+    background: var(--accent);
+    color: var(--accent-fg);
+  }
 }

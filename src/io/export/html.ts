@@ -63,18 +63,35 @@ function rulesPanel(rules: readonly RuleReportEntry[]): string {
 }
 
 // Minified inline viewer: wheel to zoom, drag to pan. No dependencies.
-const VIEWER_SCRIPT = `(function(){var st=document.getElementById('nx-stage');if(!st)return;var g=st.querySelector('svg');if(!g)return;g.style.transformOrigin='0 0';var s=1,tx=0,ty=0,down=false,lx=0,ly=0;function a(){g.style.transform='translate('+tx+'px,'+ty+'px) scale('+s+')';}st.addEventListener('wheel',function(e){e.preventDefault();var f=e.deltaY<0?1.1:0.9;s=Math.min(8,Math.max(0.1,s*f));a();},{passive:false});st.addEventListener('pointerdown',function(e){down=true;lx=e.clientX;ly=e.clientY;st.setPointerCapture&&st.setPointerCapture(e.pointerId);});window.addEventListener('pointermove',function(e){if(!down)return;tx+=e.clientX-lx;ty+=e.clientY-ly;lx=e.clientX;ly=e.clientY;a();});window.addEventListener('pointerup',function(){down=false;});var rb=document.getElementById('nx-reset');if(rb)rb.addEventListener('click',function(){s=1;tx=0;ty=0;a();});function find(id){var n=g.querySelectorAll('[data-id]');for(var i=0;i<n.length;i++)if(n[i].getAttribute('data-id')===id)return n[i];return null;}var bs=document.querySelectorAll('#nx-rules [data-target]');for(var j=0;j<bs.length;j++)(function(b){var el=find(b.getAttribute('data-target'));if(!el){b.disabled=true;b.title='Not in this export';return;}b.addEventListener('click',function(){var on=g.querySelectorAll('.nx-hit');for(var k=0;k<on.length;k++)on[k].classList.remove('nx-hit');var was=b.getAttribute('aria-pressed')==='true';for(var m=0;m<bs.length;m++)bs[m].setAttribute('aria-pressed','false');if(!was){el.classList.add('nx-hit');b.setAttribute('aria-pressed','true');}});})(bs[j]);})();`;
+// Changing it changes its hash: update VIEWER_SCRIPT_SHA256 (html.test.ts tells you the value).
+export const VIEWER_SCRIPT = `(function(){var st=document.getElementById('nx-stage');if(!st)return;var g=st.querySelector('svg');if(!g)return;g.style.transformOrigin='0 0';var s=1,tx=0,ty=0,down=false,lx=0,ly=0;function a(){g.style.transform='translate('+tx+'px,'+ty+'px) scale('+s+')';}st.addEventListener('wheel',function(e){e.preventDefault();var f=e.deltaY<0?1.1:0.9;s=Math.min(8,Math.max(0.1,s*f));a();},{passive:false});st.addEventListener('pointerdown',function(e){down=true;lx=e.clientX;ly=e.clientY;st.setPointerCapture&&st.setPointerCapture(e.pointerId);});window.addEventListener('pointermove',function(e){if(!down)return;tx+=e.clientX-lx;ty+=e.clientY-ly;lx=e.clientX;ly=e.clientY;a();});window.addEventListener('pointerup',function(){down=false;});var rb=document.getElementById('nx-reset');if(rb)rb.addEventListener('click',function(){s=1;tx=0;ty=0;a();});function find(id){var n=g.querySelectorAll('[data-id]');for(var i=0;i<n.length;i++)if(n[i].getAttribute('data-id')===id)return n[i];return null;}var bs=document.querySelectorAll('#nx-rules [data-target]');for(var j=0;j<bs.length;j++)(function(b){var el=find(b.getAttribute('data-target'));if(!el){b.disabled=true;b.title='Not in this export';return;}b.addEventListener('click',function(){var on=g.querySelectorAll('.nx-hit');for(var k=0;k<on.length;k++)on[k].classList.remove('nx-hit');var was=b.getAttribute('aria-pressed')==='true';for(var m=0;m<bs.length;m++)bs[m].setAttribute('aria-pressed','false');if(!was){el.classList.add('nx-hit');b.setAttribute('aria-pressed','true');}});})(bs[j]);})();`;
+
+/**
+ * base64 SHA-256 of VIEWER_SCRIPT, for the file's CSP. The export allows exactly
+ * this one script — not 'unsafe-inline' — so even if markup were ever smuggled
+ * into the embedded SVG, an injected <script> or on*= handler would not run.
+ * (A constant, because the builder is synchronous and WebCrypto is not;
+ * html.test.ts recomputes it and fails if the script and hash drift apart.)
+ */
+export const VIEWER_SCRIPT_SHA256 = 'R4P9GrWtuBiMpo5MpHWco1NbkmlVRIv3aX+JIZGAaDk=';
+
+/** A whole, non-negative count for the header (never raw model data in markup). */
+function count(n: unknown): number {
+  return typeof n === 'number' && Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0;
+}
 
 /** Build a complete, self-contained HTML document embedding `svg` with a pan/zoom viewer. */
 export function buildStandaloneHtml(svg: string, meta: StandaloneHtmlMeta): string {
   const title = escapeHtml(meta.projectName || 'NexMap diagram');
   const rules = meta.rules && meta.rules.length > 0 ? rulesPanel(meta.rules) : '';
+  const devices = count(meta.deviceCount);
+  const links = count(meta.linkCount);
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-${VIEWER_SCRIPT_SHA256}'; img-src data:">
 <title>${title} — NexMap</title>
 <style>
   :root { color-scheme: light dark; }
@@ -116,7 +133,7 @@ export function buildStandaloneHtml(svg: string, meta: StandaloneHtmlMeta): stri
 <body>
 <header>
   <h1>${title}</h1>
-  <span class="meta">${meta.deviceCount} device${meta.deviceCount === 1 ? '' : 's'} · ${meta.linkCount} link${meta.linkCount === 1 ? '' : 's'}</span>
+  <span class="meta">${devices} device${devices === 1 ? '' : 's'} · ${links} link${links === 1 ? '' : 's'}</span>
   <span class="spacer"></span>
   <button id="nx-reset" type="button">Reset view</button>
 </header>

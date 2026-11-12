@@ -58,16 +58,24 @@ import {
   createTextObject,
   createView,
   createVlan,
+  clampRackUnits,
+  isSafeImageHref,
 } from '@/model/schema';
 import { cloneBlocks } from '@/model/callout';
 import { validate, resetIssueIds } from '@/model/validate';
 import { SpatialIndex, type Box } from '@/lib/spatial-index';
 import { computeAlignSnap, computeSpacingSnap, type AlignGuide } from '@/canvas/align';
-import { autoLayoutPositions } from '@/lib/layout';
+import { autoLayoutGrouped, autoLayoutPositions } from '@/lib/layout';
 import { avoidRoute } from '@/lib/routing';
 import { pointInPolygon, polylineIntersectsBox, segmentHitsRect, type Point } from '@/lib/geometry';
 import { PARALLEL_LINK_SPACING, routePoints } from '@/canvas/connector';
-import { parseNexText, buildModel, type Diagnostic as NexDiagnostic } from '@/lib/nextext';
+import {
+  parseNexText,
+  planNexText,
+  nexTextHandles,
+  type Diagnostic as NexDiagnostic,
+  type NexTextPlan,
+} from '@/lib/nextext';
 import { analyzeHealth, edgeDisjointPaths, type HealthReport } from '@/lib/health';
 import { fabricEdges } from '@/sim/fabric';
 import { pickHub, starEdges } from '@/sim/hub';
@@ -290,8 +298,15 @@ function cloneMovable(
       extra: item.extra ? { ...item.extra } : undefined,
     });
   }
-  return createImageObject(x, y, item.width, item.height, layerId, item.href, {
-    opacity: item.opacity,
+  // A pasted image may only carry an embedded (data:) source — the same rule the
+  // load path enforces — so a clone can never put a remote href into an export.
+  const href = isSafeImageHref(item.href) ? item.href : '';
+  const opacity =
+    typeof item.opacity === 'number' && Number.isFinite(item.opacity)
+      ? Math.min(1, Math.max(0, item.opacity))
+      : undefined;
+  return createImageObject(x, y, item.width, item.height, layerId, href, {
+    opacity,
     z: item.z,
     groupId: item.groupId,
     extra: item.extra ? { ...item.extra } : undefined,
@@ -682,7 +697,18 @@ export interface ProjectStore {
    * the result, laid out, as one undoable transaction. Aborts without mutating if the
    * source has parse errors. Returns the (possibly warning-only) diagnostics.
    */
-  applyNexText(src: string): { ok: boolean; diagnostics: NexDiagnostic[] };
+  /**
+   * Sync the diagram to NexText: a lossless reconcile, not a rebuild (#85). Devices
+   * match by handle and keep their id, position, rack slot and interfaces; only what
+   * the text can express is patched. One undoable step. `changed` is false — and
+   * history untouched — when the text already matches. `dryRun` returns the plan
+   * (what would be updated/added/removed, and what a removal takes with it) without
+   * applying it. Canvas objects, racks and layers are never touched.
+   */
+  applyNexText(
+    src: string,
+    opts?: { dryRun?: boolean },
+  ): { ok: boolean; changed: boolean; diagnostics: NexDiagnostic[]; plan?: NexTextPlan };
   /** Layer id new imported/created objects attach to (the active layer). */
   defaultLayerId(): string;
   // Layer management (Phase 5). Layer config is document state and undoable.
@@ -771,6 +797,8 @@ export interface ProjectStore {
   distributeSelection(axis: 'h' | 'v'): void;
   /** Arrange all unlocked devices into a tidy layered layout (one undoable entry). */
   autoLayout(): void;
+  /** Auto-layout with each site (device Location) kept together as one block. */
+  autoLayoutBySite(): void;
   /** Group selected devices so they select/move together. */
   groupSelection(): void;
   /** Clear the group of selected devices. */
@@ -1709,6 +1737,12 @@ export const useProjectStore = create<ProjectStore>((rawSet, get) => {
     },
 
     addImage(href, width, height) {
+      // Only an embedded image (a data:image/… URI) may enter the document: a
+      // remote source would be fetched by whoever opens an export of it.
+      if (!isSafeImageHref(href)) {
+        set({ flash: 'That image could not be added — only images stored in the file itself are allowed.' });
+        return '';
+      }
       // Cap absurd dimensions; underlays render at the back via z=-1000.
       const w = Math.min(width, 4000);
       const h = Math.min(height, 4000);
@@ -2756,6 +2790,7 @@ export const useProjectStore = create<ProjectStore>((rawSet, get) => {
         canRedo: history.canRedo,
         dirty: true,
       });
+      get().runValidation();
     },
 
     importSemantics(subnets, vlans) {
@@ -2772,49 +2807,82 @@ export const useProjectStore = create<ProjectStore>((rawSet, get) => {
         canRedo: history.canRedo,
         dirty: true,
       });
+      get().runValidation();
     },
 
-    applyNexText(src) {
+    applyNexText(src, opts) {
       const result = parseNexText(src);
       if (result.diagnostics.some((d) => d.severity === 'error')) {
-        return { ok: false, diagnostics: result.diagnostics };
+        return { ok: false, changed: false, diagnostics: result.diagnostics };
       }
-      const built = buildModel(result, { layerId: firstLayerId() });
+      const devices = [...model.devices.values()];
+      // Locks hold here as for any delete: the same guard decides what may be removed,
+      // and the planner reports the rest as kept rather than promising to remove it.
+      const linkIds = [...model.links.keys()];
+      const free = get().deletable([...devices.map((d) => d.id), ...linkIds]);
+      const freeDevices = new Set(free.deviceIds);
+      const freeLinks = new Set(free.linkIds);
+      const plan = planNexText(
+        result,
+        {
+          devices,
+          links: [...model.links.values()],
+          subnets: [...model.subnets.values()],
+          vlans: [...model.vlans.values()],
+          racks: [...model.racks.values()],
+          rackCables: [...model.rackCables.values()],
+          protectedDeviceIds: new Set(devices.filter((d) => !freeDevices.has(d.id)).map((d) => d.id)),
+          protectedLinkIds: new Set(linkIds.filter((id) => !freeLinks.has(id))),
+        },
+        nexTextHandles(devices),
+        { layerId: firstLayerId() },
+      );
+      // Nothing to do: no dispatch, so no history entry and the redo stack survives.
+      if (opts?.dryRun || plan.isEmpty) {
+        return { ok: true, changed: false, diagnostics: result.diagnostics, plan };
+      }
 
-      // Replace the whole diagram in one undoable transaction: clear existing
-      // devices (links cascade), objects, subnets, and vlans, then add the new ones.
+      // One undoable transaction. Removals first (a device's links and rack cables
+      // cascade with it, as with any delete), then in-place patches, then additions.
+      // Canvas objects, racks and layers are deliberately not part of it.
       const cmds: Command[] = [];
-      const deviceIds = [...model.devices.keys()];
-      const objectIds = [...model.objects.keys()];
-      if (deviceIds.length || objectIds.length) {
-        cmds.push(new DeleteCommand(deviceIds, [], objectIds));
+      if (plan.removeDeviceIds.length || plan.removeLinkIds.length) {
+        cmds.push(new DeleteCommand(plan.removeDeviceIds, plan.removeLinkIds, []));
       }
-      for (const id of model.subnets.keys()) cmds.push(new DeleteSubnetCommand(id));
-      for (const id of model.vlans.keys()) cmds.push(new DeleteVlanCommand(id));
-      for (const d of built.devices) cmds.push(new AddDeviceCommand(d));
-      for (const l of built.links) cmds.push(new AddLinkCommand(l));
-      for (const s of built.subnets) cmds.push(new AddSubnetCommand(s));
-      for (const v of built.vlans) cmds.push(new AddVlanCommand(v));
+      for (const id of plan.removeSubnetIds) cmds.push(new DeleteSubnetCommand(id));
+      for (const id of plan.removeVlanIds) cmds.push(new DeleteVlanCommand(id));
+      for (const u of plan.deviceUpdates) cmds.push(new UpdateDeviceCommand(u.id, u.before, u.after));
+      for (const u of plan.linkUpdates) cmds.push(new UpdateLinkCommand(u.id, u.before, u.after));
+      for (const u of plan.subnetUpdates) cmds.push(new UpdateSubnetCommand(u.id, u.before, u.after));
+      for (const u of plan.vlanUpdates) cmds.push(new UpdateVlanCommand(u.id, u.before, u.after));
+      for (const d of plan.addDevices) cmds.push(new AddDeviceCommand(d));
+      for (const l of plan.addLinks) cmds.push(new AddLinkCommand(l));
+      for (const sn of plan.addSubnets) cmds.push(new AddSubnetCommand(sn));
+      for (const v of plan.addVlans) cmds.push(new AddVlanCommand(v));
 
+      history.commitCoalesceBoundary();
       history.dispatch(transaction('Apply NexText', cmds), model);
       history.commitCoalesceBoundary();
       rebuildIndex();
       resetIssueIds();
+      // Devices and links can both go (links also by cascade): keep only what still exists.
+      const exists = (id: string) => model.devices.has(id) || model.links.has(id) || model.objects.has(id);
       set({
         rev: get().rev + 1,
-        selection: new Set(),
+        selection: new Set([...get().selection].filter(exists)),
         issues: validate({
           devices: [...model.devices.values()],
           links: [...model.links.values()],
           vlans: [...model.vlans.values()],
           subnets: [...model.subnets.values()],
           racks: [...model.racks.values()],
+          rackCables: [...model.rackCables.values()],
         }),
         canUndo: history.canUndo,
         canRedo: history.canRedo,
         dirty: true,
       });
-      return { ok: true, diagnostics: result.diagnostics };
+      return { ok: true, changed: true, diagnostics: result.diagnostics, plan };
     },
 
     defaultLayerId() {
@@ -3219,6 +3287,35 @@ export const useProjectStore = create<ProjectStore>((rawSet, get) => {
       });
     },
 
+    autoLayoutBySite() {
+      const ds = [...model.devices.values()];
+      if (ds.length === 0) return;
+      const pos = autoLayoutGrouped(
+        ds.map((d) => ({ id: d.id, width: d.width, height: d.height, group: d.location })),
+        [...model.links.values()].map((l) => ({
+          sourceId: l.sourceId,
+          targetId: l.targetId,
+        })),
+      );
+      const cmds: Command[] = [];
+      for (const d of ds) {
+        if (d.locked || model.layers.get(d.layerId)?.locked) continue;
+        const p = pos.get(d.id);
+        if (!p || (p.x === d.x && p.y === d.y)) continue;
+        cmds.push(new MoveDeviceCommand(d.id, { x: d.x, y: d.y }, p));
+      }
+      if (cmds.length === 0) return;
+      history.dispatch(transaction('Auto-layout by site', cmds), model);
+      rebuildIndex();
+      history.commitCoalesceBoundary();
+      set({
+        rev: get().rev + 1,
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        dirty: true,
+      });
+    },
+
     groupSelection() {
       const ids = [...get().selection].filter((id) => movable(id));
       if (ids.length < 2) return;
@@ -3455,7 +3552,14 @@ export const useProjectStore = create<ProjectStore>((rawSet, get) => {
     },
 
     setFlowMode(on) {
-      set(on ? { flowMode: true } : { flowMode: false, flowFailed: [], flowTarget: null });
+      // Flow is an interaction mode (#87): entering it drops the selection and any
+      // armed tool so no editing chrome sits over the simulation. Nothing here
+      // touches the document — leaving Flow only forgets the what-if state.
+      if (on) {
+        if (!get().flowMode) set({ flowMode: true, mode: 'select', selection: new Set() });
+      } else {
+        set({ flowMode: false, flowFailed: [], flowTarget: null });
+      }
     },
     toggleFlowFailed(id) {
       const cur = get().flowFailed;
@@ -3639,6 +3743,7 @@ export const useProjectStore = create<ProjectStore>((rawSet, get) => {
         vlans: [...model.vlans.values()],
         subnets: [...model.subnets.values()],
         racks: [...model.racks.values()],
+        rackCables: [...model.rackCables.values()],
       });
       // Topology health rides the same debounce — all O(V+E), main-thread (eng-review lock).
       const health = analyzeHealth(devices, links);
@@ -4018,6 +4123,7 @@ export const useProjectStore = create<ProjectStore>((rawSet, get) => {
           vlans: [...model.vlans.values()],
           subnets: [...model.subnets.values()],
           racks: [...model.racks.values()],
+          rackCables: [...model.rackCables.values()],
         }),
         // Declared rules travel with the file (built-in v6 + custom v7): adopt the
         // design's own and evaluate them against the just-loaded model.
@@ -4185,7 +4291,11 @@ export const useProjectStore = create<ProjectStore>((rawSet, get) => {
       history.commitCoalesceBoundary();
       return r.id;
     },
-    updateRack(id, before, after) {
+    updateRack(id, before, patch) {
+      // A height is a whole number of U, 1–1000, whoever asks (the Racks table,
+      // a template, a script): a taller rack could not be drawn — or reopened.
+      const after =
+        patch.ruHeight === undefined ? patch : { ...patch, ruHeight: clampRackUnits(patch.ruHeight) };
       // A full-height rail item (PDU, vertical manager) follows its rack's new height.
       const rack = model.racks.get(id);
       const h = after.ruHeight;

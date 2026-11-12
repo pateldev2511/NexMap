@@ -218,6 +218,59 @@ export function createView(name: string, partial: Partial<View> = {}): View {
   return { id: nanoid(), name, hiddenLayers: [], ...partial };
 }
 
+/**
+ * The only image sources a document may carry: an EMBEDDED image — an inline
+ * `data:image/<subtype>` URI, whatever the subtype (png, tiff, heic, x-icon… paste
+ * accepts every `image/*`, and none of them can reach the network). Anything else
+ * — `https:`, `//host`, `file:`, `blob:`, `javascript:`, a non-image data URI —
+ * would make an exported SVG/HTML fetch from the network (or worse) when its
+ * recipient opens it, which the local-first promise forbids. Checked wherever an
+ * image enters the document (addImage, load, paste) and again by the exporters.
+ */
+const SAFE_IMAGE_HREF = /^data:image\/[a-z0-9.+-]+[;,]/i;
+
+export function isSafeImageHref(href: unknown): href is string {
+  return typeof href === 'string' && SAFE_IMAGE_HREF.test(href);
+}
+
+/** Whether an (unsafe) image source names somewhere outside the file, for the warning text. */
+export function isRemoteHref(href: unknown): boolean {
+  return typeof href === 'string' && /^\s*(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(href);
+}
+
+/**
+ * A paint value safe to write into an exported SVG attribute: a hex colour, a
+ * colour name / keyword (`none`, `transparent`, `currentColor`…), an
+ * rgb()/rgba()/hsl()/hsla() function, or a `var(--token)`. Above all NOT a
+ * `url(...)` paint server: `stroke="url(https://…)"` makes the export's reader
+ * fetch it. The app's own pickers store hex.
+ */
+const SAFE_COLOR =
+  /^(?:#[0-9a-f]{3,8}|[a-z]{1,32}|(?:rgba?|hsla?)\([-+0-9.,%\s/a-z]{1,64}\)|var\(--[a-z0-9_-]{1,64}\))$/i;
+
+export function isSafeColor(value: unknown): value is string {
+  return typeof value === 'string' && !/url\s*\(/i.test(value) && SAFE_COLOR.test(value.trim());
+}
+
+/** `value` if it is a safe paint, else `fallback`. */
+export function safeColor(value: unknown, fallback: string): string {
+  return isSafeColor(value) ? value.trim() : fallback;
+}
+
+/** Tallest rack the editor supports: the elevation draws one row per U. */
+export const MIN_RACK_UNITS = 1;
+export const MAX_RACK_UNITS = 1000;
+
+/** A rack height as the editor stores it: a whole number of U, 1–1000. */
+export function clampRackUnits(value: unknown): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n)) return MIN_RACK_UNITS;
+  return Math.min(MAX_RACK_UNITS, Math.max(MIN_RACK_UNITS, Math.round(n)));
+}
+
+/** Largest |x|, |y|, width or height a device/object may have (scene px). */
+export const MAX_COORD = 1e7;
+
 export function isCanvasObject(v: unknown): v is CanvasObject {
   const k = (v as CanvasObject | null)?.kind;
   return (

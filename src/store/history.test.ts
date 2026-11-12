@@ -103,6 +103,24 @@ describe('History — basic undo/redo', () => {
     h.dispatch(new AddDeviceCommand(createDevice('switch', 0, 0, LAYER)), s);
     expect(h.canRedo).toBe(false);
   });
+
+  it('an identity dispatch leaves the redo stack intact', () => {
+    const s = emptyModel(NOW);
+    const a = createDevice('router', 0, 0, LAYER);
+    const b = createDevice('switch', 0, 0, LAYER);
+    const link = createLink(a.id, b.id, LAYER);
+    const h = new History();
+    h.dispatch(new AddDeviceCommand(a), s);
+    h.dispatch(new AddDeviceCommand(b), s);
+    h.dispatch(new AddLinkCommand(link), s);
+    h.dispatch(new UpdateLinkCommand(link.id, { vlan: '20' }, { vlan: '30' }), s);
+    h.undo(s);
+    expect(h.canRedo).toBe(true);
+    h.dispatch(new UpdateLinkCommand(link.id, { vlan: '20' }, { vlan: '20' }), s);
+    expect(h.canRedo).toBe(true);
+    h.redo(s);
+    expect(s.links.get(link.id)!.vlan).toBe('30');
+  });
 });
 
 describe('History — property: undo-all === initial, redo-all === final', () => {

@@ -6,6 +6,7 @@ import {
   buildLinks,
   buildSubnets,
   buildVlans,
+  parseVlanId,
   detectCsvKind,
   DEVICE_FIELDS,
   LINK_FIELDS,
@@ -315,7 +316,7 @@ describe('detectCsvKind + semantics import', () => {
 
   it('buildSubnets maps cidr/gateway/vlan_id', () => {
     const csv = parseCsv('cidr,gateway,vlan_id,name\n10.0.0.0/24,10.0.0.1,10,Servers');
-    const subs = buildSubnets(csv.rows, csv.headers);
+    const subs = buildSubnets(csv.rows, csv.headers).items;
     expect(subs).toHaveLength(1);
     expect(subs[0]!.cidr).toBe('10.0.0.0/24');
     expect(subs[0]!.gateway).toBe('10.0.0.1');
@@ -324,9 +325,36 @@ describe('detectCsvKind + semantics import', () => {
 
   it('buildVlans maps vlan_id/name', () => {
     const csv = parseCsv('vlan_id,name,zone\n20,Voice,Floor1');
-    const vlans = buildVlans(csv.rows, csv.headers);
+    const vlans = buildVlans(csv.rows, csv.headers).items;
     expect(vlans).toHaveLength(1);
     expect(vlans[0]!.vlanId).toBe(20);
     expect(vlans[0]!.name).toBe('Voice');
+  });
+
+  it('parseVlanId accepts only plain digits after trim', () => {
+    expect(parseVlanId(' 10 ')).toBe(10);
+    for (const bad of ['VLAN-ten', 'n/a', '10.5', '1e1', '0x10', '', '  ', '-5', undefined]) {
+      expect(parseVlanId(bad)).toBeNull();
+    }
+  });
+
+  it('buildVlans skips non-numeric ids with a warning, never NaN', () => {
+    const csv = parseCsv('vlan_id,name\nVLAN-ten,A\nn/a,B\n10.5,C\n1e1,D\n 10 ,E\n5000,F');
+    const r = buildVlans(csv.rows, csv.headers);
+    expect(r.items.map((v) => v.vlanId)).toEqual([10, 5000]); // out-of-range kept
+    expect(r.items.every((v) => Number.isInteger(v.vlanId))).toBe(true);
+    expect(r.warnings).toContain('Row 1: VLAN id "VLAN-ten" is not a number — skipped.');
+    expect(r.warnings.filter((w) => w.endsWith('is not a number — skipped.'))).toHaveLength(4);
+    expect(r.warnings.some((w) => w.includes('5000'))).toBe(true);
+    expect(r.skipped).toBe(4);
+  });
+
+  it('buildSubnets keeps a row with a bad VLAN, vlanId undefined, plus a warning', () => {
+    const csv = parseCsv('cidr,vlan_id\n10.0.0.0/24,VLAN-ten\n10.0.1.0/24,1e1\n10.0.2.0/24,\n10.0.3.0/24, 20 ');
+    const r = buildSubnets(csv.rows, csv.headers);
+    expect(r.items.map((x) => x.vlanId)).toEqual([undefined, undefined, undefined, 20]);
+    expect(r.warnings).toHaveLength(2);
+    expect(r.warnings[0]).toContain('Row 1');
+    expect(r.skipped).toBe(0);
   });
 });
