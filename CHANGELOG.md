@@ -13,6 +13,31 @@ the cables down to the hardware, with a user control to dial the motion.
 
 ### Added
 
+- **NexText edits your design instead of replacing it.** Apply now syncs the text
+  with what you have: devices keep their position, rack slot, ports and cables,
+  two devices with the same name stay separate, and notes, shapes and racks are
+  never touched. Unchanged text says "No changes"; removing a line asks first
+  and names what goes with it; locked devices are kept. Names with `#`, quotes
+  or backslashes survive the round trip. (#85, #88)
+- **Stress-test is its own mode.** While Flow is on, clicks always pull the
+  device you clicked — at any zoom and in the isometric view — and nothing can
+  be edited or deleted by accident. (#87)
+- **Rack designer on narrow windows.** Below 900px the library, rack and
+  inspector show one at a time behind a bottom tab bar, so every control is
+  reachable down to phone width. (#89)
+- **Passive rack gear isn't a network problem.** PDUs, cable managers, patch
+  panels and blanks are no longer reported as disconnected devices; a device's
+  "Network role" can be set by hand. (#91)
+- **Auto-layout by site.** Lays out each Location as its own block. (#90)
+- **Small, sharp PDFs.** A large diagram that used to export as a 182 MB PDF now
+  comes out under 1 MB, with a warning when labels would print too small. (#86)
+- **Safer files in and out.** A crafted file can no longer make an exported SVG
+  or HTML page contact an outside address or run script; damaged files are
+  refused cleanly, and any repair made while opening is shown. (#72, #78)
+- **Fewer dead ends.** The start gallery gets out of the way once you build
+  anything, a crashed panel offers "Try again" and "Save a copy" instead of a
+  blank page, unreadable files and bad CSV VLAN ids say so, and the command
+  palette works with screen readers. (#69, #70, #73, #74, #76, #83)
 - **A new logo: the routed N.** The letter N drawn as one network cable through
   two nodes, with a signal on the link. It's the app icon, the favicon, the
   home-screen icon and the link preview, and in the app the cable draws itself
