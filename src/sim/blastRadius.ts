@@ -77,12 +77,22 @@ export function isEgressType(type: DeviceType): boolean {
   return (EGRESS_RANK[type] ?? 0) > 0;
 }
 
+/** Undirected adjacency: node id → neighbour ids. */
+export type Adjacency = Map<string, Set<string>>;
+
+const NONE: ReadonlySet<string> = new Set();
+
+/** The full (nothing-failed) adjacency — build once and hand to `egressNodes` to skip a rebuild. */
+export function baseAdjacency(devices: Device[], links: Link[]): Adjacency {
+  return buildAdjacency(devices, links, NONE);
+}
+
 /** Undirected adjacency, skipping self-loops, dangling endpoints, and `exclude`d nodes. */
 function buildAdjacency(
   devices: Device[],
   links: Link[],
-  exclude: Set<string>,
-): Map<string, Set<string>> {
+  exclude: ReadonlySet<string>,
+): Adjacency {
   const adj = new Map<string, Set<string>>();
   for (const d of devices) if (!exclude.has(d.id)) adj.set(d.id, new Set());
   for (const l of links) {
@@ -154,8 +164,12 @@ function activeLinks(links: Link[], dist: Map<string, number>): Set<string> {
  * would make failing it read as a total outage even though its twin survives.
  * Order is resolved by id so the result is deterministic.
  */
-export function egressNodes(devices: Device[], links: Link[]): string[] {
-  const adj = buildAdjacency(devices, links, new Set());
+export function egressNodes(
+  devices: Device[],
+  links: Link[],
+  /** Optional prebuilt `baseAdjacency(devices, links)` — must describe the same graph. */
+  adj: Adjacency = baseAdjacency(devices, links),
+): string[] {
   const linked = devices.filter((d) => (adj.get(d.id)?.size ?? 0) > 0);
   const ranked = linked
     .filter((d) => (EGRESS_RANK[d.type] ?? 0) > 0)
@@ -192,12 +206,17 @@ export function blastRadius(
   const failedSet = new Set(failed);
   const known = new Set(devices.map((d) => d.id));
   const chosen = (opts.targets ?? []).filter((id) => known.has(id));
-  const egress = chosen.length ? [...new Set(chosen)] : egressNodes(devices, links);
+  // Two adjacency builds per call, no more (#80): the intact graph (shared with
+  // egress selection) and the graph with the failed devices pulled (shared by the
+  // "after" BFS and the detour walk below).
+  const beforeAdj = baseAdjacency(devices, links);
+  const afterAdj = failedSet.size ? buildAdjacency(devices, links, failedSet) : beforeAdj;
+  const egress = chosen.length ? [...new Set(chosen)] : egressNodes(devices, links, beforeAdj);
   const anchor = egress[0] ?? null;
 
-  const distBefore = bfsLayers(buildAdjacency(devices, links, new Set()), egress);
+  const distBefore = bfsLayers(beforeAdj, egress);
   const survivingEgress = egress.filter((id) => !failedSet.has(id));
-  const distAfter = bfsLayers(buildAdjacency(devices, links, failedSet), survivingEgress);
+  const distAfter = bfsLayers(afterAdj, survivingEgress);
 
   const isolated = new Set<string>();
   for (const id of distBefore.keys()) {
@@ -231,7 +250,6 @@ export function blastRadius(
     if (!activeBefore.has(id) && !deadLinks.has(id)) rerouted.add(id);
   }
 
-  const afterAdj = buildAdjacency(devices, links, failedSet);
   const pairLink = new Map<string, string>();
   for (const l of links) {
     if (l.sourceId === l.targetId || deadLinks.has(l.id)) continue;

@@ -150,6 +150,13 @@ export interface Device {
    * ("cm-01"). Additive and optional.
    */
   rackAccessory?: 'cable-manager' | 'none';
+  /**
+   * Whether this device belongs in the logical network (additive and optional). Absent →
+   * automatic: power gear, patch panels, cable managers and port-less rack fillers are
+   * physical-only; everything else is a network device. Read through
+   * `expectsLogicalLinks` (model/topologyRole.ts), which ignores any other value.
+   */
+  topologyRole?: 'logical' | 'physical-only';
   /** Unit list price (USD) for the bill-of-materials cost rollup (schema v3 additive). Optional. */
   priceUsd?: number;
   /** Airflow direction for hot-aisle hinting (schema v3 additive). Absent → front-to-rear. */

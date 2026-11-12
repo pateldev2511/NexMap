@@ -36,8 +36,8 @@ vi.mock('./draft', async (importOriginal) => {
   return {
     ...real,
     putDraft: vi.fn(async () => ({ ok: true as const })),
-    getLatestDraft: vi.fn(async () => null),
-    getDraft: vi.fn(async () => null),
+    readLatestDraft: vi.fn(async () => ({ ok: true as const, value: null })),
+    readDraft: vi.fn(async () => ({ ok: true as const, value: null })),
     deleteDraft: vi.fn(async () => {}),
     absorbStashedDraft: vi.fn(async () => {}),
     stashDraftSync: vi.fn(() => true),
@@ -385,9 +385,10 @@ describe('read-only second tab (#24)', () => {
   }
 
   it('gates autosave and draft deletion, then takes over with the newer draft', async () => {
-    vi.mocked(draft.getLatestDraft).mockResolvedValueOnce(
-      draftOf('From tab one', 'p1', '2026-01-01T00:00:00.000Z'),
-    );
+    vi.mocked(draft.readLatestDraft).mockResolvedValueOnce({
+      ok: true,
+      value: draftOf('From tab one', 'p1', '2026-01-01T00:00:00.000Z'),
+    });
     const { result } = renderHook(() => usePersistence());
     act(() => h.writer?.(false));
     expect(result.current.readOnly).toBe(true);
@@ -405,9 +406,10 @@ describe('read-only second tab (#24)', () => {
     expect(putDraft).not.toHaveBeenCalled();
 
     // Tab one kept working after this tab opened; then it closed.
-    vi.mocked(draft.getDraft).mockResolvedValueOnce(
-      draftOf('Edited later in tab one', 'p1', '2026-01-02T00:00:00.000Z'),
-    );
+    vi.mocked(draft.readDraft).mockResolvedValueOnce({
+      ok: true,
+      value: draftOf('Edited later in tab one', 'p1', '2026-01-02T00:00:00.000Z'),
+    });
     act(() => h.writer?.(true));
     await waitFor(() => expect(s().projectName).toBe('Edited later in tab one'));
     expect(result.current.readOnly).toBe(false);
@@ -419,9 +421,10 @@ describe('read-only second tab (#24)', () => {
     const { result } = renderHook(() => usePersistence());
     act(() => h.writer?.(false));
     rename('Local view');
-    vi.mocked(draft.getDraft).mockResolvedValueOnce(
-      draftOf('Old', s().getDocument().project.id, '2000-01-01T00:00:00.000Z'),
-    );
+    vi.mocked(draft.readDraft).mockResolvedValueOnce({
+      ok: true,
+      value: draftOf('Old', s().getDocument().project.id, '2000-01-01T00:00:00.000Z'),
+    });
     act(() => h.writer?.(true));
     await waitFor(() => expect(result.current.status).not.toBe('readonly'));
     expect(s().projectName).toBe('Local view');
@@ -437,7 +440,7 @@ describe('recovery', () => {
     } as unknown as DraftRecord['doc'];
     delete (old as unknown as Record<string, unknown>).invariants;
     delete (old as unknown as Record<string, unknown>).customRules;
-    vi.mocked(draft.getLatestDraft).mockResolvedValueOnce(draft.makeDraft(old, 1, NOW));
+    vi.mocked(draft.readLatestDraft).mockResolvedValueOnce({ ok: true, value: draft.makeDraft(old, 1, NOW) });
     const { result } = render();
     await waitFor(() => expect(result.current.recoverable).not.toBeNull());
     act(() => {
@@ -445,5 +448,97 @@ describe('recovery', () => {
     });
     expect(s().getDocument().schemaVersion).toBe(SCHEMA_VERSION);
     expect(s().racksAll()).toHaveLength(1);
+  });
+});
+
+describe('draft read failures (#76)', () => {
+  it('launch: a failed read shows a notice instead of silently starting fresh', async () => {
+    vi.mocked(draft.readLatestDraft).mockResolvedValueOnce({ ok: false, message: 'boom' });
+    const { result } = renderHook(() => usePersistence());
+    await waitFor(() => expect(result.current.notice).toMatch(/Couldn't read autosaved drafts/));
+    expect(result.current.recoverable).toBeNull();
+  });
+});
+
+describe('a load that had to repair the file says so (never silently)', () => {
+  /** A document needing two kinds of repair: an image at an outside address, an over-tall rack. */
+  function damaged(name: string, projectId = 'p-damaged'): DraftRecord['doc'] {
+    const doc = createEmptyDocument(NOW);
+    doc.project = { ...doc.project, id: projectId, name };
+    doc.racks.push({ id: 'r', name: 'MDF', ruHeight: 5000 });
+    doc.objects.push({
+      id: 'img', kind: 'image', x: 0, y: 0, width: 10, height: 10, layerId: doc.layers[0]!.id,
+      href: 'https://tracker.example/p.png',
+    });
+    return doc;
+  }
+  const SUMMARY =
+    /with 2 repairs: 1 image linked to an outside address was removed; 1 rack height was limited to 1000U\./;
+
+  it('open: the notice lists the repairs in plain words', async () => {
+    const { result } = render();
+    await act(async () => {
+      expect(await result.current.openText(JSON.stringify(damaged('Opened')))).toBe(true);
+    });
+    expect(s().projectName).toBe('Opened');
+    expect(s().racksAll()[0]!.ruHeight).toBe(1000);
+    expect(s().objectsAll()).toHaveLength(0);
+    expect(result.current.notice).toMatch(SUMMARY);
+    expect(result.current.notice).toMatch(/^Opened with/);
+    expect(result.current.notice).not.toMatch(/href|schema|sanitiz/i);
+  });
+
+  it('open: an upgraded AND repaired file reports both', async () => {
+    const old = { ...damaged('Old'), schemaVersion: 6 } as unknown as Record<string, unknown>;
+    delete old.customRules;
+    const { result } = render();
+    await act(async () => {
+      expect(await result.current.openText(JSON.stringify(old))).toBe(true);
+    });
+    expect(result.current.notice).toMatch(SUMMARY);
+    expect(result.current.notice).toMatch(/Upgraded this file from schema v6/);
+  });
+
+  it('open: a clean file raises no repair notice', async () => {
+    const { result } = render();
+    await act(async () => {
+      expect(await result.current.openText(docText('Clean'))).toBe(true);
+    });
+    expect(result.current.notice).toBeNull();
+  });
+
+  it('recover: the notice lists the repairs', async () => {
+    vi.mocked(draft.readLatestDraft).mockResolvedValueOnce({
+      ok: true,
+      value: draft.makeDraft(damaged('Draft'), 1, NOW),
+    });
+    const { result } = render();
+    await waitFor(() => expect(result.current.recoverable).not.toBeNull());
+    act(() => {
+      expect(result.current.recover()).toBe(true);
+    });
+    expect(s().racksAll()[0]!.ruHeight).toBe(1000);
+    expect(result.current.notice).toMatch(SUMMARY);
+    expect(result.current.notice).toMatch(/^Recovered with/);
+  });
+
+  it('taking over from another tab: the notice lists the repairs', async () => {
+    // Start from the mocks' defaults: no draft queued by an earlier test.
+    vi.mocked(draft.readLatestDraft).mockReset().mockResolvedValue({ ok: true, value: null });
+    vi.mocked(draft.readDraft).mockReset().mockResolvedValue({ ok: true, value: null });
+    const { result } = renderHook(() => usePersistence());
+    act(() => h.writer?.(false));
+    await act(async () => {}); // let the launch-time draft reads settle first
+    const projectId = s().getDocument().project.id;
+    vi.mocked(draft.readDraft).mockResolvedValueOnce({
+      ok: true,
+      value: draft.makeDraft(damaged('From the other tab', projectId), 1, '2099-01-01T00:00:00.000Z'),
+    });
+    act(() => h.writer?.(true));
+    await act(async () => {});
+    await waitFor(() => expect(s().projectName).toBe('From the other tab'));
+    expect(s().racksAll()[0]!.ruHeight).toBe(1000);
+    expect(result.current.notice).toMatch(SUMMARY);
+    expect(result.current.notice).toMatch(/latest autosave/);
   });
 });

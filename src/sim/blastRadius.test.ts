@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { blastRadius, blastVerdict, networkAnchor, egressNodes } from './blastRadius';
+import { blastRadius, blastVerdict, networkAnchor, egressNodes, baseAdjacency } from './blastRadius';
 import { createDevice, createLink } from '@/model/schema';
 import type { Device, DeviceType } from '@/model/types';
 
@@ -237,5 +237,125 @@ describe('blastRadius — a chosen destination (#46)', () => {
     const { isp, router, devices, links } = chain();
     const r = blastRadius(devices, links, [isp.id], { targets: ['gone'] });
     expect(r.destinations).toEqual([isp.id, router.id]);
+  });
+});
+
+/**
+ * #80: blastRadius builds each adjacency once and hands the intact one to
+ * egressNodes. Pinned against a from-scratch reference (plain BFS, its own
+ * adjacency) on a redundant fabric — dual ISPs, dual cores, dual-homed access
+ * switches, hosts, one stranded device, one self-loop and one dangling link.
+ */
+describe('shared adjacency gives identical results (#80)', () => {
+  const ispA = dev('isp', 'ISP-A');
+  const ispB = dev('isp', 'ISP-B');
+  const coreA = dev('router', 'CORE-A');
+  const coreB = dev('router', 'CORE-B');
+  const access = [0, 1, 2, 3].map((i) => dev('switch', `ACC-${i}`));
+  const hosts = access.flatMap((_sw, i) => [dev('server', `H${i}a`), dev('end-user', `H${i}b`)]);
+  const stray = dev('server', 'STRAY');
+  const devices = [ispA, ispB, coreA, coreB, ...access, ...hosts, stray];
+  const links = [
+    link(ispA, coreA),
+    link(ispB, coreB),
+    link(coreA, coreB),
+    ...access.flatMap((sw) => [link(sw, coreA), link(sw, coreB)]),
+    ...access.flatMap((sw, i) => [link(sw, hosts[i * 2]!), link(sw, hosts[i * 2 + 1]!)]),
+    link(access[0]!, access[1]!),
+    link(stray, stray), // self-loop: ignored
+    createLink(coreA.id, 'ghost', L), // dangling endpoint: ignored
+  ];
+
+  /** Independent reference for the reachability sets. */
+  function reference(failed: string[], sources: string[]) {
+    const reach = (down: Set<string>) => {
+      const seen = new Set(sources.filter((id) => !down.has(id)));
+      const queue = [...seen];
+      while (queue.length) {
+        const u = queue.shift()!;
+        for (const l of links) {
+          if (l.sourceId === l.targetId) continue;
+          const v = l.sourceId === u ? l.targetId : l.targetId === u ? l.sourceId : null;
+          if (!v || down.has(v) || seen.has(v) || !devices.some((d) => d.id === v)) continue;
+          seen.add(v);
+          queue.push(v);
+        }
+      }
+      return seen;
+    };
+    const down = new Set(failed);
+    const before = reach(new Set());
+    const after = reach(down);
+    return {
+      survived: after,
+      isolated: new Set([...before].filter((id) => !down.has(id) && !after.has(id))),
+      alreadyCut: new Set(devices.map((d) => d.id).filter((id) => !down.has(id) && !before.has(id))),
+    };
+  }
+
+  const scenarios: [string, string[]][] = [
+    ['nothing failed', []],
+    ['one ISP', [ispA.id]],
+    ['one core', [coreA.id]],
+    ['both cores', [coreA.id, coreB.id]],
+    ['an access switch', [access[2]!.id]],
+    ['both ISPs', [ispA.id, ispB.id]],
+    ['a core and its far ISP', [coreA.id, ispB.id]],
+    ['an unknown id', ['nope']],
+  ];
+
+  it('egressNodes is the same with or without a prebuilt adjacency', () => {
+    const adj = baseAdjacency(devices, links);
+    expect(egressNodes(devices, links, adj)).toEqual(egressNodes(devices, links));
+    // …including the no-egress fallback (highest degree).
+    const plain = devices.filter((d) => d.type === 'switch' || d.type === 'server' || d.type === 'end-user');
+    const plainLinks = links.filter((l) => plain.some((d) => d.id === l.sourceId) && plain.some((d) => d.id === l.targetId));
+    expect(egressNodes(plain, plainLinks, baseAdjacency(plain, plainLinks))).toEqual(egressNodes(plain, plainLinks));
+  });
+
+  it.each(scenarios)('%s: reachability matches the reference, default egress', (_name, failed) => {
+    const r = blastRadius(devices, links, failed);
+    const ref = reference(failed, egressNodes(devices, links));
+    expect(r.destinations).toEqual(egressNodes(devices, links));
+    expect(new Set(r.survived)).toEqual(ref.survived);
+    expect(new Set(r.isolated)).toEqual(ref.isolated);
+    expect(new Set(r.alreadyCut)).toEqual(ref.alreadyCut);
+    // Dead links are exactly those touching a failed or isolated device.
+    const gone = new Set([...failed, ...ref.isolated]);
+    expect(new Set(r.deadLinks)).toEqual(
+      new Set(links.filter((l) => gone.has(l.sourceId) || gone.has(l.targetId)).map((l) => l.id)),
+    );
+    for (const id of r.rerouted) expect(r.deadLinks.has(id)).toBe(false);
+  });
+
+  it.each(scenarios)('%s: reachability matches the reference, chosen destination', (_name, failed) => {
+    const r = blastRadius(devices, links, failed, { targets: [ispA.id] });
+    const ref = reference(failed, [ispA.id]);
+    expect(new Set(r.survived)).toEqual(ref.survived);
+    expect(new Set(r.isolated)).toEqual(ref.isolated);
+    expect(new Set(r.alreadyCut)).toEqual(ref.alreadyCut);
+  });
+
+  it('the redundant fabric holds when one core drops', () => {
+    const r = blastRadius(devices, links, [coreA.id]);
+    expect(r.isolated.size).toBe(0);
+    expect(r.alreadyCut).toEqual(new Set([stray.id]));
+    // Asked about ISP-A alone, CORE-A is the only way there: everything else drops.
+    const toIspA = blastRadius(devices, links, [coreA.id], { targets: [ispA.id] });
+    expect(toIspA.survived).toEqual(new Set([ispA.id]));
+    // Lose the access cross-link's shortcut owner and traffic detours, not dies.
+    const viaB = blastRadius(devices, links, [ispA.id, coreA.id]);
+    expect(viaB.isolated.size).toBe(0);
+  });
+
+  it('is deterministic call to call (no state leaks through the shared adjacency)', () => {
+    const snap = (failed: string[]) => {
+      const r = blastRadius(devices, links, failed);
+      return JSON.stringify([[...r.isolated], [...r.survived], [...r.deadLinks], [...r.rerouted], r.destinations]);
+    };
+    const first = snap([coreA.id]);
+    snap([coreA.id, coreB.id]);
+    snap([]);
+    expect(snap([coreA.id])).toBe(first);
   });
 });

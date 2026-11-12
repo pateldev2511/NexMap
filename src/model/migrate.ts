@@ -11,7 +11,16 @@
  *    entry shapes, unique ids) before the document is adopted (#26).
  */
 import { legacyToBlocks } from './callout';
-import { SCHEMA_VERSION } from './schema';
+import {
+  isRemoteHref,
+  isSafeColor,
+  isSafeImageHref,
+  MAX_COORD,
+  MAX_RACK_UNITS,
+  SCHEMA_VERSION,
+} from './schema';
+
+export { MAX_RACK_UNITS };
 import type { NexMapDocument } from './types';
 
 /** Each migration takes a doc at version N and returns a doc at version N+1. */
@@ -92,7 +101,20 @@ export const MIGRATIONS: Record<number, Migration> = {
 };
 
 export type LoadResult =
-  | { ok: true; doc: NexMapDocument; migratedFrom?: number }
+  | {
+      ok: true;
+      doc: NexMapDocument;
+      migratedFrom?: number;
+      /**
+       * What the load had to repair to make the file safe to open and export, as
+       * plain-language phrases ("1 rack height was limited to 1000U"). Absent when
+       * nothing was. Show them with loadRepairSummary() — a repair the user is not
+       * told about becomes permanent at the next autosave.
+       */
+      warnings?: string[];
+      /** How many individual values the warnings cover. */
+      repairs?: number;
+    }
   | {
       ok: false;
       reason: 'corrupt' | 'too-new' | 'invalid';
@@ -103,16 +125,27 @@ export type LoadResult =
 
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
-/** Recursively strip prototype-pollution keys from parsed JSON. */
-export function stripDangerousKeys<T>(value: T): T {
+/**
+ * Deepest nesting a document may have. Real documents are ~10 deep; the cap turns
+ * a crafted 200k-deep array into a clean refusal instead of a stack overflow.
+ */
+export const MAX_JSON_DEPTH = 256;
+
+/**
+ * Recursively strip prototype-pollution keys from parsed JSON (returns a deep
+ * copy). THROWS on input nested deeper than MAX_JSON_DEPTH — callers that
+ * promise not to throw (migrateDocument, the importers) catch it and refuse.
+ */
+export function stripDangerousKeys<T>(value: T, depth = 0): T {
+  if (depth > MAX_JSON_DEPTH) throw new RangeError('Document is nested too deeply.');
   if (Array.isArray(value)) {
-    return value.map((v) => stripDangerousKeys(v)) as unknown as T;
+    return value.map((v) => stripDangerousKeys(v, depth + 1)) as unknown as T;
   }
   if (value && typeof value === 'object') {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       if (DANGEROUS_KEYS.has(k)) continue;
-      out[k] = stripDangerousKeys(v);
+      out[k] = stripDangerousKeys(v, depth + 1);
     }
     return out as T;
   }
@@ -140,9 +173,23 @@ export function loadDocument(raw: string): LoadResult {
 /**
  * Migrate and validate an already-parsed document (a file's JSON, or an autosave
  * draft read back from IndexedDB — a draft written by an older build is at an
- * older schema too). Pure and total, like loadDocument.
+ * older schema too). Pure and total, like loadDocument: ANY throw underneath — a
+ * migration step tripping on malformed data, a document nested deeply enough to
+ * overflow the stack — becomes a `corrupt` refusal, never an exception (#72).
  */
 export function migrateDocument(parsed: unknown): LoadResult {
+  try {
+    return migrateUnsafe(parsed);
+  } catch {
+    return {
+      ok: false,
+      reason: 'corrupt',
+      message: 'This file is damaged and could not be read.',
+    };
+  }
+}
+
+function migrateUnsafe(parsed: unknown): LoadResult {
   if (!isPlainObject(parsed)) {
     return { ok: false, reason: 'invalid', message: 'Document root is not an object.' };
   }
@@ -209,10 +256,14 @@ export function migrateDocument(parsed: unknown): LoadResult {
     };
   }
 
+  // `doc` is our own deep copy (stripDangerousKeys), so repairing in place is safe.
+  const { warnings, repairs } = sanitizeDocumentCounted(doc);
+
   return {
     ok: true,
     doc: doc as unknown as NexMapDocument,
     ...(startVersion < SCHEMA_VERSION ? { migratedFrom: startVersion } : {}),
+    ...(warnings.length > 0 ? { warnings, repairs } : {}),
   };
 }
 
@@ -310,4 +361,276 @@ export function structuralProblem(
     }
   }
   return null;
+}
+
+/* ── Value sanitising ─────────────────────────────────────────────────────────
+ * structuralProblem() REFUSES only what the editor cannot index (a missing id, a
+ * non-finite coordinate). Everything else is REPAIRED here, and the user is told:
+ * a file the app's own UI could have produced must always open. Repairs cover
+ * what would hurt later — every numeric field an export interpolates must be a
+ * finite number (a string there could break out of an SVG attribute), colours
+ * must be plain paints (no `url(...)`), an image may only be embedded (a remote
+ * one would make the export phone home), and absurd geometry is limited.
+ */
+
+type Range = readonly [min: number, max: number];
+const ANY: Range = [-Number.MAX_VALUE, Number.MAX_VALUE];
+
+/**
+ * Optional numeric fields, by collection. ANY = "finite" only: the Inspector's
+ * own inputs put no bounds on these (font size, U position, U height…), so the
+ * loader must not either. The few ranges are wider than what the UI can make.
+ */
+const NUMERIC_FIELDS: Record<string, Record<string, Range>> = {
+  layers: { order: ANY },
+  devices: {
+    iconScale: ANY,
+    labelHeight: ANY,
+    ru: ANY,
+    ruSpan: ANY,
+    watts: ANY,
+    weightKg: ANY,
+    depthMm: ANY,
+    priceUsd: ANY,
+    ratedAmps: ANY,
+    ratedVolts: ANY,
+    ratedPhases: ANY,
+    ratedWatts: ANY,
+    z: ANY,
+  },
+  links: { width: ANY },
+  objects: { z: ANY, opacity: [0, 1], fontSize: ANY },
+  racks: { maxWatts: ANY, maxWeightKg: ANY, depthMm: ANY, order: ANY },
+  rackCables: { lengthFt: ANY },
+};
+
+/** Optional text fields that reach an export and must be strings. */
+const STRING_FIELDS: Record<string, readonly string[]> = {
+  objects: ['label'],
+  rackCables: ['label'],
+};
+
+/** Colour fields, by collection → the value a bad one is repaired to (undefined = remove). */
+const COLOR_FIELDS: Record<string, Record<string, string | undefined>> = {
+  devices: { fill: undefined },
+  links: { color: undefined },
+  objects: { color: undefined, fill: undefined, stroke: undefined },
+  vlans: { color: undefined },
+  rackCables: { color: '#64748b' },
+};
+
+/** A finite number from a number or a numeric string; otherwise undefined. */
+function toFinite(v: unknown): number | undefined {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Make `entry[field]` a finite number in range. Absent/null stays as it is; a
+ * numeric string is converted; anything else is removed (the field's default
+ * applies). Returns whether it changed.
+ */
+function fixNumber(entry: Record<string, unknown>, field: string, [min, max]: Range): boolean {
+  const v = entry[field];
+  if (v === undefined || v === null) return false;
+  const n = toFinite(v);
+  if (n === undefined) {
+    delete entry[field];
+    return true;
+  }
+  const clamped = Math.min(max, Math.max(min, n));
+  if (clamped === v) return false;
+  entry[field] = clamped;
+  return true;
+}
+
+function finitePoint(p: unknown): p is { x: number; y: number } {
+  return (
+    isPlainObject(p) &&
+    typeof p.x === 'number' &&
+    typeof p.y === 'number' &&
+    Number.isFinite(p.x) &&
+    Number.isFinite(p.y)
+  );
+}
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * Repair a structurally valid document in place; returns plain-language phrases
+ * describing what was changed (empty when the file was clean).
+ */
+export function sanitizeDocument(doc: Record<string, unknown>): string[] {
+  return sanitizeDocumentCounted(doc).warnings;
+}
+
+function sanitizeDocumentCounted(doc: Record<string, unknown>): {
+  warnings: string[];
+  repairs: number;
+} {
+  let remoteImages = 0;
+  let badImages = 0;
+  let rackHeights = 0;
+  let geometry = 0;
+  let colors = 0;
+  let values = 0;
+  const list = (name: string) =>
+    Array.isArray(doc[name]) ? (doc[name] as Record<string, unknown>[]) : [];
+
+  // Images: only an embedded source may stay; otherwise the whole object goes.
+  if (Array.isArray(doc.objects)) {
+    const kept = list('objects').filter((o) => {
+      if (o.kind !== 'image' || isSafeImageHref(o.href)) return true;
+      if (isRemoteHref(o.href)) remoteImages++;
+      else badImages++;
+      return false;
+    });
+    if (kept.length !== doc.objects.length) doc.objects = kept;
+  }
+
+  // Rack heights: whole-file refusal would lock the user out of their own work.
+  for (const r of list('racks')) {
+    if ((r.ruHeight as number) > MAX_RACK_UNITS) {
+      r.ruHeight = MAX_RACK_UNITS;
+      rackHeights++;
+    }
+  }
+
+  // Geometry: finite (checked structurally) but absurd boxes are limited (#78).
+  for (const name of ['devices', 'objects']) {
+    for (const e of list(name)) {
+      // Magnitude only: a negative size is odd but harmless, and the Inspector can make one.
+      for (const f of ['x', 'y', 'width', 'height']) {
+        if (fixNumber(e, f, [-MAX_COORD, MAX_COORD])) geometry++;
+      }
+    }
+  }
+
+  for (const [collection, fields] of Object.entries(NUMERIC_FIELDS)) {
+    for (const entry of list(collection)) {
+      for (const [field, range] of Object.entries(fields)) {
+        if (fixNumber(entry, field, range)) values++;
+      }
+    }
+  }
+  for (const [collection, fields] of Object.entries(STRING_FIELDS)) {
+    for (const entry of list(collection)) {
+      for (const field of fields) {
+        if (entry[field] !== undefined && typeof entry[field] !== 'string') {
+          delete entry[field];
+          values++;
+        }
+      }
+    }
+  }
+  for (const [collection, fields] of Object.entries(COLOR_FIELDS)) {
+    for (const entry of list(collection)) {
+      for (const [field, fallback] of Object.entries(fields)) {
+        const v = entry[field];
+        if (v === undefined && fallback === undefined) continue;
+        if (isSafeColor(v)) continue;
+        if (fallback === undefined) delete entry[field];
+        else entry[field] = fallback;
+        colors++;
+      }
+    }
+  }
+
+  for (const d of list('devices')) {
+    if (d.interfaces === undefined) continue;
+    if (!Array.isArray(d.interfaces)) {
+      delete d.interfaces;
+      values++;
+      continue;
+    }
+    for (const iface of d.interfaces) {
+      if (isPlainObject(iface) && fixNumber(iface, 'vlan', ANY)) values++;
+    }
+  }
+
+  for (const l of list('links')) {
+    if (l.waypoints === undefined) continue;
+    if (!Array.isArray(l.waypoints)) {
+      delete l.waypoints;
+      values++;
+      continue;
+    }
+    const pts = l.waypoints.filter(finitePoint);
+    if (pts.length !== l.waypoints.length) {
+      l.waypoints = pts;
+      values++;
+    }
+    for (const p of pts as Record<string, unknown>[]) {
+      for (const f of ['x', 'y']) if (fixNumber(p, f, [-MAX_COORD, MAX_COORD])) geometry++;
+    }
+  }
+
+  for (const o of list('objects')) {
+    if (o.kind !== 'text') continue;
+    if (o.leader !== undefined) {
+      const leader = o.leader;
+      const ok =
+        isPlainObject(leader) &&
+        typeof leader.dash === 'string' &&
+        toFinite(leader.width) !== undefined;
+      if (!ok) {
+        delete o.leader;
+        values++;
+      } else {
+        if (fixNumber(leader, 'width', ANY)) values++;
+        if (!isSafeColor(leader.color)) {
+          leader.color = '#2563eb';
+          colors++;
+        }
+      }
+    }
+    const anchor = o.anchor;
+    if (anchor !== undefined && anchor !== null) {
+      const ok =
+        isPlainObject(anchor) &&
+        ((anchor.type === 'device' && typeof anchor.id === 'string') ||
+          (anchor.type === 'point' && finitePoint(anchor)));
+      if (!ok) {
+        o.anchor = null;
+        values++;
+      }
+    }
+  }
+
+  const warnings: string[] = [];
+  const say = (n: number, one: string, many: string, was: string, were = was) => {
+    if (n > 0) warnings.push(`${plural(n, one, many)} ${n === 1 ? was : were}`);
+  };
+  say(remoteImages, 'image', 'images', 'linked to an outside address was removed', 'linked to an outside address were removed');
+  say(badImages, 'image', 'images', 'that was not stored in the file was removed', 'that were not stored in the file were removed');
+  say(rackHeights, 'rack height', 'rack heights', `was limited to ${MAX_RACK_UNITS}U`, `were limited to ${MAX_RACK_UNITS}U`);
+  say(geometry, 'position or size', 'positions or sizes', 'was out of range and was limited', 'were out of range and were limited');
+  say(colors, 'colour', 'colours', 'could not be used and was reset', 'could not be used and were reset');
+  say(values, 'setting', 'settings', 'could not be read and was reset', 'could not be read and were reset');
+  return {
+    warnings,
+    repairs: remoteImages + badImages + rackHeights + geometry + colors + values,
+  };
+}
+
+/**
+ * One plain sentence for the notice shown after a load that repaired something:
+ * "Opened with 2 repairs: 1 image linked to an outside address was removed;
+ * 1 rack height was limited to 1000U." Null when nothing was repaired.
+ */
+export function loadRepairSummary(
+  result: { warnings?: string[]; repairs?: number },
+  verb = 'Opened',
+): string | null {
+  const warnings = result.warnings ?? [];
+  if (warnings.length === 0) return null;
+  const n = result.repairs ?? warnings.length;
+  const MAX = 3;
+  const shown = warnings.slice(0, MAX);
+  if (warnings.length > MAX) shown.push(`and ${warnings.length - MAX} more kinds of repair`);
+  return `${verb} with ${plural(n, 'repair', 'repairs')}: ${shown.join('; ')}.`;
 }

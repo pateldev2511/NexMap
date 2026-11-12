@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildStandaloneHtml } from './html';
+import { createHash } from 'node:crypto';
+import { buildStandaloneHtml, VIEWER_SCRIPT, VIEWER_SCRIPT_SHA256 } from './html';
 import type { RuleReportEntry } from './rulesReport';
 
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect/></svg>';
@@ -16,6 +17,29 @@ describe('buildStandaloneHtml', () => {
     const html = buildStandaloneHtml(SVG, { projectName: 'x', deviceCount: 0, linkCount: 0 });
     expect(html).toContain("default-src 'none'");
     expect(html).toContain('Content-Security-Policy');
+  });
+
+  it('allows only its own viewer script: no unsafe-inline, hash matches the script', () => {
+    const html = buildStandaloneHtml(SVG, { projectName: 'x', deviceCount: 0, linkCount: 0 });
+    const csp = /Content-Security-Policy" content="([^"]*)"/.exec(html)![1]!;
+    const scriptSrc = csp.split(';').find((d) => d.trim().startsWith('script-src'))!;
+    expect(scriptSrc).not.toContain('unsafe-inline');
+    // If this fails after editing VIEWER_SCRIPT, set VIEWER_SCRIPT_SHA256 to the value on the right.
+    expect(VIEWER_SCRIPT_SHA256).toBe(createHash('sha256').update(VIEWER_SCRIPT, 'utf8').digest('base64'));
+    expect(scriptSrc.trim()).toBe(`script-src 'sha256-${VIEWER_SCRIPT_SHA256}'`);
+    // The hashed text is exactly what sits between the tags.
+    expect(html).toContain(`<script>${VIEWER_SCRIPT}</script>`);
+    expect(html.match(/<script/g)).toHaveLength(1);
+  });
+
+  it('never writes a non-numeric count into the markup', () => {
+    const html = buildStandaloneHtml(SVG, {
+      projectName: 'x',
+      deviceCount: '<img src=x>' as unknown as number,
+      linkCount: NaN,
+    });
+    expect(html).not.toContain('<img');
+    expect(html).toContain('0 devices · 0 links');
   });
 
   it('makes no external network references (img/script/link to http)', () => {

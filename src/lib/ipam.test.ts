@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { intToIpv4, usableHostRange, nextFreeHost, subnetUsage } from './ipam';
+import { intToIpv4, usableHostRange, nextFreeHost, subnetUsage, createHostAllocator } from './ipam';
 
 describe('intToIpv4', () => {
   it('formats unsigned ints, including the high bit', () => {
@@ -88,5 +88,47 @@ describe('subnetUsage', () => {
     const u = subnetUsage('10.0.0.0/30', ['10.0.0.1', '10.0.0.2'])!;
     expect(u.exhausted).toBe(true);
     expect(u.free).toBe(0);
+  });
+});
+
+describe('createHostAllocator — matches repeated nextFreeHost', () => {
+  function lcg(seed: number) {
+    let x = seed;
+    return () => ((x = (Math.imul(x, 1664525) + 1013904223) >>> 0) / 2 ** 32);
+  }
+
+  it('reproduces the exact sequence across prefixes, gateways, pre-used and cross-subnet addresses', () => {
+    const cidrs = ['10.0.0.0/24', '10.0.1.0/30', '10.0.2.0/31', '10.0.3.4/32', '10.0.0.0/24'];
+    const gateways: Array<string | undefined> = [undefined, '10.0.0.1', '10.0.0.7', '10.0.1.2', '10.0.2.1', '10.0.3.4'];
+    for (let seed = 1; seed <= 25; seed++) {
+      const rnd = lcg(seed);
+      const pre: string[] = [];
+      for (let i = 0; i < 30; i++) {
+        const sn = Math.floor(rnd() * 4);
+        pre.push(`10.0.${sn}.${Math.floor(rnd() * 12)}${rnd() < 0.2 ? '/24' : ''}`);
+      }
+      const used = [...pre];
+      const alloc = createHostAllocator(pre);
+      for (let i = 0; i < 120; i++) {
+        const cidr = cidrs[Math.floor(rnd() * cidrs.length)]!;
+        const gw = gateways[Math.floor(rnd() * gateways.length)];
+        const expected = nextFreeHost(cidr, used, gw ? { gateway: gw } : {});
+        expect(alloc.next(cidr, gw)).toBe(expected);
+        if (expected) used.push(expected);
+      }
+    }
+  });
+
+  it('a gateway only excludes within its own call', () => {
+    const a = createHostAllocator();
+    expect(a.next('10.0.0.0/24', '10.0.0.1')).toBe('10.0.0.2');
+    expect(a.next('10.0.0.0/24')).toBe('10.0.0.1');
+  });
+
+  it('add() marks addresses used; invalid CIDR returns null', () => {
+    const a = createHostAllocator();
+    a.add('10.0.0.1/24');
+    expect(a.next('10.0.0.0/24')).toBe('10.0.0.2');
+    expect(a.next('nope')).toBeNull();
   });
 });

@@ -6,6 +6,7 @@
  */
 import { createDevice, createLink } from '@/model/schema';
 import type { Device, DeviceType, Link } from '@/model/types';
+import { stripDangerousKeys } from '@/model/migrate';
 import { describeAmbiguous, deviceNameResolver, parseDeviceType } from './csvImport';
 
 // Keyword inference for free-text labels ("Core Router" → router). Order matters:
@@ -75,55 +76,201 @@ function bestGraphmlLabel(
   return labelish?.text ?? data[0]?.text ?? fallback;
 }
 
+const CSS_URL = /url\(\s*(?:"[^"]*"|'[^']*'|[^)]*)\s*\)/gi;
+
+/** Whether any `url(...)` inside an attribute value points outside the file. */
+function hasExternalUrl(value: string): boolean {
+  return (value.match(CSS_URL) ?? []).some(isExternalSvgReference);
+}
+
 function isExternalSvgReference(value: string): boolean {
-  const v = value.trim().replace(/^url\(\s*['"]?|['"]?\s*\)$/g, '');
+  const v = value
+    .trim()
+    .replace(/^url\(\s*['"]?|['"]?\s*\)$/g, '')
+    // Browsers ignore whitespace/control characters inside a scheme ("java\nscript:").
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u0020]/g, '');
   if (v.startsWith('#')) return false;
   if (/^(https?:)?\/\//i.test(v)) return true;
-  if (/^(file|ftp|blob):/i.test(v)) return true;
+  if (/^(file|ftp|blob|wss?|javascript|vbscript):/i.test(v)) return true;
   if (/^data:/i.test(v) && !/^data:image\/(?:png|jpe?g|gif|webp|svg\+xml);/i.test(v))
     return true;
   return false;
 }
 
 /**
+ * Split CSS into top-level chunks: whole rules (`sel { … }`, `@media { … }`) and,
+ * outside any block, single declarations / at-statements ending in `;`. Quotes
+ * and parentheses are respected, so `url(data:…;base64,…)` stays in one piece.
+ * Every character of the input lands in exactly one chunk.
+ */
+function cssChunks(css: string): string[] {
+  const chunks: string[] = [];
+  let start = 0;
+  let braces = 0;
+  let parens = 0;
+  let quote = '';
+  for (let i = 0; i < css.length; i++) {
+    const c = css[i]!;
+    if (c === '\\') {
+      i++; // an escape: skip whatever it escapes
+    } else if (quote) {
+      if (c === quote) quote = '';
+    } else if (c === '"' || c === "'") {
+      quote = c;
+    } else if (c === '(') {
+      parens++;
+    } else if (c === ')') {
+      parens = Math.max(0, parens - 1);
+    } else if (c === '{') {
+      braces++;
+    } else if (c === '}') {
+      braces = Math.max(0, braces - 1);
+      if (braces === 0) {
+        chunks.push(css.slice(start, i + 1));
+        start = i + 1;
+        parens = 0;
+      }
+    } else if (c === ';' && braces === 0 && parens === 0) {
+      chunks.push(css.slice(start, i + 1));
+      start = i + 1;
+    }
+  }
+  if (start < css.length) chunks.push(css.slice(start));
+  return chunks;
+}
+
+/** What may be left in CSS once its url(...) tokens are set aside: no scheme, no `//host`. */
+const CSS_REMOTE = /(?:^|[^a-z0-9+.-])(?:https?|ftp|file|blob|data|javascript|wss?):|(?:^|["'(,\s])\/\//i;
+
+/**
+ * Make a CSS fragment (a `style` attribute or a `<style>` sheet) reference nothing
+ * outside the file, one rule/declaration at a time:
+ *  - an `@import` is removed;
+ *  - an external `url(...)` target becomes `none` (local `#id` and embedded
+ *    `data:image/…` targets are kept);
+ *  - a rule/declaration that contains a backslash is removed: CSS escapes
+ *    (`\75rl(`, `ht\74ps:`) can spell a URL this cannot see;
+ *  - a rule/declaration that still names a remote scheme or a `//host` afterwards
+ *    (e.g. `image-set("https://…")`, which takes bare strings) is removed.
+ * Everything else — including a harmless `//` inside a string such as
+ * `content:"a//b"` — is kept as written.
+ */
+export function stripExternalCssReferences(css: string): { css: string; stripped: number } {
+  let stripped = 0;
+  const out: string[] = [];
+  for (const chunk of cssChunks(css.replace(/\/\*[\s\S]*?\*\//g, ''))) {
+    if (chunk.includes('\\') || /^\s*@import\b/i.test(chunk)) {
+      stripped++;
+      continue;
+    }
+    const rewritten = chunk.replace(CSS_URL, (m) => {
+      if (isExternalSvgReference(m)) {
+        stripped++;
+        return 'none';
+      }
+      return m;
+    });
+    // Judge what is left with the (safe) url() tokens set aside: base64 may contain "//".
+    const residue = rewritten.replace(CSS_URL, ' ');
+    if (/@import\b/i.test(residue) || CSS_REMOTE.test(residue)) {
+      stripped++;
+      continue;
+    }
+    out.push(rewritten);
+  }
+  const joined = out.join('');
+  // Belt and braces: the kept chunks, read as one text, must still be clean.
+  if (joined.includes('\\') || CSS_REMOTE.test(joined.replace(CSS_URL, ' '))) {
+    return { css: '', stripped: stripped + 1 };
+  }
+  return { css: joined, stripped };
+}
+
+const XML_ENTITIES = new Set(['amp', 'lt', 'gt', 'quot', 'apos']);
+const entityCache = new Map<string, string | null>();
+
+/** The text an HTML named entity stands for, or null if there is no such entity. */
+function decodeHtmlEntity(entity: string): string | null {
+  let hit = entityCache.get(entity);
+  if (hit === undefined) {
+    const text = new DOMParser().parseFromString(entity, 'text/html').body?.textContent ?? entity;
+    // A real entity is one or two characters. Longer means the HTML parser only
+    // matched a legacy prefix (`&notanentity;` → "¬anentity;"): not an entity.
+    hit = text === entity || [...text].length > 2 ? null : text;
+    entityCache.set(entity, hit);
+  }
+  return hit;
+}
+
+/**
+ * XML knows five named entities; HTML knows thousands, and an HTML serialiser
+ * (DOMPurify's) writes a non-breaking space as `&nbsp;` — which is a fatal error
+ * to the XML parser. Rewrite every HTML-only named entity as the numeric
+ * reference for the same character (`&nbsp;` → `&#160;`). An unknown name is left
+ * alone, so genuinely malformed input still fails to parse.
+ */
+function htmlEntitiesToNumeric(svg: string): string {
+  return svg.replace(/&([a-zA-Z][a-zA-Z0-9]{1,31});/g, (m, name: string) => {
+    if (XML_ENTITIES.has(name)) return m;
+    const text = decodeHtmlEntity(m);
+    if (text === null) return m;
+    return [...text].map((ch) => `&#${ch.codePointAt(0)};`).join('');
+  });
+}
+
+/**
  * Remove external fetch references from sanitized SVG underlays. DOMPurify handles
  * scripts/unsafe markup; this extra pass protects the local-first privacy promise
- * by preventing imported SVGs from loading remote images, filters, masks, etc.
+ * by preventing imported SVGs from loading remote images, filters, masks, fonts,
+ * etc. — in attributes, `style` attributes and `<style>` sheets alike.
+ *
+ * Fails CLOSED: an SVG that does not parse cannot be checked, so it is REJECTED
+ * (throws an Error with a user-facing message) rather than passed through as-is.
  */
 export function stripExternalSvgReferences(svg: string): {
   svg: string;
   stripped: number;
 } {
-  const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
-  if (doc.querySelector('parsererror')) return { svg, stripped: 0 };
+  const doc = new DOMParser().parseFromString(htmlEntitiesToNumeric(svg), 'image/svg+xml');
+  if (doc.querySelector('parsererror') || doc.documentElement?.localName !== 'svg') {
+    throw new Error(
+      'this SVG is not well-formed, so it could not be checked for external references',
+    );
+  }
   let stripped = 0;
   doc.querySelectorAll('script,foreignObject,iframe,object,embed').forEach((el) => {
     stripped++;
     el.remove();
   });
-  const attrs = [
-    'href',
-    'xlink:href',
-    'src',
-    'filter',
-    'clip-path',
-    'mask',
-    'marker-start',
-    'marker-mid',
-    'marker-end',
-    'fill',
-    'stroke',
-  ];
-  doc.querySelectorAll('*').forEach((el) => {
-    for (const attr of attrs) {
-      const value = el.getAttribute(attr);
-      if (value && isExternalSvgReference(value)) {
-        el.removeAttribute(attr);
-        stripped++;
-      }
+  doc.querySelectorAll('style').forEach((el) => {
+    const res = stripExternalCssReferences(el.textContent ?? '');
+    if (res.stripped > 0) {
+      el.textContent = res.css;
+      stripped += res.stripped;
     }
+  });
+  const linkAttrs = new Set(['href', 'xlink:href', 'src']);
+  doc.querySelectorAll('*').forEach((el) => {
     for (const attr of [...el.attributes]) {
-      if (/^on/i.test(attr.name)) {
+      const name = attr.name.toLowerCase();
+      if (/^on/.test(name)) {
+        el.removeAttribute(attr.name);
+        stripped++;
+      } else if (name === 'style') {
+        const res = stripExternalCssReferences(attr.value);
+        if (res.stripped > 0) {
+          if (res.css.trim()) el.setAttribute(attr.name, res.css);
+          else el.removeAttribute(attr.name);
+          stripped += res.stripped;
+        }
+      } else if (
+        // A link attribute, or ANY presentation attribute carrying a url(...)
+        // (fill, stroke, filter, mask, clip-path, marker-*, cursor, …).
+        linkAttrs.has(name)
+          ? isExternalSvgReference(attr.value)
+          : hasExternalUrl(attr.value)
+      ) {
         el.removeAttribute(attr.name);
         stripped++;
       }
@@ -319,10 +466,28 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
+/** Longest name / longest free-text field an imported JSON row may carry. */
+export const MAX_IMPORT_NAME = 256;
+export const MAX_IMPORT_TEXT = 10_000;
+
+/** Cut an imported string to `max` characters (a megabyte "name" would wreck layout and export). */
+function clip(v: string | undefined, max: number): string | undefined {
+  return v !== undefined && v.length > max ? v.slice(0, max) : v;
+}
+
 /** A usable name/endpoint value: a non-blank string, or a number (`"name": 7`). */
 function nameText(v: unknown): string | undefined {
   if (typeof v === 'number' && Number.isFinite(v)) return String(v);
-  return typeof v === 'string' && v.trim() ? v.trim() : undefined;
+  return typeof v === 'string' && v.trim() ? clip(v.trim(), MAX_IMPORT_NAME) : undefined;
+}
+
+/**
+ * JSON.parse for an import: prototype-pollution keys are stripped before any field
+ * is read. Throws (bad JSON, or nested too deeply to be a topology file) — callers
+ * turn that into a "not valid JSON" result.
+ */
+function parseImportJson(text: string): unknown {
+  return stripDangerousKeys(JSON.parse(text) as unknown);
 }
 
 /**
@@ -333,7 +498,7 @@ function nameText(v: unknown): string | undefined {
 export function parseNetboxJson(text: string, layerId: string): ImportResult {
   let data: unknown;
   try {
-    data = JSON.parse(text);
+    data = parseImportJson(text);
   } catch {
     return { devices: [], links: [], warnings: ['File is not valid JSON.'], skipped: 0 };
   }
@@ -360,17 +525,21 @@ export function parseNetboxJson(text: string, layerId: string): ImportResult {
       warnings.push(`Device ${i + 1}: not a device object — skipped.`);
       return;
     }
-    const name = str(d.name) || str(d.display) || `device-${i}`;
-    const roleLabel = nested(d.device_role, 'name') ?? nested(d.role, 'name') ?? '';
+    const name = clip(str(d.name) || str(d.display), MAX_IMPORT_NAME) || `device-${i}`;
+    const roleLabel =
+      clip(nested(d.device_role, 'name') ?? nested(d.role, 'name'), MAX_IMPORT_NAME) ?? '';
     const pos = layout(devices.length);
     devices.push(
       createDevice(inferType(roleLabel || name), pos.x, pos.y, layerId, {
         name,
         role: roleLabel || undefined,
-        model: nested(d.device_type, 'model'),
-        vendor: nested(d.device_type, 'manufacturer', 'name'),
-        location: nested(d.site, 'name'),
-        managementIp: nested(d.primary_ip, 'address') ?? nested(d.primary_ip4, 'address'),
+        model: clip(nested(d.device_type, 'model'), MAX_IMPORT_NAME),
+        vendor: clip(nested(d.device_type, 'manufacturer', 'name'), MAX_IMPORT_NAME),
+        location: clip(nested(d.site, 'name'), MAX_IMPORT_NAME),
+        managementIp: clip(
+          nested(d.primary_ip, 'address') ?? nested(d.primary_ip4, 'address'),
+          MAX_IMPORT_NAME,
+        ),
       }),
     );
   });
@@ -387,7 +556,7 @@ export function parseNetboxJson(text: string, layerId: string): ImportResult {
 export function parseTopologyJson(text: string, layerId: string): ImportResult {
   let data: unknown;
   try {
-    data = JSON.parse(text);
+    data = parseImportJson(text);
   } catch {
     return { devices: [], links: [], warnings: ['File is not valid JSON.'], skipped: 0 };
   }
@@ -413,14 +582,16 @@ export function parseTopologyJson(text: string, layerId: string): ImportResult {
     const pos = layout(devices.length);
     const device = createDevice(type, pos.x, pos.y, layerId, {
       name,
-      managementIp:
+      managementIp: clip(
         typeof d.managementIp === 'string'
           ? d.managementIp
           : typeof d.ip === 'string'
             ? d.ip
             : undefined,
-      vendor: typeof d.vendor === 'string' ? d.vendor : undefined,
-      notes: typeof d.notes === 'string' ? d.notes : undefined,
+        MAX_IMPORT_NAME,
+      ),
+      vendor: clip(typeof d.vendor === 'string' ? d.vendor : undefined, MAX_IMPORT_NAME),
+      notes: clip(typeof d.notes === 'string' ? d.notes : undefined, MAX_IMPORT_TEXT),
     });
     devices.push(device);
   });

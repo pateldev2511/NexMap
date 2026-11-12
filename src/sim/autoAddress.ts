@@ -13,7 +13,7 @@
  * policy (lowest free host, skipping network/broadcast/gateway/used).
  */
 import type { Device, DeviceType, Subnet } from '@/model/types';
-import { nextFreeHost } from '@/lib/ipam';
+import { createHostAllocator } from '@/lib/ipam';
 import { cidrsOverlap, ipInCidr, isValidCidr, isValidIpv4, stripPrefix } from '@/lib/ipcidr';
 
 /** The default subnet synthesized when a topology has none to address from. */
@@ -116,7 +116,7 @@ export function planAddresses(
 
   // Seed "used" with every address already assigned anywhere in the diagram
   // (device management IPs AND per-port interface IPs).
-  const used: string[] = usedAddresses(devices);
+  const alloc = createHostAllocator(usedAddresses(devices));
 
   let subs = subnets.map((s) => ({ cidr: s.cidr, gateway: s.gateway }));
   let createdSubnetCidr: string | null = null;
@@ -137,12 +137,11 @@ export function planAddresses(
   for (const d of targets) {
     let ip: string | null = null;
     for (const s of subs) {
-      ip = nextFreeHost(s.cidr, used, { gateway: s.gateway });
+      ip = alloc.next(s.cidr, s.gateway);
       if (ip) break;
     }
     if (ip) {
       assignments.push({ deviceId: d.id, ip });
-      used.push(ip);
     } else {
       unassigned.push(d.id);
     }
@@ -234,7 +233,7 @@ export function planDeduplicateIps(
     else groups.set(ip, [slot]);
   }
   // Seed "used" with every address already in the diagram so re-homes never collide.
-  const used: string[] = slots.map((s) => stripPrefix(s.ip));
+  const alloc = createHostAllocator(slots.map((s) => stripPrefix(s.ip)));
   const assignments: AddressTarget[] = [];
   for (const [ip, members] of groups) {
     if (members.length < 2) continue; // no clash
@@ -243,10 +242,9 @@ export function planDeduplicateIps(
     // The first slot keeps the address; re-address the rest.
     const extras = [...members].sort(bySlot).slice(1);
     for (const m of extras) {
-      const next = nextFreeHost(sub.cidr, used, { gateway: sub.gateway });
+      const next = alloc.next(sub.cidr, sub.gateway);
       if (!next) break; // subnet full — leave this one flagged rather than guess
       assignments.push(m.ifaceId ? { deviceId: m.deviceId, ifaceId: m.ifaceId, ip: next } : { deviceId: m.deviceId, ip: next });
-      used.push(next);
     }
   }
   assignments.sort((a, b) => (a.deviceId < b.deviceId ? -1 : a.deviceId > b.deviceId ? 1 : 0));
@@ -275,7 +273,7 @@ export function planInterfaceAddresses(
   devices: readonly Device[],
   subnets: readonly Subnet[],
 ): InterfaceAddress[] {
-  const used = usedAddresses(devices).map((ip) => stripPrefix(ip));
+  const alloc = createHostAllocator(usedAddresses(devices).map((ip) => stripPrefix(ip)));
   const assignments: InterfaceAddress[] = [];
   const ordered = [...devices].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   for (const d of ordered) {
@@ -285,10 +283,9 @@ export function planInterfaceAddresses(
     if (!subnet) continue; // management IP outside every subnet → skip
     for (const iface of d.interfaces ?? []) {
       if (iface.ip?.trim()) continue; // never overwrite an existing port IP
-      const next = nextFreeHost(subnet.cidr, used, { gateway: subnet.gateway });
+      const next = alloc.next(subnet.cidr, subnet.gateway);
       if (!next) break; // subnet full → leave the remaining ports for the user
       assignments.push({ deviceId: d.id, ifaceId: iface.id, ip: next });
-      used.push(next);
     }
   }
   return assignments;

@@ -27,10 +27,20 @@ interface Entry {
 
 const DEFAULT_CELL = 128;
 
+/**
+ * The most grid cells one entry may occupy (#78). A box spanning more — a huge
+ * zone, or a crafted/corrupt 1e9-wide object — is never materialised cell by
+ * cell (that loop froze the tab on open); it goes in the `oversized` set, which
+ * every query tests directly by box intersection.
+ */
+export const MAX_ENTRY_CELLS = 4096;
+
 export class SpatialIndex {
   private readonly cellSize: number;
   private readonly cells = new Map<string, Set<string>>();
   private readonly entries = new Map<string, Entry>();
+  /** Ids whose box is too large (or non-finite) to index by cell; see MAX_ENTRY_CELLS. */
+  private readonly oversized = new Set<string>();
 
   constructor(cellSize: number = DEFAULT_CELL) {
     this.cellSize = cellSize;
@@ -38,6 +48,11 @@ export class SpatialIndex {
 
   get size(): number {
     return this.entries.size;
+  }
+
+  /** Occupied grid cells (diagnostics/tests: bounded however large an entry is). */
+  get cellCount(): number {
+    return this.cells.size;
   }
 
   private cellKey(cx: number, cy: number): string {
@@ -58,13 +73,14 @@ export class SpatialIndex {
     return keys;
   }
 
-  insert(id: string, box: Box): void {
-    if (this.entries.has(id)) {
-      this.update(id, box);
-      return;
-    }
-    const cells = this.cellsFor(box);
-    this.entries.set(id, { id, box, cells });
+  /** The cells an ENTRY occupies, or null when it must live in `oversized`. */
+  private entryCells(box: Box): string[] | null {
+    const span = this.cellSpan(box);
+    if (!Number.isFinite(span) || span > MAX_ENTRY_CELLS) return null;
+    return this.cellsFor(box);
+  }
+
+  private addToCells(id: string, cells: string[]): void {
     for (const key of cells) {
       let set = this.cells.get(key);
       if (!set) {
@@ -75,6 +91,17 @@ export class SpatialIndex {
     }
   }
 
+  insert(id: string, box: Box): void {
+    if (this.entries.has(id)) {
+      this.update(id, box);
+      return;
+    }
+    const cells = this.entryCells(box);
+    this.entries.set(id, { id, box, cells: cells ?? [] });
+    if (cells) this.addToCells(id, cells);
+    else this.oversized.add(id);
+  }
+
   /** Move/resize an existing entry. Cheap when it stays in the same cells. */
   update(id: string, box: Box): void {
     const entry = this.entries.get(id);
@@ -82,28 +109,31 @@ export class SpatialIndex {
       this.insert(id, box);
       return;
     }
-    const next = this.cellsFor(box);
-    if (sameCells(entry.cells, next)) {
+    const next = this.entryCells(box);
+    if (!next) {
+      // Grew past the cap (or went non-finite): leave the grid for the direct-test set.
+      this.removeFromCells(entry);
+      entry.box = box;
+      entry.cells = [];
+      this.oversized.add(id);
+      return;
+    }
+    const wasOversized = this.oversized.delete(id);
+    if (!wasOversized && sameCells(entry.cells, next)) {
       entry.box = box;
       return;
     }
     this.removeFromCells(entry);
     entry.box = box;
     entry.cells = next;
-    for (const key of next) {
-      let set = this.cells.get(key);
-      if (!set) {
-        set = new Set();
-        this.cells.set(key, set);
-      }
-      set.add(id);
-    }
+    this.addToCells(id, next);
   }
 
   remove(id: string): void {
     const entry = this.entries.get(id);
     if (!entry) return;
     this.removeFromCells(entry);
+    this.oversized.delete(id);
     this.entries.delete(id);
   }
 
@@ -120,6 +150,7 @@ export class SpatialIndex {
   clear(): void {
     this.cells.clear();
     this.entries.clear();
+    this.oversized.clear();
   }
 
   /** IDs whose bounding box intersects the query box (e.g. viewport cull, box-select). */
@@ -136,6 +167,11 @@ export class SpatialIndex {
       return found;
     }
     const found = new Set<string>();
+    // Oversized entries are in no cell: test each one's box directly.
+    for (const id of this.oversized) {
+      const entry = this.entries.get(id);
+      if (entry && boxesIntersect(entry.box, box)) found.add(id);
+    }
     for (const key of this.cellsFor(box)) {
       const set = this.cells.get(key);
       if (!set) continue;

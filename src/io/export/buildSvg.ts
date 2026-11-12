@@ -23,7 +23,8 @@ import { deviceFlatDefs } from '@/canvas/deviceFlatArt';
 import { BLUEPRINT, deviceIconBlueprintGroup } from '@/canvas/blueprintArt';
 import { clampIconScale } from '@/canvas/nodeCard';
 import { isoProjectPx, DEFAULT_TILE } from '@/canvas/iso';
-import { calloutRowsOrPlaceholder, rowAnchor } from '@/model/callout';
+import { calloutRowsOrPlaceholder, clampFontSize, rowAnchor } from '@/model/callout';
+import { isSafeImageHref, safeColor } from '@/model/schema';
 import {
   DEFAULT_LEADER,
   leaderDashArray,
@@ -82,8 +83,8 @@ function modernZoneParts(o: {
   stroke?: string;
   label?: string;
 }): string {
-  const accent = escapeXml(o.stroke ?? '#2563eb');
-  const fill = escapeXml(o.fill ?? '#eef2ff');
+  const accent = safeColor(o.stroke, '#2563eb');
+  const fill = safeColor(o.fill, '#eef2ff');
   const parts: string[] = [];
   if (o.shape === 'ellipse') {
     parts.push(
@@ -153,7 +154,88 @@ const ESC: Record<string, string> = {
   "'": '&apos;',
 };
 export function escapeXml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ESC[c]!);
+  // String(): a non-string that slipped past the types is still escaped, not thrown on.
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ESC[c]!);
+}
+
+/**
+ * A finite number for an SVG attribute. Anything else — above all a STRING from a
+ * hand-edited file, which could close the attribute and inject markup into the
+ * exported file — becomes `fallback`. Optionally clamped to [min, max].
+ */
+export function svgNum(v: unknown, fallback = 0, min = -Infinity, max = Infinity): number {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return fallback;
+  return Math.min(max, Math.max(min, v));
+}
+
+const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const boxOk = (b: { x: unknown; y: unknown; width: unknown; height: unknown }) =>
+  isNum(b.x) && isNum(b.y) && isNum(b.width) && isNum(b.height);
+const safeBox = (b: { x: unknown; y: unknown; width: unknown; height: unknown }) => ({
+  x: svgNum(b.x),
+  y: svgNum(b.y),
+  width: svgNum(b.width, 0, 0),
+  height: svgNum(b.height, 0, 0),
+});
+
+/*
+ * Defence in depth (the load path already repairs these): every model value the
+ * builders interpolate RAW into markup is forced to a finite number here, once,
+ * at the entry points — so no `${o.x}`-style interpolation below can carry a
+ * string. A clean entity is returned as-is (no copy).
+ */
+function safeDevice(d: Device): Device {
+  const scaleOk = d.iconScale === undefined || isNum(d.iconScale);
+  if (boxOk(d) && scaleOk) return d;
+  return { ...d, ...safeBox(d), iconScale: scaleOk ? d.iconScale : undefined };
+}
+
+function safeLink(l: Link): Link {
+  const widthOk = l.width === undefined || isNum(l.width);
+  const pts = l.waypoints;
+  const ptsOk =
+    pts === undefined || (Array.isArray(pts) && pts.every((p) => p && isNum(p.x) && isNum(p.y)));
+  if (widthOk && ptsOk) return l;
+  return {
+    ...l,
+    width: widthOk ? l.width : undefined,
+    waypoints: Array.isArray(pts) ? pts.filter((p) => p && isNum(p.x) && isNum(p.y)) : undefined,
+  };
+}
+
+/** A callout whose every interpolated number is finite (shared with the rack export). */
+export function safeTextObject(o: TextObject): TextObject {
+  const leader = o.leader;
+  const leaderOk = leader === undefined || (leader !== null && isNum(leader.width));
+  const a = o.anchor;
+  const anchorOk = a == null || a.type !== 'point' || (isNum(a.x) && isNum(a.y));
+  const fsOk = o.fontSize === undefined || clampFontSize(o.fontSize) === o.fontSize;
+  if (boxOk(o) && leaderOk && anchorOk && fsOk) return o;
+  return {
+    ...o,
+    ...safeBox(o),
+    fontSize: o.fontSize === undefined ? undefined : clampFontSize(o.fontSize),
+    leader: leaderOk ? leader : undefined,
+    anchor: anchorOk ? a : null,
+  };
+}
+
+/** Objects safe to draw: unsafe-source images are dropped, numbers are finite. */
+function safeObjects(objects: CanvasObject[] | undefined): CanvasObject[] {
+  const out: CanvasObject[] = [];
+  for (const o of objects ?? []) {
+    if (o.kind === 'image') {
+      // Never write a non-embedded image source into an export: opening the file
+      // would fetch it from the network.
+      if (!isSafeImageHref(o.href)) continue;
+      out.push(boxOk(o) ? o : { ...o, ...safeBox(o) });
+    } else if (o.kind === 'text') {
+      out.push(safeTextObject(o));
+    } else {
+      out.push(boxOk(o) ? o : { ...o, ...safeBox(o) });
+    }
+  }
+  return out;
 }
 
 /**
@@ -178,7 +260,7 @@ function linkStrokeAttrs(
 ): string {
   const s = deriveLinkStroke(l, health, sole);
   const dash = s.dashed ? ' stroke-dasharray="6 4"' : '';
-  return `stroke="${escapeXml(s.color ?? defaultStroke)}" stroke-width="${s.width}"${dash}`;
+  return `stroke="${safeColor(s.color, defaultStroke)}" stroke-width="${svgNum(s.width, 1.5, 0)}"${dash}`;
 }
 
 /**
@@ -235,7 +317,7 @@ function linkArrowAttrs(l: Link): string {
  */
 function textObjectSvg(o: TextObject, boxX: number, boxY: number, ink?: string): string {
   const fs = o.fontSize ?? 14;
-  const fill = escapeXml(ink ?? o.color ?? '#1c2733');
+  const fill = ink ?? safeColor(o.color, '#1c2733');
   const rows = calloutRowsOrPlaceholder(o.blocks, fs);
   let y = boxY;
   return rows
@@ -254,7 +336,7 @@ function textObjectSvg(o: TextObject, boxX: number, boxY: number, ink?: string):
             : escapeXml(run.text);
         })
         .join('');
-      return `<text x="${a.x}" y="${y}" text-anchor="${a.anchor}" font-size="${r.size}" font-weight="${r.weight}" fill="${rowFill}"${fam}>${inner}</text>`;
+      return `<text x="${a.x}" y="${y}" text-anchor="${a.anchor}" font-size="${svgNum(r.size, 14, 0)}" font-weight="${svgNum(r.weight, 400)}" fill="${rowFill}"${fam}>${inner}</text>`;
     })
     .join('');
 }
@@ -264,7 +346,17 @@ export function buildSvg(
   links: Link[],
   opts: ExportSvgOptions,
 ): string {
-  if (opts.projection === 'iso') return buildSvgIso(devices, links, opts);
+  const d = devices.map(safeDevice);
+  const l = links.map(safeLink);
+  const o: ExportSvgOptions = {
+    ...opts,
+    objects: safeObjects(opts.objects),
+    padding: svgNum(opts.padding, 40),
+  };
+  return o.projection === 'iso' ? buildSvgIso(d, l, o) : buildSvgFlat(d, l, o);
+}
+
+function buildSvgFlat(devices: Device[], links: Link[], opts: ExportSvgOptions): string {
   const padding = opts.padding ?? 40;
   // Rack-scoped callouts render on the rack elevation, not the flat diagram export.
   const objects = (opts.objects ?? []).filter((o) => !(o.kind === 'text' && o.rackScope));
@@ -314,7 +406,7 @@ export function buildSvg(
   for (const o of objects) {
     if (o.kind !== 'image') continue;
     parts.push(
-      `<image href="${escapeXml(o.href)}" x="${o.x}" y="${o.y}" width="${o.width}" height="${o.height}" opacity="${o.opacity ?? 1}" preserveAspectRatio="none"/>`,
+      `<image href="${escapeXml(o.href)}" x="${o.x}" y="${o.y}" width="${o.width}" height="${o.height}" opacity="${svgNum(o.opacity, 1, 0, 1)}" preserveAspectRatio="none"/>`,
     );
   }
 
@@ -326,8 +418,8 @@ export function buildSvg(
       continue;
     }
     // Blueprint zones are outlined areas — a user fill would paint over the sheet.
-    const fill = bp ? 'none' : escapeXml(o.fill ?? '#e8effb');
-    const stroke = bp ? BLUEPRINT.inkDim : escapeXml(o.stroke ?? '#2563eb');
+    const fill = bp ? 'none' : safeColor(o.fill, '#e8effb');
+    const stroke = bp ? BLUEPRINT.inkDim : safeColor(o.stroke, '#2563eb');
     const pen = bp ? ' stroke-width="1.25" stroke-dasharray="6 3"' : ' stroke-width="1.5"';
     if (o.shape === 'ellipse') {
       parts.push(
@@ -416,7 +508,7 @@ export function buildSvg(
     const dash = leaderDashArray(style);
     parts.push(
       `<line data-leader-for="${escapeXml(o.id)}" x1="${g.x1}" y1="${g.y1}" x2="${g.x2}" y2="${g.y2}" ` +
-        `stroke="${bp ? BLUEPRINT.inkDim : escapeXml(style.color)}" stroke-width="${style.width}" fill="none" stroke-linecap="round"` +
+        `stroke="${bp ? BLUEPRINT.inkDim : safeColor(style.color, DEFAULT_LEADER.color)}" stroke-width="${svgNum(style.width, DEFAULT_LEADER.width, 0)}" fill="none" stroke-linecap="round"` +
         `${dash ? ` stroke-dasharray="${dash}"` : ''}/>`,
     );
   }
@@ -570,13 +662,13 @@ function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): 
   for (const o of objects) {
     if (o.kind !== 'image') continue;
     parts.push(
-      `<image href="${escapeXml(o.href)}" x="${o.x}" y="${o.y}" width="${o.width}" height="${o.height}" opacity="${o.opacity ?? 1}" preserveAspectRatio="none"/>`,
+      `<image href="${escapeXml(o.href)}" x="${o.x}" y="${o.y}" width="${o.width}" height="${o.height}" opacity="${svgNum(o.opacity, 1, 0, 1)}" preserveAspectRatio="none"/>`,
     );
   }
   for (const o of objects) {
     if (o.kind !== 'shape') continue;
-    const fill = escapeXml(o.fill ?? '#e8effb');
-    const stroke = escapeXml(o.stroke ?? '#2563eb');
+    const fill = safeColor(o.fill, '#e8effb');
+    const stroke = safeColor(o.stroke, '#2563eb');
     if (o.shape === 'ellipse') {
       parts.push(
         `<ellipse cx="${o.x + o.width / 2}" cy="${o.y + o.height / 2}" rx="${o.width / 2}" ry="${o.height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`,
@@ -621,7 +713,7 @@ function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): 
     const dash = leaderDashArray(style);
     parts.push(
       `<line data-leader-for="${escapeXml(o.id)}" x1="${g.x1}" y1="${g.y1}" x2="${g.x2}" y2="${g.y2}" ` +
-        `stroke="${escapeXml(style.color)}" stroke-width="${style.width}" fill="none" stroke-linecap="round" vector-effect="non-scaling-stroke"` +
+        `stroke="${safeColor(style.color, DEFAULT_LEADER.color)}" stroke-width="${svgNum(style.width, DEFAULT_LEADER.width, 0)}" fill="none" stroke-linecap="round" vector-effect="non-scaling-stroke"` +
         `${dash ? ` stroke-dasharray="${dash}"` : ''}/>`,
     );
   }
@@ -633,7 +725,7 @@ function buildSvgIso(devices: Device[], links: Link[], opts: ExportSvgOptions): 
     if (modern) {
       // Header pill + colored dot + bold accent label, anchored at the plane's
       // top-left corner (projected) so it reads clearly over the tinted plane.
-      const accent = escapeXml(o.stroke ?? '#2563eb');
+      const accent = safeColor(o.stroke, '#2563eb');
       const p = P(o.x, o.y);
       const tw = o.label.length * 7.2 + 34;
       parts.push(

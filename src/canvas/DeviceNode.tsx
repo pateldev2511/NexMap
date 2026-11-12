@@ -27,6 +27,11 @@ interface DeviceNodeProps {
   holdsEnforced?: boolean;
   /** Draw in the blueprint skin (drafting ink) instead of the flat art. */
   blueprint?: boolean;
+  /**
+   * Flow (stress-test) only: whether this device is pulled. When defined, the node
+   * is a "fail this device" toggle and reports that as its pressed state (#87).
+   */
+  flowFailed?: boolean;
   onPointerDown: (e: React.PointerEvent, id: string) => void;
   /** Double-click the on-top name label → edit it inline. */
   onLabelDoubleClick?: (e: React.MouseEvent, id: string) => void;
@@ -49,6 +54,7 @@ function DeviceNodeImpl({
   holdsUp = 0,
   holdsEnforced = false,
   blueprint = false,
+  flowFailed,
   onPointerDown,
   onLabelDoubleClick,
   onActivate,
@@ -82,7 +88,7 @@ function DeviceNodeImpl({
       tabIndex={0}
       role="button"
       aria-label={ariaLabel}
-      aria-pressed={selected}
+      aria-pressed={flowFailed ?? selected}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();

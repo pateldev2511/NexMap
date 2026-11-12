@@ -98,7 +98,6 @@ export class History {
   /** Apply a command and record it, coalescing with the previous entry if possible. */
   dispatch(command: Command, state: ModelState): void {
     command.apply(state);
-    this.future = [];
     this.mark('do', command);
 
     const last = this.past[this.past.length - 1];
@@ -116,11 +115,14 @@ export class History {
         } else {
           this.past[this.past.length - 1] = merged;
         }
+        this.future = [];
         return;
       }
     }
 
-    if (command.isIdentity?.()) return; // no-op command: nothing to record
+    // A no-op command changes nothing, so it must not invalidate redo.
+    if (command.isIdentity?.()) return;
+    this.future = [];
     this.breakCoalesce = false;
     this.past.push(command);
     this.pushes++;

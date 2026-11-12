@@ -17,7 +17,8 @@ import {
   stripPrefix,
 } from '@/lib/ipcidr';
 import { intToIpv4, usableHostRange } from '@/lib/ipam';
-import type { Device, Link, Rack, Subnet, ValidationIssue, Vlan } from './types';
+import type { Device, Link, Rack, RackCable, Subnet, ValidationIssue, Vlan } from './types';
+import { expectsLogicalLinks } from './topologyRole';
 import { depthProblems, slotOf, slotsCollide } from '@/rack/rackModel';
 
 let counter = 0;
@@ -37,6 +38,8 @@ export interface ValidationInput {
   vlans?: Vlan[];
   subnets?: Subnet[];
   racks?: Rack[];
+  /** Physical patch cables: tells "cabled in the rack, not drawn" from "not connected". */
+  rackCables?: RackCable[];
 }
 
 /** Rule: a device must have a non-empty name. */
@@ -518,25 +521,63 @@ function checkTrunkAccess(links: Link[]): ValidationIssue[] {
   return issues;
 }
 
-/** Rule: a device with no links is likely orphaned. */
-function checkOrphanedDevices(devices: Device[], links: Link[]): ValidationIssue[] {
+/**
+ * Rule: a network device with no logical link is likely orphaned. One that is cabled in
+ * the rack says so instead. Passive rack assets (power, cable management, panels) are
+ * not expected to have links: they get one summary line, with no object ids — it is a
+ * note about the design, not something to open.
+ */
+function checkOrphanedDevices(
+  devices: Device[],
+  links: Link[],
+  rackCables: RackCable[],
+): ValidationIssue[] {
   if (devices.length <= 1) return [];
   const connected = new Set<string>();
   for (const l of links) {
     connected.add(l.sourceId);
     connected.add(l.targetId);
   }
+  const cabled = new Set<string>();
+  for (const c of rackCables) {
+    cabled.add(c.aEnd.deviceId);
+    cabled.add(c.bEnd.deviceId);
+  }
   const issues: ValidationIssue[] = [];
+  let passive = 0;
   for (const d of devices) {
-    if (!connected.has(d.id)) {
+    if (connected.has(d.id)) continue;
+    if (!expectsLogicalLinks(d)) {
+      passive += 1;
+    } else if (cabled.has(d.id)) {
+      issues.push({
+        id: issueId(),
+        severity: 'info',
+        code: 'cabled-no-logical-link',
+        message: `${d.name} is cabled in the rack but has no link in the network diagram.`,
+        objectIds: [d.id],
+      });
+    } else {
       issues.push({
         id: issueId(),
         severity: 'info',
         code: 'orphaned-device',
-        message: `${d.name} has no connections.`,
+        message: `${d.name} has no logical connections.`,
         objectIds: [d.id],
       });
     }
+  }
+  if (passive > 0) {
+    issues.push({
+      id: issueId(),
+      severity: 'info',
+      code: 'passive-assets',
+      message:
+        passive === 1
+          ? '1 passive rack asset (power, cable management, panels) is not expected to have network links.'
+          : `${passive} passive rack assets (power, cable management, panels) are not expected to have network links.`,
+      objectIds: [],
+    });
   }
   return issues;
 }
@@ -596,6 +637,7 @@ export function validate({
   vlans = [],
   subnets = [],
   racks = [],
+  rackCables = [],
 }: ValidationInput): ValidationIssue[] {
   return [
     ...checkDuplicateIps(devices),
@@ -610,7 +652,7 @@ export function validate({
     ...checkInterfaces(devices, links),
     ...checkDuplicateNames(devices),
     ...checkDeviceNames(devices),
-    ...checkOrphanedDevices(devices, links),
+    ...checkOrphanedDevices(devices, links, rackCables),
   ];
 }
 

@@ -51,4 +51,17 @@ describe('importPastedCsv', () => {
     expect(importPastedCsv('', 'L', [])).toBeNull();
     expect(importPastedCsv('header-only', 'L', [])).toBeNull();
   });
+
+  it('propagates VLAN warnings from pasted vlans and subnets', () => {
+    const v = importPastedCsv('vlan,name\nVLAN-ten,A\n10,B', 'L', []);
+    expect(v?.vlans.map((x) => x.vlanId)).toEqual([10]);
+    expect(v?.warnings).toEqual(['Row 1: VLAN id "VLAN-ten" is not a number — skipped.']);
+    const s = importPastedCsv('cidr,vlan_id\n10.0.0.0/24,n/a', 'L', []);
+    expect(s?.subnets[0]?.vlanId).toBeUndefined();
+    expect(s?.warnings).toHaveLength(1);
+    // every row skipped: still surfaced rather than silently falling through
+    const all = importPastedCsv('vlan,name\nn/a,A', 'L', []);
+    expect(all?.vlans).toEqual([]);
+    expect(all?.warnings).toHaveLength(1);
+  });
 });

@@ -118,7 +118,7 @@ let dbPromise: Promise<IDBDatabase> | null = null;
 
 function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
-  dbPromise = new Promise((resolve, reject) => {
+  const p = new Promise<IDBDatabase>((resolve, reject) => {
     if (typeof indexedDB === 'undefined') {
       reject(new Error('IndexedDB unavailable'));
       return;
@@ -133,7 +133,13 @@ function openDb(): Promise<IDBDatabase> {
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error ?? new Error('IndexedDB open failed'));
   });
-  return dbPromise;
+  dbPromise = p;
+  // Never cache a failure: a transient open error must not disable persistence
+  // until the tab reloads.
+  p.catch(() => {
+    if (dbPromise === p) dbPromise = null;
+  });
+  return p;
 }
 
 export type SaveResult =
@@ -176,47 +182,72 @@ export async function putDraft(draft: DraftRecord): Promise<SaveResult> {
   });
 }
 
-function readAll(db: IDBDatabase): Promise<DraftRecord[]> {
+/** A read that says whether it FAILED, so "no draft" and "couldn't look" differ. */
+export type DraftRead<T> = { ok: true; value: T } | { ok: false; message: string };
+
+const readFail = (e: unknown, fallback: string): { ok: false; message: string } => ({
+  ok: false,
+  message: (e as { message?: string } | null)?.message || fallback,
+});
+
+function readAll(db: IDBDatabase): Promise<DraftRead<DraftRecord[]>> {
   return new Promise((resolve) => {
     try {
       const req = db.transaction(STORE, 'readonly').objectStore(STORE).getAll();
       req.onsuccess = () =>
-        resolve(((req.result as DraftRecord[]) ?? []).filter((d) => d && typeof d === 'object'));
-      req.onerror = () => resolve([]);
-    } catch {
-      resolve([]);
+        resolve({
+          ok: true,
+          value: ((req.result as DraftRecord[]) ?? []).filter((d) => d && typeof d === 'object'),
+        });
+      req.onerror = () => resolve(readFail(req.error, 'Reading drafts failed.'));
+    } catch (e) {
+      resolve(readFail(e, 'Reading drafts failed.'));
     }
   });
 }
 
-/** Newest recoverable draft (see pickRecoverable), or null. Crash recovery on launch. */
-export async function getLatestDraft(): Promise<DraftRecord | null> {
+/** Newest recoverable draft (see pickRecoverable), or a failed read. */
+export async function readLatestDraft(): Promise<DraftRead<DraftRecord | null>> {
   let db: IDBDatabase;
   try {
     db = await openDb();
-  } catch {
-    return null;
+  } catch (e) {
+    return readFail(e, 'IndexedDB unavailable.');
   }
-  return pickRecoverable(await readAll(db));
+  const all = await readAll(db);
+  return all.ok ? { ok: true, value: pickRecoverable(all.value) } : all;
 }
 
-/** One project's draft (any content), or null. */
-export async function getDraft(projectId: string): Promise<DraftRecord | null> {
+/** One project's draft (any content), or a failed read. */
+export async function readDraft(projectId: string): Promise<DraftRead<DraftRecord | null>> {
   let db: IDBDatabase;
   try {
     db = await openDb();
-  } catch {
-    return null;
+  } catch (e) {
+    return readFail(e, 'IndexedDB unavailable.');
   }
   return new Promise((resolve) => {
     try {
       const req = db.transaction(STORE, 'readonly').objectStore(STORE).get(projectId);
-      req.onsuccess = () => resolve((req.result as DraftRecord | undefined) ?? null);
-      req.onerror = () => resolve(null);
-    } catch {
-      resolve(null);
+      req.onsuccess = () =>
+        resolve({ ok: true, value: (req.result as DraftRecord | undefined) ?? null });
+      req.onerror = () => resolve(readFail(req.error, 'Reading the draft failed.'));
+    } catch (e) {
+      resolve(readFail(e, 'Reading the draft failed.'));
     }
   });
+}
+
+/** Newest recoverable draft, or null — also null when the read failed. Prefer readLatestDraft. */
+export async function getLatestDraft(): Promise<DraftRecord | null> {
+  const r = await readLatestDraft();
+  return r.ok ? r.value : null;
+}
+
+/** One project's draft, or null — also null when the read failed. Prefer readDraft. */
+export async function getDraft(projectId: string): Promise<DraftRecord | null> {
+  const r = await readDraft(projectId);
+  return r.ok ? r.value : null;
 }
 
 export async function deleteDraft(projectId: string): Promise<void> {
@@ -290,7 +321,11 @@ export async function absorbStashedDraft(): Promise<void> {
     clearStashedDraft(); // unreadable leftovers
     return;
   }
-  const current = await getDraft(stash.projectId);
+  const read = await readDraft(stash.projectId);
+  // Couldn't look: we can't know whether the stash is newer. Keep it and write
+  // nothing — a later launch retries, and the stash is never the thing that's lost.
+  if (!read.ok) return;
+  const current = read.value;
   if (current && current.updatedAt >= stash.updatedAt) {
     clearStashedDraft();
     return;

@@ -98,6 +98,10 @@ function capturePointer(el: Element | null, pointerId: number): void {
   }
 }
 
+// Stable empties: the Flow lens's full-graph inputs while the lens is off (#79).
+const NO_DEVICES: Device[] = [];
+const NO_LINKS: Link[] = [];
+
 interface CanvasProps {
   /** Presentation/read-only: pan+zoom only, no editing chrome. */
   readOnly?: boolean;
@@ -244,6 +248,12 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     null,
   );
   const anchorDragRef = useRef<string | null>(null);
+  // The ONE way an anchor drag ends without attaching (#71): pointer cancel, lost
+  // capture, window blur, Escape, entering Flow. Clears the ref and the leader.
+  const endAnchorDrag = useCallback(() => {
+    anchorDragRef.current = null;
+    setAnchorDrag(null);
+  }, []);
 
   const rev = useProjectStore((s) => s.rev);
   const selection = useProjectStore((s) => s.selection);
@@ -263,10 +273,22 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   // that crosses off-screen is not clipped. `rev` bumps on every model change, which
   // is exactly when devicesAll()/linksAll() must re-run (eslint can't see through the
   // getState() call that they depend on it).
+  // Only while the lens is on: with Flow off these copies ran on every drag frame
+  // for nothing (#79), so they stay a stable empty array.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const flowDevices = useMemo(() => store().devicesAll(), [rev]);
+  const flowDevices = useMemo(() => (flowMode ? store().devicesAll() : NO_DEVICES), [rev, flowMode]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const flowLinks = useMemo(() => store().linksAll(), [rev]);
+  const flowLinks = useMemo(() => (flowMode ? store().linksAll() : NO_LINKS), [rev, flowMode]);
+  // Flow (stress-test) is an interaction MODE (#87): while it is on the canvas is
+  // as locked as a presentation — no editing chrome renders, no pointer or key
+  // edits the document. Pan, zoom, search, undo/redo and the Flow controls stay.
+  const editLocked = readOnly || flowMode;
+  // The simulation itself only runs on an editable canvas (the HUD lives there).
+  const flowActive = flowMode && !readOnly;
+  const flowFailedSet = useMemo(
+    () => (flowActive ? new Set(flowFailed) : null),
+    [flowActive, flowFailed],
+  );
 
   // Point a callout's leader at `targetId` (or clear it when null). One undo entry.
   const attachCalloutTo = useCallback(
@@ -344,12 +366,15 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   }, [ruleSupports, rulesEnforced]);
 
   // Object IDs carrying an error/critical issue → canvas badge.
-  const errorIds = new Set<string>();
-  for (const i of issues) {
-    if (i.severity === 'error' || i.severity === 'critical') {
-      for (const id of i.objectIds) errorIds.add(id);
+  const errorIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const i of issues) {
+      if (i.severity === 'error' || i.severity === 'critical') {
+        for (const id of i.objectIds) ids.add(id);
+      }
     }
-  }
+    return ids;
+  }, [issues]);
 
   useLayoutEffect(() => {
     const el = rootRef.current;
@@ -372,10 +397,20 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       // Presentation is read-only (#35): only viewing keys act — zoom, fit, zoom
       // to selection, copy, Space-pan. The canvas's editing combos are swallowed rather than passed on
       // (⌘D would otherwise bookmark the page); everything else does nothing here.
-      if (readOnly) {
+      // Flow (#87) is locked the same way — Delete, nudge, group, z-order, auto-layout
+      // and the tool keys do nothing — but keeps find (⌘F), and Escape leaves it.
+      // Escape arrives here only after the router's overlay stack (dialogs, menus)
+      // and gesture-cancel stage passed on it: one layer per press.
+      const flow = !readOnly && store().flowMode;
+      if (flow && !mod && e.key === 'Escape') {
+        momentum.current.block(performance.now());
+        store().setFlowMode(false);
+        return true;
+      }
+      if (readOnly || flow) {
         const k = e.key.toLowerCase();
         const viewing = mod
-          ? k === '0' || k === '=' || k === '+' || k === '-' || k === 'c'
+          ? k === '0' || k === '=' || k === '+' || k === '-' || k === 'c' || (flow && k === 'f')
           : e.code === 'Space' || e.key === 'Alt' || e.key === '2';
         if (!viewing) {
           if (mod && ['a', 'd', 'x', 'g', ']', '['].includes(k)) {
@@ -512,6 +547,10 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         // press: armed visuals / pending click-connect → tool mode →
         // selection. Never all at once.
         momentum.current.block(performance.now()); // eat the trackpad tail
+        if (anchorDragRef.current) {
+          endAnchorDrag(); // not machine-owned, so the router can't cancel it (#71)
+          return true;
+        }
         if (anchorPickRef.current) {
           setAnchorPick(null);
           return true;
@@ -544,17 +583,36 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   // calls to consume Escape / Cmd+Z safely mid-gesture.
   const cancelActiveGesture = useCallback(() => {
     momentum.current.block(performance.now());
-    // ALL gestures are machine-owned: cancel through the reducer — its
-    // effects restore the store and release capture.
+    // Gestures are machine-owned: cancel through the reducer — its effects
+    // restore the store and release capture. The one hold-out is the callout
+    // anchor drag (#71), which ends here too.
     if (machine.current.phase !== 'idle') dispatchRef.current({ type: 'escape' });
-  }, []);
+    if (anchorDragRef.current) endAnchorDrag();
+  }, [endAnchorDrag]);
 
   // Register with the router. The ref indirection keeps registration stable
   // across renders (and StrictMode-idempotent) while handlers stay fresh.
   const routerApiRef = useRef({ key: handleCanvasKey, cancel: cancelActiveGesture });
   routerApiRef.current = { key: handleCanvasKey, cancel: cancelActiveGesture };
   // This canvas is where paste lands — or, read-only, where it's refused (#35).
-  useEffect(() => registerPasteCanvas({ readOnly }), [readOnly]);
+  // Flow refuses it the same way (#87): a paste would add to the diagram mid-test.
+  useEffect(() => registerPasteCanvas({ readOnly: editLocked }), [editLocked]);
+
+  // Entering Flow puts away every piece of in-progress editing: an in-flight
+  // gesture, a half-made link, open menus and inline editors. (The store clears
+  // the selection and tool in setFlowMode.)
+  useEffect(() => {
+    if (!flowMode) return;
+    routerApiRef.current.cancel();
+    setPending(null);
+    setAnchorPick(null);
+    setMarquee(null);
+    setLassoPts(null);
+    setQuickCreate(null);
+    setMenu(null);
+    setEditingTextId(null);
+    setEditingDeviceId(null);
+  }, [flowMode, setPending, setAnchorPick]);
 
   useEffect(
     () =>
@@ -629,10 +687,11 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   useEffect(() => {
     const onBlur = () => {
       if (machine.current.phase !== 'idle') dispatchRef.current({ type: 'blur' });
+      if (anchorDragRef.current) endAnchorDrag();
     };
     window.addEventListener('blur', onBlur);
     return () => window.removeEventListener('blur', onBlur);
-  }, []);
+  }, [endAnchorDrag]);
 
   const localPoint = useCallback((e: { clientX: number; clientY: number }) => {
     const rect = rootRef.current!.getBoundingClientRect();
@@ -913,6 +972,11 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           const d = ef.data as { additive: boolean };
           if (!d.additive) store().clearSelection();
           setMarquee(null);
+        } else if (ef.gesture === 'pan') {
+          // Flow (#87): a press on a device that never moved pulls / restores it.
+          // (Had it moved, the same press became an ordinary pan.)
+          const d = ef.data as { flowToggle?: string } | null;
+          if (d?.flowToggle && store().flowMode) store().toggleFlowFailed(d.flowToggle);
         } else if (ef.gesture === 'shape') {
           // Tiny press → a default-sized zone at the press point.
           const c = toFlat(ef.x, ef.y);
@@ -1094,6 +1158,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   const onLinkDown = useCallback(
     (e: React.PointerEvent, id: string) => {
       if (e.button !== 0) return; // let right/middle pan
+      if (store().flowMode) return; // Flow: links aren't selectable — the press pans
       if (store().mode === 'connect') return;
       e.stopPropagation();
       store().select([id], e.shiftKey);
@@ -1140,7 +1205,34 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       // Only the left button selects/drags a cell. Middle/right bubble to the
       // root so they pan (draw.io: right-drag pans anywhere) or open the menu.
       if (e.button !== 0) return;
-      if (readOnly || spaceHeld || store().mode === 'pan') return; // let the root handler pan
+      if (readOnly || spaceHeld) return; // let the root handler pan
+      // Flow (#87): a device press never selects or drags. It arms a pan with the
+      // click threshold: released without moving it toggles the device's failed
+      // state (the machine's click effect); moved, it pans — so a touch or mouse
+      // drag that happens to start on a device doesn't fail it. A press on
+      // anything else that sits over a device (a note, a label) resolves to the
+      // device underneath; otherwise it bubbles to the root and pans.
+      if (store().flowMode) {
+        const { sx, sy } = localPoint(e);
+        let target: string | undefined = store().getDevice(id) ? id : undefined;
+        if (!target) {
+          const c = toFlat(sx, sy);
+          target = store().hitTest(c.x, c.y).find((h) => store().getDevice(h));
+        }
+        if (!target) return;
+        e.stopPropagation();
+        dispatchRef.current({
+          type: 'arm',
+          gesture: 'pan',
+          data: { button: 0, startX: sx, startY: sy, flowToggle: target },
+          pointerId: e.pointerId,
+          pointerType: e.pointerType as PointerKind,
+          x: sx,
+          y: sy,
+        });
+        return;
+      }
+      if (store().mode === 'pan') return; // let the root handler pan
       // Leader-attach pick: the next device/object press becomes the target.
       if (anchorPickRef.current) {
         const cid = anchorPickRef.current;
@@ -1199,15 +1291,15 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         y: sy,
       });
     },
-    [spaceHeld, store, localPoint, startLinkFrom, setPending, readOnly, attachCalloutTo, setAnchorPick],
+    [spaceHeld, store, localPoint, toFlat, startLinkFrom, setPending, readOnly, attachCalloutTo, setAnchorPick],
   );
 
   const onLabelDoubleClick = useCallback(
     (e: React.MouseEvent, id: string) => {
       e.stopPropagation();
-      if (!readOnly) setEditingDeviceId(id);
+      if (!editLocked) setEditingDeviceId(id);
     },
-    [readOnly],
+    [editLocked],
   );
 
   const onRootPointerDown = useCallback(
@@ -1229,8 +1321,10 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       // tool. MIGRATED: pan runs on the machine (immediate arm — it starts at
       // press; the machine's capture effect targets the svg, which is what
       // keeps move/up firing off-element).
+      // Flow (#87): the background only pans — no marquee, lasso, text or shape.
       if (
         readOnly ||
+        store().flowMode ||
         spaceHeld ||
         e.button === 1 ||
         e.button === 2 ||
@@ -1304,8 +1398,16 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     [spaceHeld, store, localPoint, readOnly, toFlat],
   );
 
-  // Keyboard selection: Tab focuses a device node, Enter/Space selects it.
-  const onActivateNode = useCallback((id: string) => store().select([id]), [store]);
+  // Keyboard selection: Tab focuses a device node, Enter/Space selects it. In Flow
+  // the same keys pull / restore the device instead (#87) — never a selection.
+  const onActivateNode = useCallback(
+    (id: string) => {
+      if (readOnly) return; // presentation: nothing to select or fail
+      if (store().flowMode) store().toggleFlowFailed(id);
+      else store().select([id]);
+    },
+    [store, readOnly],
+  );
 
   const onPointerMove = useCallback(
     (e: React.PointerEvent) => {
@@ -1349,7 +1451,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
-      if (readOnly) return;
+      if (readOnly || store().flowMode) return;
       const type = e.dataTransfer.getData('application/nexmap-device') as DeviceType;
       if (!type) return;
       const c = screenToCanvasFromEvent(e);
@@ -1362,12 +1464,12 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
     },
     // toFlat, not viewport: see startLinkFrom (stale-projection fix).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [store, toFlat],
+    [store, toFlat, readOnly],
   );
 
   const onCanvasDoubleClick = useCallback(
     (e: React.MouseEvent) => {
-      if (readOnly) return;
+      if (readOnly || store().flowMode) return;
       const { sx, sy } = localPoint(e);
       const c = toFlat(sx, sy);
       const hit = store().hitTest(c.x, c.y);
@@ -1420,6 +1522,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         suppressMenu.current = false;
         return;
       }
+      if (store().flowMode) return; // Flow: no editing menu (and no select-on-right-click)
       const { sx, sy } = localPoint(e);
       const c = toFlat(sx, sy);
       const hitId = store()
@@ -1622,14 +1725,16 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
   }, [projection]);
 
   const svgClass = `${styles.svg} ${
-    machine.current.gesture === 'pan' && machine.current.phase !== 'idle'
+    // 'active', not merely armed: a Flow press on a device arms a pan that is
+    // usually just a click, and must not flash the grabbing cursor.
+    machine.current.gesture === 'pan' && machine.current.phase === 'active'
       ? styles.panning
       : spaceHeld || mode === 'pan'
         ? styles.panMode
         : mode === 'connect' || mode === 'lasso'
           ? styles.connectMode
           : ''
-  }${flipping ? ' ' + styles.flip : ''}${flowMode ? ' ' + styles.flowDimmed : ''}`;
+  }${flipping ? ' ' + styles.flip : ''}${flowActive ? ' ' + styles.flowDimmed : ''}`;
   const gridStep = 16 * viewport.scale;
   const blueprint = projection === 'blueprint';
 
@@ -1800,7 +1905,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           {/* Relink handles for the selected connector(s) — scale-dependent, so
               they live here (a live overlay) rather than inside the memoized
               LinkLayer, which must stay viewport-invariant. */}
-          {!readOnly &&
+          {!editLocked &&
             links
               .filter((l) => selection.has(l.id))
               .map((l) => {
@@ -1846,7 +1951,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
 
           {/* Reroute handles for the single selected connector. */}
           {(() => {
-            if (readOnly || selection.size !== 1) return null;
+            if (editLocked || selection.size !== 1) return null;
             const id = [...selection][0]!;
             const link = store().getLink(id);
             if (!link) return null;
@@ -1888,7 +1993,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
 
           {/* Resize handles for the single selected canvas object. */}
           {(() => {
-            if (readOnly || selection.size !== 1) return null;
+            if (editLocked || selection.size !== 1) return null;
             const id = [...selection][0]!;
             const o = store().getObject(id);
             if (!o || o.locked) return null;
@@ -1919,7 +2024,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           {/* Leader anchor handle for a single selected callout (flat only): drag
               onto a device to attach a leader. The toolbar Attach/Detach buttons
               are the discoverable equivalent. */}
-          {!readOnly &&
+          {!editLocked &&
             projection !== 'iso' &&
             (() => {
               if (selection.size !== 1) return null;
@@ -1951,7 +2056,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
                     r={r}
                     onPointerDown={(e) => {
                       e.stopPropagation();
-                      (e.target as Element).setPointerCapture(e.pointerId);
+                      capturePointer(e.currentTarget, e.pointerId);
                       anchorDragRef.current = id;
                       setAnchorDrag({ id, x: hx, y: hy });
                     }}
@@ -1963,16 +2068,25 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
                     }}
                     onPointerUp={(e) => {
                       if (anchorDragRef.current !== id) return;
-                      (e.target as Element).releasePointerCapture(e.pointerId);
-                      anchorDragRef.current = null;
+                      // End the drag FIRST: releasing fires lostpointercapture,
+                      // which must find nothing left to cancel.
+                      endAnchorDrag();
+                      try {
+                        e.currentTarget.releasePointerCapture(e.pointerId);
+                      } catch {
+                        /* not captured here — fine */
+                      }
                       const { sx, sy } = localPoint(e);
                       const f = toFlat(sx, sy);
                       const hit = store()
                         .hitTest(f.x, f.y)
                         .find((h) => h !== id && (store().getDevice(h) || store().getObject(h)));
                       if (hit) attachCalloutTo(id, hit);
-                      setAnchorDrag(null);
                     }}
+                    // Interrupted (OS gesture, Cmd+Tab, element churn): drop the
+                    // leader without attaching. After a normal up these are no-ops.
+                    onPointerCancel={endAnchorDrag}
+                    onLostPointerCapture={endAnchorDrag}
                   />
                 </g>
               );
@@ -2024,6 +2138,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
                 holdsUp={holdCounts.get(dev.id)}
                 holdsEnforced={holdsEnforced.has(dev.id)}
                 blueprint={blueprint}
+                flowFailed={flowFailedSet?.has(dev.id)}
                 onPointerDown={onDevicePointerDown}
                 onActivate={onActivateNode}
                 onLabelDoubleClick={onLabelDoubleClick}
@@ -2032,13 +2147,13 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
 
           {/* Flow lens: click-to-fail blast radius. Reads the full graph, renders on
               top of the (dimmed) scene, and projects for free inside this group. */}
-          {flowMode && (
+          {flowActive && (
             <FlowSceneOverlay
               devices={flowDevices}
               links={flowLinks}
               failed={flowFailed}
               scale={viewport.scale}
-              onToggle={(id) => store().toggleFlowFailed(id)}
+              onDevicePointerDown={onDevicePointerDown}
             />
           )}
 
@@ -2081,7 +2196,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           )}
 
           {/* Directional connect ports on the hovered device (flat mode; iso has its own). */}
-          {!readOnly &&
+          {!editLocked &&
             projection !== 'iso' &&
             mode === 'select' &&
             handleDevice &&
@@ -2132,6 +2247,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
                   breaksRule={ruleIds.has(dev.id)}
                 holdsUp={holdCounts.get(dev.id)}
                 holdsEnforced={holdsEnforced.has(dev.id)}
+                  flowFailed={flowFailedSet?.has(dev.id)}
                   onPointerDown={onDevicePointerDown}
                   onActivate={onActivateNode}
                   onLabelDoubleClick={onLabelDoubleClick}
@@ -2149,7 +2265,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
                 />
               ) : null,
             )}
-            {!readOnly &&
+            {!editLocked &&
               mode === 'select' &&
               handleDevice &&
               !anyLinkSelected &&
@@ -2200,7 +2316,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       {/* Floating selection toolbar (M3): the PRIMARY quick-action path.
           Hidden while a gesture is active — contextual chrome that follows a
           drag is noise at the exact moment the user needs the canvas. */}
-      {!readOnly &&
+      {!editLocked &&
         selection.size > 0 &&
         machine.current.phase !== 'active' &&
         machine.current.phase !== 'pinch' &&
@@ -2237,7 +2353,11 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
       {!readOnly && (
         <CanvasToolbar
           mode={mode}
-          onMode={(m) => store().setMode(m)}
+          onMode={(m) => {
+            // Picking a tool is asking to edit: that leaves the stress-test first.
+            if (store().flowMode) store().setFlowMode(false);
+            store().setMode(m);
+          }}
           canUndo={canUndo}
           canRedo={canRedo}
           onUndo={() => {
@@ -2256,13 +2376,15 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           onToggleBlueprint={() =>
             store().setProjection(projection === 'blueprint' ? 'flat' : 'blueprint')
           }
-          onAutoLayout={() => store().autoLayout()}
+          onAutoLayout={() => {
+            if (!store().flowMode) store().autoLayout(); // Flow never rearranges the diagram
+          }}
           flowMode={flowMode}
           onToggleFlow={() => store().setFlowMode(!flowMode)}
         />
       )}
 
-      {!readOnly && flowMode && (
+      {flowActive && (
         <FlowHud
           devices={flowDevices}
           links={flowLinks}
@@ -2305,7 +2427,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
 
       {/* Quick-create picker (M4b/M4c): create — and connect, when opened by
           a link drop — in one motion. */}
-      {!readOnly && quickCreate && (
+      {!editLocked && quickCreate && (
         <QuickCreateMenu
           left={quickCreate.sx}
           top={quickCreate.sy}
@@ -2359,7 +2481,8 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
         </div>
       )}
 
-      {editingTextId &&
+      {!editLocked &&
+        editingTextId &&
         (() => {
           const o = store().getObject(editingTextId);
           if (!o || o.kind !== 'text') return null;
@@ -2397,7 +2520,8 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           );
         })()}
 
-      {editingDeviceId &&
+      {!editLocked &&
+        editingDeviceId &&
         (() => {
           const d = store().getDevice(editingDeviceId);
           if (!d) return null;
@@ -2430,7 +2554,7 @@ export function Canvas({ readOnly = false, showPages = false }: CanvasProps) {
           );
         })()}
 
-      {menu && (
+      {!editLocked && menu && (
         <ContextMenu
           x={menu.x}
           y={menu.y}

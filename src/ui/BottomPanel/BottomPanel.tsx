@@ -2,7 +2,7 @@ import { Fragment, memo, useEffect, useRef, useState } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import { getPanelOpen, setPanelOpen } from '@/lib/prefs';
 import { NexIcon } from '@/ui/icons/NexIcon';
-import { DEVICE_TYPES, defaultDeviceName } from '@/model/schema';
+import { DEVICE_TYPES, clampRackUnits, defaultDeviceName } from '@/model/schema';
 import { suggestRules } from '@/model/ruleSuggest';
 import { ruleFixes, ruleFixLabel, type RuleSupport } from '@/model/ruleStakes';
 import { loadRulesFile, saveRulesFile } from '@/ui/rulesFileActions';
@@ -567,7 +567,7 @@ function RackTable({ racks, devices }: { racks: Rack[]; devices: Device[] }) {
                   <Cell
                     type="number"
                     value={String(r.ruHeight)}
-                    onCommit={(v) => set(r, 'ruHeight', Number(v) || 1)}
+                    onCommit={(v) => set(r, 'ruHeight', clampRackUnits(v))}
                   />
                 </td>
                 <td>

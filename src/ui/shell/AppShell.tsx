@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 're
 import { NexIcon } from '@/ui/icons/NexIcon';
 import { NexMapLogo } from '@/ui/deck/NexMapLogo';
 import { getPanelOpen, setPanelOpen } from '@/lib/prefs';
+import { useProjectStore } from '@/store/projectStore';
 import { ErrorBoundary } from './ErrorBoundary';
 import styles from './AppShell.module.css';
 
@@ -77,6 +78,10 @@ export function AppShell({
       return !v;
     });
 
+  // A different project is a fresh start for any panel that crashed on the last one.
+  const docIdentity = useProjectStore((s) => s.docIdentity);
+  const resetKeys = [docIdentity];
+
   const collapseLeft = fullBleed || !leftOpen;
   const collapseRight = fullBleed || !rightOpen;
 
@@ -119,12 +124,16 @@ export function AppShell({
 
       {!fullBleed && (
         <aside className={styles.left} aria-label="Object library">
-          {left ?? <div className={styles.panelHeader}>Library</div>}
+          <ErrorBoundary variant="panel" label="Object library" resetKeys={resetKeys}>
+            {left ?? <div className={styles.panelHeader}>Library</div>}
+          </ErrorBoundary>
         </aside>
       )}
 
       <main className={styles.canvas} aria-label="Design canvas">
-        <ErrorBoundary>{canvas}</ErrorBoundary>
+        <ErrorBoundary label="the canvas" resetKeys={resetKeys}>
+          {canvas}
+        </ErrorBoundary>
       </main>
 
       {!fullBleed && (
@@ -133,11 +142,19 @@ export function AppShell({
           aria-label="Properties inspector"
           data-demote="panel"
         >
-          {right ?? <div className={styles.panelHeader}>Inspector</div>}
+          <ErrorBoundary variant="panel" label="Properties inspector" resetKeys={resetKeys}>
+            {right ?? <div className={styles.panelHeader}>Inspector</div>}
+          </ErrorBoundary>
         </aside>
       )}
 
-      {!fullBleed && bottom && <div className={styles.bottom}>{bottom}</div>}
+      {!fullBleed && bottom && (
+        <div className={styles.bottom}>
+          <ErrorBoundary variant="panel" label="Data panel" resetKeys={resetKeys}>
+            {bottom}
+          </ErrorBoundary>
+        </div>
+      )}
 
       <footer className={styles.status}>{status}</footer>
     </div>

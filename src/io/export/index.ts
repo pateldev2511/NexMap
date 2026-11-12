@@ -6,7 +6,7 @@ import type { CanvasObject, Device, Link, NexMapDocument, Rack, Subnet, Vlan } f
 import { buildDiagramSvg, type DiagramRenderOptions } from './diagram';
 import { buildStandaloneHtml } from './html';
 import { rasterize, downloadBlob, scaleWarning } from './raster';
-import { buildPdf, type PageSize } from './pdf';
+import { buildPdf, pdfWarning, type PageSize } from './pdf';
 import { exportInventoryCsv, exportLinksCsv, exportRulesCsv } from './csvExport';
 import { buildRulesReport, hasDeclaredRules, type RulesReportInput } from './rulesReport';
 import { buildPackageZip, packageSvg } from './zip';
@@ -152,7 +152,7 @@ export async function runExport(
   }
 
   if (opts.format === 'pdf') {
-    const { blob, raster } = await buildPdf(
+    const { blob, raster, fitRatio, capped } = await buildPdf(
       svg,
       { pageSize: opts.pageSize, orientation: opts.orientation, scale: opts.scale },
       rulesReport,
@@ -160,7 +160,10 @@ export async function runExport(
     );
     const fn = safeName(opts.fileName || scene.projectName, 'pdf');
     downloadBlob(blob, fn);
-    return { fileName: fn, warning: scaleWarning(opts.scale, raster) };
+    return {
+      fileName: fn,
+      warning: [scaleWarning(opts.scale, raster), pdfWarning({ fitRatio, capped })].filter(Boolean).join(' ') || undefined,
+    };
   }
 
   // png / jpg

@@ -8,7 +8,8 @@
  * this markup. Every user string is run through escapeXml.
  */
 import type { Device, Rack, RackCable, RackCableEnd, TextObject } from '@/model/types';
-import { escapeXml } from '@/io/export/buildSvg';
+import { safeColor } from '@/model/schema';
+import { escapeXml, safeTextObject, svgNum } from '@/io/export/buildSvg';
 import { calloutRowsOrPlaceholder, rowAnchor } from '@/model/callout';
 import { DEFAULT_LEADER, leaderDashArray, leaderGeometry, type LeaderRect } from '@/model/leader';
 import {
@@ -79,19 +80,19 @@ function calloutSvgParts(o: TextObject, boxX: number, target: LeaderRect | null)
       const dash = leaderDashArray(style);
       out.push(
         `<line data-leader-for="${escapeXml(o.id)}" x1="${g.x1.toFixed(1)}" y1="${g.y1.toFixed(1)}" x2="${g.x2.toFixed(1)}" y2="${g.y2.toFixed(1)}" ` +
-          `stroke="${escapeXml(style.color)}" stroke-width="${style.width}" fill="none" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ''}/>`,
+          `stroke="${safeColor(style.color, DEFAULT_LEADER.color)}" stroke-width="${svgNum(style.width, DEFAULT_LEADER.width, 0)}" fill="none" stroke-linecap="round"${dash ? ` stroke-dasharray="${escapeXml(dash)}"` : ''}/>`,
       );
     }
   }
   out.push(
-    `<rect data-callout-id="${escapeXml(o.id)}" x="${boxX.toFixed(1)}" y="${o.y.toFixed(1)}" width="${o.width}" height="${o.height}" rx="4" fill="#ffffff" fill-opacity="0.94" stroke="#cbd5e1" stroke-width="1"/>`,
+    `<rect data-callout-id="${escapeXml(o.id)}" x="${boxX.toFixed(1)}" y="${o.y.toFixed(1)}" width="${svgNum(o.width, 0, 0)}" height="${svgNum(o.height, 0, 0)}" rx="4" fill="#ffffff" fill-opacity="0.94" stroke="#cbd5e1" stroke-width="1"/>`,
   );
   const fs = o.fontSize ?? 13;
   let y = o.y;
   for (const r of calloutRowsOrPlaceholder(o.blocks, fs)) {
     y += r.size * 1.25;
     const a = rowAnchor(r.align, boxX, o.width, 6);
-    const fill = r.muted ? '#64748b' : escapeXml(o.color ?? '#1c2733');
+    const fill = r.muted ? '#64748b' : safeColor(o.color, '#1c2733');
     const fam = r.mono ? ' font-family="monospace"' : '';
     const inner = r.runs
       .map((run) => {
@@ -104,7 +105,7 @@ function calloutSvgParts(o: TextObject, boxX: number, target: LeaderRect | null)
       })
       .join('');
     out.push(
-      `<text x="${a.x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${a.anchor}" font-size="${r.size}" font-weight="${r.weight}" fill="${fill}"${fam}>${inner}</text>`,
+      `<text x="${a.x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${a.anchor}" font-size="${svgNum(r.size, 13, 0)}" font-weight="${svgNum(r.weight, 400)}" fill="${fill}"${fam}>${inner}</text>`,
     );
   }
   return out;
@@ -215,7 +216,7 @@ export function buildRackRowSvg(
   cables.forEach((c, i) => {
     const pa = endPoint(c.aEnd.deviceId, c.aEnd.ifaceId);
     const pb = endPoint(c.bEnd.deviceId, c.bEnd.ifaceId);
-    const color = escapeXml(c.color);
+    const color = safeColor(c.color, '#64748b');
     if (pa && pb) {
       const crossRack = placeOf.get(c.aEnd.deviceId) !== placeOf.get(c.bEnd.deviceId);
       const { d, control } = cablePath(pa, pb, i, crossRack);
@@ -240,7 +241,8 @@ export function buildRackRowSvg(
   // MUST grow to include the callout column or a margin note would be clipped out.
   let outW = width;
   let outH = height;
-  const callouts = opts.callouts ?? [];
+  // Finite numbers only (defence in depth; see safeTextObject).
+  const callouts = (opts.callouts ?? []).map(safeTextObject);
   if (callouts.length > 0) {
     const placeById = new Map(placements.map((p) => [p.rack.id, p]));
     for (const o of callouts) {
@@ -575,7 +577,7 @@ function buildTableSvg<K extends string>(
     let colX = x0;
     for (const col of cols) {
       if (col.key === 'color') {
-        parts.push(`<rect x="${colX + 7}" y="${y + TBL.rowH / 2 - 6}" width="14" height="12" rx="2" fill="${escapeXml(String(r[col.key] ?? ''))}" stroke="${TBL.border}" stroke-width="1"/>`);
+        parts.push(`<rect x="${colX + 7}" y="${y + TBL.rowH / 2 - 6}" width="14" height="12" rx="2" fill="${safeColor(r[col.key], '#64748b')}" stroke="${TBL.border}" stroke-width="1"/>`);
       } else {
         const val = String(r[col.key] ?? '');
         if (val) parts.push(`<text x="${colX + 6}" y="${y + TBL.rowH / 2 + 4}" font-family="ui-monospace,Menlo,monospace" font-size="${TBL.font}" fill="${TBL.text}">${escapeXml(val)}</text>`);

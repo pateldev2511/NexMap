@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useProjectStore } from '@/store/projectStore';
 import type { CanvasObject, Device, DeviceType, Link } from '@/model/types';
 import { NexIcon } from '@/ui/icons/NexIcon';
@@ -317,6 +318,17 @@ function DeviceInspector({ device }: { device: Device }) {
             onBlur={endEdit}
           />
         </Field>
+        <Field label="Network role">
+          <select
+            value={device.topologyRole === 'logical' || device.topologyRole === 'physical-only' ? device.topologyRole : ''}
+            onChange={(e) => set('topologyRole', (e.target.value || undefined) as Device['topologyRole'])}
+            onBlur={endEdit}
+          >
+            <option value="">Auto</option>
+            <option value="logical">Network device</option>
+            <option value="physical-only">Physical-only asset</option>
+          </select>
+        </Field>
         <Field label="Description">
           <RichTextEditor
             value={device.descriptionHtml ?? ''}
@@ -591,7 +603,7 @@ function IfacePicker({
   );
 }
 
-function RackFields({
+export function RackFields({
   device,
   set,
   endEdit,
@@ -600,7 +612,9 @@ function RackFields({
   set: <K extends keyof Device>(key: K, value: Device[K]) => void;
   endEdit: () => void;
 }) {
-  const racks = useProjectStore((s) => s.racksAll());
+  // racksAll() allocates a fresh array per call; compare element-wise or this
+  // re-renders on every store mutation.
+  const racks = useProjectStore(useShallow((s) => s.racksAll()));
   if (racks.length === 0) return null;
   return (
     <div className={styles.group}>

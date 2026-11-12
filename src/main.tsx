@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App.tsx';
 import { UpdateToast } from './ui/UpdateToast';
+import { ErrorBoundary } from './ui/shell/ErrorBoundary';
 import { installNetGuard } from './lib/netguard';
 import { installInputDebugLogger } from './input/debugLog';
 import './styles/global.css';
@@ -23,7 +24,9 @@ if (!rootEl) throw new Error('Root element #root not found');
 
 createRoot(rootEl).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary label="NexMap" viewport>
+      <App />
+    </ErrorBoundary>
     {/* Beside App, not inside it: worker status can arrive on any screen. */}
     <UpdateToast />
   </StrictMode>,

@@ -3,6 +3,7 @@ import { useProjectStore } from '@/store/projectStore';
 import { isTextTarget } from '@/input/router';
 import { importPastedCsv, looksLikeCsv } from './clipboardImport';
 import { pasteSource, writeMarkerOnEvent } from './canvasClipboard';
+import { readFileAsDataUrl } from '../readFileAsDataUrl';
 
 const IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 
@@ -71,36 +72,47 @@ export function usePasteToCanvas(): void {
         const file = src.file;
         if (file && file.size > 0 && file.size <= IMAGE_MAX_BYTES) {
           e.preventDefault();
-          const reader = new FileReader();
-          reader.onload = () => {
-            const href = reader.result as string;
-            const img = new Image();
-            // Decoding is async: re-check, presentation may have begun meanwhile.
-            const add = (w: number, h: number) => {
-              if (!pasteLocked()) useProjectStore.getState().addImage(href, w, h);
-            };
-            img.onload = () => add(img.naturalWidth || 400, img.naturalHeight || 300);
-            img.onerror = () => add(400, 300);
-            img.src = href;
-          };
-          reader.readAsDataURL(file);
+          readFileAsDataUrl(file).then(
+            (href) => {
+              const img = new Image();
+              // Decoding is async: re-check, presentation may have begun meanwhile.
+              const add = (w: number, h: number) => {
+                if (!pasteLocked()) useProjectStore.getState().addImage(href, w, h);
+              };
+              img.onload = () => add(img.naturalWidth || 400, img.naturalHeight || 300);
+              img.onerror = () => add(400, 300);
+              img.src = href;
+            },
+            () => useProjectStore.getState().setFlash('Could not read the pasted image.'),
+          );
         }
         return;
       }
 
       // 2) CSV text → model objects via the shared CSV path.
-      const res = looksLikeCsv(src.text)
-        ? importPastedCsv(src.text, store.defaultLayerId(), store.devicesAll())
-        : null;
-      if (!res) {
-        if (internal) pasteInternal(e); // plain text isn't an import: paste the canvas copy
-        return;
+      // preventDefault comes before the try: a parser/apply throw must not fall
+      // through to the browser's or the internal paste.
+      const csv = looksLikeCsv(src.text);
+      if (csv) e.preventDefault();
+      try {
+        const res = csv
+          ? importPastedCsv(src.text, store.defaultLayerId(), store.devicesAll())
+          : null;
+        if (!res) {
+          if (internal) pasteInternal(e); // plain text isn't an import: paste the canvas copy
+          return;
+        }
+        if (res.devices.length || res.links.length) store.importObjects(res.devices, res.links);
+        if (res.subnets.length || res.vlans.length) store.importSemantics(res.subnets, res.vlans);
+        if (res.devices.length) store.select(res.devices.map((d) => d.id));
+        store.runValidation();
+        if (res.warnings.length) {
+          const n = res.warnings.length;
+          store.setFlash(`Pasted with ${n} warning${n === 1 ? '' : 's'}: ${res.warnings[0]}`);
+        }
+      } catch {
+        store.setFlash('Could not import the pasted table.');
       }
-      e.preventDefault();
-      if (res.devices.length || res.links.length) store.importObjects(res.devices, res.links);
-      if (res.subnets.length || res.vlans.length) store.importSemantics(res.subnets, res.vlans);
-      if (res.devices.length) store.select(res.devices.map((d) => d.id));
-      store.runValidation();
     }
 
     // The native copy/cut that follows a canvas ⌘C/⌘X writes the marker.

@@ -7,6 +7,9 @@ import {
   parseNmapXml,
   looksLikeNetbox,
   stripExternalSvgReferences,
+  stripExternalCssReferences,
+  MAX_IMPORT_NAME,
+  MAX_IMPORT_TEXT,
 } from './graphImport';
 import { useProjectStore } from '@/store/projectStore';
 
@@ -322,5 +325,133 @@ describe('stripExternalSvgReferences', () => {
     expect(result.svg).not.toContain('https://example.com');
     expect(result.svg).not.toContain('onclick');
     expect(result.svg).toContain('url(#shadow)');
+  });
+});
+
+describe('stripExternalSvgReferences — fails closed, covers CSS', () => {
+  const NS = 'xmlns="http://www.w3.org/2000/svg"';
+  const body = (svg: string) => svg.replace(NS, '');
+
+  it('rejects an SVG that does not parse instead of returning it unstripped', () => {
+    const broken = `<svg ${NS}><image href="https://evil.example/p.png"></svg>`;
+    expect(() => stripExternalSvgReferences(broken)).toThrow(/not well-formed/);
+    expect(() => stripExternalSvgReferences('not svg at all <<<')).toThrow();
+    expect(() => stripExternalSvgReferences('<html><body/></html>')).toThrow();
+  });
+
+  it('strips external url() from style attributes, keeping local ones', () => {
+    const raw = `<svg ${NS}>
+      <rect style="fill: url(#grad); filter: url('https://evil.example/f.svg#x'); stroke: red"/>
+      <rect style="background-image: url(//evil.example/a.png)"/>
+      <rect style="fill: url(data:image/png;base64,AA//BB==)"/>
+    </svg>`;
+    const r = stripExternalSvgReferences(raw);
+    expect(body(r.svg)).not.toContain('evil.example');
+    expect(body(r.svg)).not.toMatch(/https?:/);
+    expect(r.svg).toContain('url(#grad)');
+    expect(r.svg).toContain('stroke: red');
+    expect(r.svg).toContain('url(data:image/png;base64,AA//BB==)');
+    expect(r.stripped).toBeGreaterThanOrEqual(2);
+  });
+
+  it('strips @import and external url() from <style> sheets', () => {
+    const raw = `<svg ${NS}><style>
+      @import url("https://evil.example/track.css");
+      @import 'https://evil.example/two.css';
+      @font-face { font-family: X; src: url(https://evil.example/f.woff2); }
+      .a { fill: url(#ok); }
+    </style><rect class="a"/></svg>`;
+    const r = stripExternalSvgReferences(raw);
+    expect(body(r.svg)).not.toContain('evil.example');
+    expect(r.svg).not.toContain('@import');
+    expect(r.svg).toContain('url(#ok)');
+    expect(r.stripped).toBeGreaterThanOrEqual(3);
+  });
+
+  it('drops CSS it cannot vouch for: escapes and bare-string remote references', () => {
+    expect(stripExternalCssReferences('fill: \\75rl(https://evil.example/x)').css).toBe('');
+    expect(stripExternalCssReferences('background: image-set("https://evil.example/x.png" 1x)').css).toBe('');
+    expect(stripExternalCssReferences('fill: red; stroke: url(#a)')).toEqual({
+      css: 'fill: red; stroke: url(#a)',
+      stripped: 0,
+    });
+    const r = stripExternalSvgReferences(
+      `<svg ${NS}><rect style="fill:u\\72l(https://evil.example/x)"/><style>.a{background:image-set('//evil.example/y' 1x)}</style></svg>`,
+    );
+    expect(body(r.svg)).not.toContain('evil.example');
+  });
+
+  it('checks every url() in any attribute, not only the first', () => {
+    const raw = `<svg ${NS}><rect cursor="url(#a), url(https://evil.example/c.cur), auto" fill="url(#ok)"/><a href="java\nscript:alert(1)"/></svg>`;
+    const r = stripExternalSvgReferences(raw);
+    expect(body(r.svg)).not.toContain('evil.example');
+    expect(r.svg).not.toContain('script:');
+    expect(r.svg).toContain('fill="url(#ok)"');
+  });
+});
+
+describe('stripExternalSvgReferences — does not over-reject honest SVG (round 2)', () => {
+  const NS = 'xmlns="http://www.w3.org/2000/svg"';
+
+  it('accepts HTML named entities such as &nbsp; (what DOMPurify serialises), still rejecting junk', () => {
+    const r = stripExternalSvgReferences(`<svg ${NS}><text>10&nbsp;GbE &copy; &amp; &lt;ok&gt; &mdash;</text></svg>`);
+    expect(r.stripped).toBe(0);
+    const text = new DOMParser().parseFromString(r.svg, 'image/svg+xml').documentElement.textContent;
+    expect(text).toBe('10\u00a0GbE \u00a9 & <ok> \u2014');
+    expect(() => stripExternalSvgReferences(`<svg ${NS}><text>&notanentity;</text></svg>`)).toThrow(/not well-formed/);
+    expect(() => stripExternalSvgReferences(`<svg ${NS}><text>&nbsp;</svg>`)).toThrow(/not well-formed/);
+  });
+
+  it('keeps a stylesheet that merely contains "//" in a string', () => {
+    const css = '.a{content:"a//b";fill:red}.b{stroke:url(#s)}';
+    expect(stripExternalCssReferences(css)).toEqual({ css, stripped: 0 });
+    const r = stripExternalSvgReferences(`<svg ${NS}><style>${css}</style><rect class="a"/></svg>`);
+    expect(r.svg).toContain('content:"a//b"');
+    expect(r.stripped).toBe(0);
+    // …while a protocol-relative reference is still removed, alone.
+    const mixed = stripExternalCssReferences('.a{fill:red}.b{background:image-set("//evil.example/y" 1x)}.c{fill:blue}');
+    expect(mixed.css).toBe('.a{fill:red}.c{fill:blue}');
+  });
+
+  it('drops only the rule or declaration that contains a backslash', () => {
+    const sheet = stripExternalCssReferences('.a{fill:red}.b{font-family:"\\66oo";fill:u\\72l(https://evil.example/x)}@media print{.c{fill:blue}}');
+    expect(sheet).toEqual({ css: '.a{fill:red}@media print{.c{fill:blue}}', stripped: 1 });
+    const attr = stripExternalCssReferences('fill:red; content:"\\201C"; stroke:url(data:image/png;base64,AA//BB==)');
+    expect(attr.css).toBe('fill:red; stroke:url(data:image/png;base64,AA//BB==)');
+    expect(attr.css).not.toContain('\\');
+    // A backslash cannot be used to hide the end of a rule from the splitter.
+    const tricky = stripExternalCssReferences('.a{content:"\\"}.b{fill:url(https://evil.example/x)}');
+    expect(tricky.css).not.toContain('evil.example');
+    expect(tricky.css).not.toContain('\\');
+  });
+});
+
+describe('JSON imports — nesting depth and oversized strings', () => {
+  it('refuses absurdly nested JSON as invalid instead of throwing', () => {
+    const deep = `{"devices":${'['.repeat(100_000)}${']'.repeat(100_000)}}`;
+    let r!: ReturnType<typeof parseTopologyJson>;
+    expect(() => (r = parseTopologyJson(deep, L))).not.toThrow();
+    expect(r.devices).toHaveLength(0);
+    expect(r.warnings[0]).toMatch(/not valid JSON/);
+    expect(() => parseNetboxJson(`{"results":${'['.repeat(100_000)}${']'.repeat(100_000)}}`, L)).not.toThrow();
+  });
+
+  it('clamps string lengths', () => {
+    const big = 'x'.repeat(50_000);
+    const topo = parseTopologyJson(
+      JSON.stringify({ devices: [{ name: big, vendor: big, notes: big, ip: big }] }),
+      L,
+    );
+    const d = topo.devices[0]!;
+    expect(d.name).toHaveLength(MAX_IMPORT_NAME);
+    expect(d.vendor).toHaveLength(MAX_IMPORT_NAME);
+    expect(d.managementIp).toHaveLength(MAX_IMPORT_NAME);
+    expect(d.notes).toHaveLength(MAX_IMPORT_TEXT);
+    const nb = parseNetboxJson(
+      JSON.stringify({ results: [{ name: big, device_type: { model: big, manufacturer: { name: big } }, site: { name: big }, role: { name: big } }] }),
+      L,
+    );
+    const n = nb.devices[0]!;
+    for (const v of [n.name, n.model, n.vendor, n.location, n.role]) expect(v).toHaveLength(MAX_IMPORT_NAME);
   });
 });

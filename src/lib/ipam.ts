@@ -95,6 +95,47 @@ export function nextFreeHost(
 }
 
 /**
+ * Stateful host allocator for bulk passes. Holds ONE used-address set and a
+ * per-CIDR cursor, so N allocations cost O(N + scanned) rather than O(N²).
+ * Produces exactly the sequence repeated `nextFreeHost` calls would (each result
+ * is recorded as used). A gateway only excludes within its own call — it is never
+ * added to the shared set.
+ */
+export interface HostAllocator {
+  next(cidr: string, gateway?: string): string | null;
+  /** Mark an address as used without allocating it (a prefix suffix is stripped). */
+  add(ip: string): void;
+}
+
+export function createHostAllocator(usedIps: Iterable<string> = []): HostAllocator {
+  const used = usedSet(usedIps);
+  const cursors = new Map<string, number>();
+  return {
+    add(ip) {
+      const v = parseIpv4(stripPrefix(ip));
+      if (v !== null) used.add(v >>> 0);
+    },
+    next(cidr, gateway) {
+      const range = usableHostRange(cidr);
+      if (!range) return null;
+      const g = gateway ? parseIpv4(stripPrefix(gateway)) : null;
+      const gw = g === null ? null : g >>> 0;
+      // Used addresses only ever grow, so everything below the cursor stays taken.
+      let cur = Math.max(cursors.get(cidr) ?? range.firstInt, range.firstInt);
+      while (cur <= range.lastInt && used.has(cur >>> 0)) cur++;
+      cursors.set(cidr, cur);
+      for (; cur <= range.lastInt; cur++) {
+        const c = cur >>> 0;
+        if (c === gw || used.has(c)) continue;
+        used.add(c);
+        return intToIpv4(c);
+      }
+      return null;
+    },
+  };
+}
+
+/**
  * Utilization for a subnet: capacity (assignable hosts), how many are used (assigned
  * IPs + gateway that fall inside the host range), and the resulting fraction. Returns
  * null for an invalid CIDR.

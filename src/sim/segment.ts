@@ -14,7 +14,7 @@
  * one allocation + CIDR source of truth.
  */
 import type { Device } from '@/model/types';
-import { nextFreeHost } from '@/lib/ipam';
+import { createHostAllocator } from '@/lib/ipam';
 import { cidrsOverlap, ipInCidr, stripPrefix } from '@/lib/ipcidr';
 import { isAddressable, pickGatewayDevice } from './autoAddress';
 
@@ -75,13 +75,12 @@ export function planSegment(
     ? [gatewayDevice, ...unaddressed.filter((t) => t.id !== gatewayDevice.id)]
     : unaddressed;
 
-  const used: string[] = []; // fresh block — only what we hand out below.
+  const alloc = createHostAllocator(); // fresh block — only what we hand out below.
   const assignments: SegmentAssignment[] = [];
   for (const d of targets) {
-    const ip = nextFreeHost(cidr, used);
+    const ip = alloc.next(cidr);
     if (!ip) break; // block full (a /24 won't happen for a sane selection).
     assignments.push({ deviceId: d.id, ip });
-    used.push(ip);
   }
   if (assignments.length === 0) return null;
   const gateway = gatewayDevice
